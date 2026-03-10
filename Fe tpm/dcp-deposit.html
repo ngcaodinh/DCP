@@ -1,0 +1,2157 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nạp tiền — DCP Platform</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Lexend:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --teal: #0E7C6B;
+            --teal-dark: #0A5C50;
+            --teal-light: #E6F7F4;
+            --teal-mid: #1AAE97;
+            --amber: #F59E0B;
+            --amber-light: #FEF3C7;
+            --ink: #0D1117;
+            --ink-mid: #1C2431;
+            --ink-soft: #16212E;
+            --gray: #4B5563;
+            --gray-light: #9CA3AF;
+            --gray-border: #E5E7EB;
+            --gray-bg: #F3F4F6;
+            --cream: #F8FAFB;
+            --white: #FFFFFF;
+            --green: #10B981;
+            --green-light: #D1FAE5;
+            --red: #EF4444;
+            --red-light: #FEF2F2;
+            --sidebar: 240px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --shadow-teal: 0 4px 16px rgba(14, 124, 107, 0.25);
+            --shadow-amber: 0 4px 20px rgba(245, 158, 11, 0.35);
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: 'Lexend', 'Be Vietnam Pro', sans-serif;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--ink);
+            background: var(--cream);
+        }
+
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(14, 124, 107, 0.3);
+            border-radius: 99px;
+        }
+
+        /* ═══════════════════════════════
+   SIDEBAR
+═══════════════════════════════ */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: var(--sidebar);
+            background: var(--ink);
+            display: flex;
+            flex-direction: column;
+            z-index: 50;
+            overflow-y: auto;
+            border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .sb-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 24px 20px 20px;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .sb-logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--teal);
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 10px rgba(14, 124, 107, 0.4);
+        }
+
+        .sb-logo-icon svg {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
+
+        .sb-logo-name {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 17px;
+            color: white;
+            letter-spacing: -0.3px;
+        }
+
+        .sb-logo-sub {
+            font-size: 9.5px;
+            color: rgba(255, 255, 255, 0.4);
+            display: block;
+            line-height: 1;
+            margin-top: 1px;
+        }
+
+        /* User info */
+        .sb-user {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .sb-user-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .sb-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--teal), var(--teal-mid));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.15);
+            flex-shrink: 0;
+        }
+
+        .sb-user-name {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 600;
+            font-size: 13px;
+            color: white;
+            line-height: 1.2;
+        }
+
+        .sb-user-addr {
+            font-family: monospace;
+            font-size: 10.5px;
+            color: rgba(255, 255, 255, 0.35);
+            letter-spacing: .3px;
+        }
+
+        .sb-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.25);
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--amber);
+        }
+
+        /* Token balance */
+        .sb-balance {
+            background: rgba(14, 124, 107, 0.15);
+            border: 1px solid rgba(14, 124, 107, 0.3);
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-top: 10px;
+        }
+
+        .sb-balance-lbl {
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.45);
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            margin-bottom: 6px;
+        }
+
+        .sb-balance-num {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 20px;
+            color: var(--teal-mid);
+            letter-spacing: -0.5px;
+            line-height: 1.1;
+        }
+
+        .sb-balance-token {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.4);
+            font-weight: 300;
+        }
+
+        .sb-balance-vnd {
+            font-size: 11.5px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 4px;
+            font-weight: 300;
+        }
+
+        /* Nav */
+        .sb-nav {
+            flex: 1;
+            padding: 12px 0;
+        }
+
+        .sb-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 20px;
+            font-size: 13.5px;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.55);
+            text-decoration: none;
+            transition: all .2s;
+            position: relative;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+
+        .sb-nav-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .sb-nav-item.active {
+            background: rgba(14, 124, 107, 0.18);
+            color: white;
+            border-left-color: var(--teal);
+            font-weight: 500;
+        }
+
+        .sb-nav-item .nav-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            opacity: .7;
+        }
+
+        .sb-nav-item.active .nav-icon {
+            opacity: 1;
+        }
+
+        .sb-nav-sep {
+            height: 1px;
+            background: rgba(255, 255, 255, 0.07);
+            margin: 8px 20px;
+        }
+
+        .sb-bottom {
+            padding: 12px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        /* ═══════════════════════════════
+   MAIN CONTENT
+═══════════════════════════════ */
+        .main {
+            margin-left: var(--sidebar);
+            min-height: 100vh;
+            padding: 32px 40px 60px;
+        }
+
+        /* Top progress bar */
+        .pbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            z-index: 999;
+            background: linear-gradient(90deg, var(--teal), var(--teal-mid));
+            transform-origin: left;
+            transform: scaleX(0);
+        }
+
+        .pbar.run {
+            animation: pload 1.8s ease forwards;
+        }
+
+        /* Confirmation banner */
+        .confirm-banner {
+            position: fixed;
+            top: 0;
+            left: var(--sidebar);
+            right: 0;
+            z-index: 80;
+            background: var(--teal);
+            padding: 12px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transform: translateY(-100%);
+            transition: transform .4s ease;
+        }
+
+        .confirm-banner.show {
+            transform: translateY(0);
+        }
+
+        .cb-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: white;
+        }
+
+        .cb-spin {
+            width: 20px;
+            height: 20px;
+            border: 2.5px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            flex-shrink: 0;
+        }
+
+        .cb-text {
+            font-size: 13.5px;
+            font-weight: 500;
+        }
+
+        .cb-sub {
+            font-size: 12px;
+            opacity: .7;
+        }
+
+        .cb-progress {
+            width: 180px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .cb-progress-fill {
+            height: 100%;
+            background: white;
+            border-radius: 99px;
+            width: 0%;
+            transition: width .5s ease;
+        }
+
+        /* Page header */
+        .page-header {
+            margin-bottom: 28px;
+            animation: fadeUp .5s ease both;
+        }
+
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--gray-light);
+            margin-bottom: 12px;
+        }
+
+        .breadcrumb a {
+            color: var(--gray-light);
+            text-decoration: none;
+            transition: color .2s;
+        }
+
+        .breadcrumb a:hover {
+            color: var(--teal);
+        }
+
+        .breadcrumb svg {
+            width: 12px;
+            height: 12px;
+            stroke: var(--gray-border);
+            fill: none;
+            stroke-width: 2;
+        }
+
+        .page-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 28px;
+            color: var(--ink);
+            letter-spacing: -0.5px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-sub {
+            font-size: 14px;
+            color: var(--gray-light);
+            font-weight: 300;
+        }
+
+        /* 2-col layout */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 340px;
+            gap: 24px;
+            align-items: start;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--white);
+            border-radius: 16px;
+            padding: 24px 28px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            margin-bottom: 16px;
+            animation: fadeUp .5s ease both;
+        }
+
+        .card:last-child {
+            margin-bottom: 0;
+        }
+
+        .card-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--teal);
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            margin-bottom: 16px;
+        }
+
+        .card-step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: var(--teal);
+            color: white;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        /* Amount input */
+        .amount-wrap {
+            display: flex;
+            align-items: center;
+            border: 2px solid var(--gray-border);
+            border-radius: 12px;
+            overflow: hidden;
+            background: var(--white);
+            transition: border-color .2s, box-shadow .2s;
+            margin-bottom: 14px;
+        }
+
+        .amount-wrap:focus-within {
+            border-color: var(--teal);
+            box-shadow: 0 0 0 4px rgba(14, 124, 107, 0.08);
+        }
+
+        .amount-wrap.err {
+            border-color: var(--red);
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.08);
+        }
+
+        .amount-prefix {
+            padding: 0 18px;
+            height: 72px;
+            background: var(--teal-light);
+            border-right: 1px solid var(--gray-border);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .amount-prefix-main {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--teal);
+            line-height: 1.1;
+        }
+
+        .amount-prefix-sub {
+            font-size: 10px;
+            color: var(--teal);
+            opacity: .6;
+            font-weight: 400;
+        }
+
+        .amount-input {
+            flex: 1;
+            height: 72px;
+            border: none;
+            outline: none;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 28px;
+            color: var(--ink);
+            padding: 0 20px;
+            background: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .amount-input::placeholder {
+            color: #E5E7EB;
+            font-weight: 400;
+            font-size: 24px;
+        }
+
+        .amount-suffix {
+            padding: 0 18px;
+            height: 72px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            gap: 2px;
+        }
+
+        .token-preview {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--teal);
+            line-height: 1.1;
+            transition: all .2s;
+            text-align: center;
+        }
+
+        .token-preview.empty {
+            color: #E5E7EB;
+            font-weight: 400;
+        }
+
+        .token-label {
+            font-size: 10px;
+            color: var(--gray-light);
+            font-weight: 300;
+        }
+
+        .rate-hint {
+            font-size: 12.5px;
+            color: var(--gray-light);
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .rate-hint svg {
+            width: 14px;
+            height: 14px;
+            stroke: var(--teal-mid);
+            fill: none;
+            flex-shrink: 0;
+        }
+
+        .rate-hint span {
+            color: var(--teal);
+            font-weight: 500;
+        }
+
+        /* Quick chips */
+        .chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+
+        .chip {
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            border: 1.5px solid var(--gray-border);
+            background: var(--white);
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray);
+            transition: all .18s;
+            white-space: nowrap;
+        }
+
+        .chip:hover {
+            border-color: var(--teal);
+            color: var(--teal);
+        }
+
+        .chip.sel {
+            background: var(--teal-light);
+            border-color: var(--teal);
+            color: var(--teal);
+            border-width: 2px;
+        }
+
+        .val-note {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--amber);
+            margin-top: 6px;
+            height: 18px;
+        }
+
+        .val-note svg {
+            width: 13px;
+            height: 13px;
+            stroke: var(--amber);
+            fill: none;
+            stroke-width: 2;
+            flex-shrink: 0;
+        }
+
+        .val-note.hidden {
+            visibility: hidden;
+        }
+
+        /* Wallet box */
+        .wallet-box {
+            background: var(--teal-light);
+            border: 1.5px solid rgba(14, 124, 107, 0.2);
+            border-radius: 12px;
+            padding: 16px 20px;
+        }
+
+        .wallet-box-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--teal);
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .wallet-addr {
+            font-family: monospace;
+            font-size: 12.5px;
+            color: var(--ink);
+            word-break: break-all;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+
+        .wallet-badges {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .wb {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 10px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .wb-teal {
+            background: rgba(14, 124, 107, 0.1);
+            color: var(--teal);
+        }
+
+        .wb-green {
+            background: var(--green-light);
+            color: #065F46;
+        }
+
+        /* Summary table */
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .summary-table tr td {
+            padding: 11px 0;
+            font-size: 13.5px;
+            border-bottom: 1px solid var(--gray-bg);
+        }
+
+        .summary-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .summary-table td:first-child {
+            color: var(--gray);
+            font-weight: 400;
+        }
+
+        .summary-table td:last-child {
+            text-align: right;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        .sum-free {
+            color: var(--green) !important;
+        }
+
+        .sum-total-box {
+            background: var(--teal-light);
+            border-left: 3px solid var(--teal);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-top: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stb-label {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--teal);
+        }
+
+        .stb-value {
+            text-align: right;
+        }
+
+        .stb-num {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 20px;
+            color: var(--teal);
+            letter-spacing: -0.5px;
+            line-height: 1.1;
+        }
+
+        .stb-vnd {
+            font-size: 12px;
+            color: var(--gray-light);
+        }
+
+        /* PayOS button */
+        .payos-btn {
+            width: 100%;
+            height: 56px;
+            border-radius: 12px;
+            background: var(--amber);
+            color: var(--ink);
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: all .22s;
+            box-shadow: var(--shadow-amber);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            margin-top: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .payos-btn:hover:not(:disabled) {
+            background: #E08E00;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 28px rgba(245, 158, 11, 0.45);
+        }
+
+        .payos-btn:disabled {
+            background: var(--gray-border);
+            color: var(--gray-light);
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .payos-btn-main {
+            font-size: 15.5px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .payos-btn-sub {
+            font-size: 11.5px;
+            font-weight: 300;
+            opacity: .6;
+        }
+
+        .payos-btn.loading .payos-btn-text {
+            display: none;
+        }
+
+        .payos-btn-spinner {
+            display: none;
+            width: 22px;
+            height: 22px;
+            border: 2.5px solid rgba(0, 0, 0, 0.2);
+            border-top-color: var(--ink);
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+        }
+
+        .payos-btn.loading .payos-btn-spinner {
+            display: block;
+        }
+
+        .trust-strip {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 12px;
+            font-size: 11.5px;
+            color: var(--gray-light);
+        }
+
+        .trust-strip svg {
+            width: 13px;
+            height: 13px;
+            stroke: var(--green);
+            fill: none;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .bank-logos {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .bank-logo {
+            height: 22px;
+            padding: 3px 8px;
+            background: var(--gray-bg);
+            border-radius: 5px;
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--gray);
+            letter-spacing: .3px;
+            display: flex;
+            align-items: center;
+        }
+
+        /* ── RIGHT COLUMN ── */
+        .info-col .card {
+            margin-bottom: 16px;
+        }
+
+        /* Process steps */
+        .proc-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .proc-step {
+            display: flex;
+            gap: 14px;
+            position: relative;
+        }
+
+        .proc-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            left: 11px;
+            top: 28px;
+            bottom: -4px;
+            width: 2px;
+            background: repeating-linear-gradient(to bottom, var(--teal-light) 0, var(--teal-light) 4px, transparent 4px, transparent 8px);
+        }
+
+        .ps-dot {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--teal-light);
+            border: 2px solid rgba(14, 124, 107, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            color: var(--teal);
+            flex-shrink: 0;
+            z-index: 1;
+        }
+
+        .ps-dot.done {
+            background: var(--green);
+            border-color: var(--green);
+            color: white;
+        }
+
+        .ps-dot.active-s {
+            background: var(--teal);
+            border-color: var(--teal);
+            color: white;
+            box-shadow: 0 0 0 3px rgba(14, 124, 107, 0.15);
+        }
+
+        .ps-body {
+            padding: 0 0 20px;
+        }
+
+        .ps-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 600;
+            font-size: 13.5px;
+            color: var(--ink);
+            line-height: 1.2;
+            margin-bottom: 3px;
+        }
+
+        .ps-desc {
+            font-size: 12px;
+            color: var(--gray-light);
+            font-weight: 300;
+            line-height: 1.5;
+        }
+
+        /* Recent tx */
+        .tx-list-r {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .tx-item-r {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            background: var(--cream);
+            border: 1px solid transparent;
+            transition: all .2s;
+            cursor: pointer;
+        }
+
+        .tx-item-r:hover {
+            background: var(--teal-light);
+            border-color: rgba(14, 124, 107, 0.15);
+        }
+
+        .tx-ico {
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: var(--green-light);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .tx-body {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .tx-name {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--ink);
+            line-height: 1.2;
+        }
+
+        .tx-date {
+            font-size: 11px;
+            color: var(--gray-light);
+            font-weight: 300;
+        }
+
+        .tx-hash-r {
+            font-family: monospace;
+            font-size: 10px;
+            color: var(--gray-light);
+        }
+
+        .tx-amt {
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .tx-amt-num {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 13.5px;
+            color: var(--teal);
+        }
+
+        .tx-amt-badge {
+            display: inline-flex;
+            background: var(--green-light);
+            color: #065F46;
+            font-size: 10.5px;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: 99px;
+            margin-top: 2px;
+        }
+
+        .card-title-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .card-title-r {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 15px;
+            color: var(--ink);
+        }
+
+        .card-link {
+            font-size: 12.5px;
+            color: var(--teal);
+            text-decoration: none;
+            font-weight: 500;
+            transition: opacity .2s;
+        }
+
+        .card-link:hover {
+            opacity: .7;
+        }
+
+        /* Info note */
+        .info-note {
+            background: var(--teal-light);
+            border-radius: 14px;
+            padding: 18px 20px;
+        }
+
+        .in-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--teal);
+            margin-bottom: 12px;
+        }
+
+        .in-list {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .in-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            font-size: 12.5px;
+            color: var(--gray);
+            line-height: 1.5;
+            font-weight: 300;
+        }
+
+        .in-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--teal);
+            flex-shrink: 0;
+            margin-top: 7px;
+        }
+
+        .in-item.warn .in-dot {
+            background: var(--amber);
+        }
+
+        .in-item.warn {
+            color: var(--gray);
+        }
+
+        .in-item strong {
+            font-weight: 600;
+            color: var(--ink);
+        }
+
+        /* ── MODAL: PayOS redirect ── */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(13, 17, 23, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .3s;
+        }
+
+        .modal-overlay.show {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal {
+            background: var(--white);
+            border-radius: 20px;
+            padding: 32px;
+            width: 420px;
+            max-width: 90vw;
+            text-align: center;
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.15);
+            transform: scale(.95) translateY(10px);
+            transition: transform .3s;
+        }
+
+        .modal-overlay.show .modal {
+            transform: scale(1) translateY(0);
+        }
+
+        .modal-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: var(--amber-light);
+            border: 2px solid rgba(245, 158, 11, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin: 0 auto 20px;
+        }
+
+        .modal-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 20px;
+            color: var(--ink);
+            margin-bottom: 8px;
+        }
+
+        .modal-sub {
+            font-size: 13.5px;
+            color: var(--gray-light);
+            line-height: 1.6;
+            margin-bottom: 24px;
+            font-weight: 300;
+        }
+
+        .modal-amount {
+            background: var(--teal-light);
+            border-radius: 10px;
+            padding: 12px 20px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .ma-label {
+            font-size: 12px;
+            color: var(--gray);
+        }
+
+        .ma-value {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--teal);
+        }
+
+        .modal-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-modal-primary {
+            height: 50px;
+            border-radius: 10px;
+            background: var(--amber);
+            color: var(--ink);
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: all .2s;
+            box-shadow: var(--shadow-amber);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-modal-primary:hover {
+            background: #E08E00;
+            transform: translateY(-1px);
+        }
+
+        .btn-modal-cancel {
+            height: 44px;
+            border-radius: 10px;
+            background: transparent;
+            border: none;
+            font-size: 13px;
+            color: var(--gray-light);
+            cursor: pointer;
+            transition: color .2s;
+            font-family: 'Lexend', sans-serif;
+        }
+
+        .btn-modal-cancel:hover {
+            color: var(--gray);
+        }
+
+        /* ── TOAST ── */
+        .toast {
+            position: fixed;
+            bottom: 32px;
+            right: 32px;
+            z-index: 300;
+            width: 360px;
+            background: var(--white);
+            border-radius: 14px;
+            padding: 18px 20px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+            border-left: 4px solid var(--green);
+            transform: translateX(120%);
+            transition: transform .4s cubic-bezier(.34, 1.2, .64, 1);
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.error-t {
+            border-left-color: var(--red);
+        }
+
+        .toast-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .toast-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 14px;
+            color: var(--ink);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .toast-close {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border: none;
+            background: var(--gray-bg);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: var(--gray-light);
+            transition: background .2s;
+        }
+
+        .toast-close:hover {
+            background: var(--gray-border);
+        }
+
+        .toast-body {
+            font-size: 13px;
+            color: var(--gray);
+            line-height: 1.5;
+            margin-bottom: 14px;
+            font-weight: 300;
+        }
+
+        .toast-amount {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 18px;
+            color: var(--teal);
+            margin-bottom: 4px;
+        }
+
+        .toast-balance {
+            font-size: 12px;
+            color: var(--gray-light);
+        }
+
+        .toast-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .toast-btn-p {
+            flex: 1;
+            height: 36px;
+            border-radius: 8px;
+            background: var(--teal);
+            color: white;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: background .2s;
+        }
+
+        .toast-btn-p:hover {
+            background: var(--teal-dark);
+        }
+
+        .toast-btn-s {
+            height: 36px;
+            padding: 0 14px;
+            border-radius: 8px;
+            background: var(--gray-bg);
+            color: var(--gray);
+            font-size: 13px;
+            font-weight: 500;
+            border: none;
+            cursor: pointer;
+            font-family: 'Lexend', sans-serif;
+            transition: background .2s;
+        }
+
+        .toast-btn-s:hover {
+            background: var(--gray-border);
+        }
+
+        /* Mobile bottom nav */
+        .mobile-nav {
+            display: none;
+        }
+
+        /* Animations */
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(14px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        @keyframes pload {
+            0% {
+                transform: scaleX(0)
+            }
+
+            40% {
+                transform: scaleX(.6)
+            }
+
+            70% {
+                transform: scaleX(.85)
+            }
+
+            100% {
+                transform: scaleX(1)
+            }
+        }
+
+        /* Stagger */
+        .card:nth-child(1) {
+            animation-delay: .05s
+        }
+
+        .card:nth-child(2) {
+            animation-delay: .12s
+        }
+
+        .card:nth-child(3) {
+            animation-delay: .18s
+        }
+
+        .info-col .card:nth-child(1) {
+            animation-delay: .08s
+        }
+
+        .info-col .card:nth-child(2) {
+            animation-delay: .15s
+        }
+
+        .info-col .card:nth-child(3) {
+            animation-delay: .22s
+        }
+
+        /* Responsive */
+        @media(max-width:1100px) {
+            .content-grid {
+                grid-template-columns: 1fr 300px;
+            }
+        }
+
+        @media(max-width:900px) {
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform .3s;
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .main {
+                margin-left: 0;
+                padding: 24px 20px 100px;
+            }
+
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .mobile-nav {
+                display: flex;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                z-index: 50;
+                background: var(--ink);
+                border-top: 1px solid rgba(255, 255, 255, 0.08);
+                padding: 8px 0 16px;
+            }
+
+            .mn-item {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 3px;
+                padding: 6px 0;
+                text-decoration: none;
+                font-size: 9.5px;
+                color: rgba(255, 255, 255, 0.45);
+                font-weight: 500;
+                transition: color .2s;
+                cursor: pointer;
+            }
+
+            .mn-item.active {
+                color: var(--teal-mid);
+            }
+
+            .mn-icon {
+                font-size: 20px;
+                line-height: 1;
+            }
+
+            .chips {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+
+            .chips::-webkit-scrollbar {
+                height: 0;
+            }
+
+            .toast {
+                width: calc(100vw - 32px);
+                bottom: 80px;
+                right: 16px;
+            }
+
+            .confirm-banner {
+                left: 0;
+            }
+
+            .page-header {
+                margin-bottom: 20px;
+            }
+        }
+
+        @media(max-width:480px) {
+            .main {
+                padding: 20px 16px 100px;
+            }
+
+            .amount-input {
+                font-size: 22px;
+            }
+
+            .modal {
+                padding: 24px 20px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Top progress bar -->
+    <div class="pbar" id="pbar"></div>
+
+    <!-- Confirm banner (PayOS return) -->
+    <div class="confirm-banner" id="confirmBanner">
+        <div class="cb-left">
+            <div class="cb-spin"></div>
+            <div>
+                <div class="cb-text">Đang xác nhận giao dịch...</div>
+                <div class="cb-sub">Đang chờ xác nhận từ Blockchain (2 blocks)</div>
+            </div>
+        </div>
+        <div class="cb-progress">
+            <div class="cb-progress-fill" id="cbFill"></div>
+        </div>
+    </div>
+
+    <!-- PayOS redirect modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <div class="modal-icon">💳</div>
+            <div class="modal-title">Chuyển đến PayOS</div>
+            <div class="modal-sub">Bạn sẽ được chuyển đến cổng thanh toán an toàn. Hoàn tất thanh toán và quay lại DCP.
+            </div>
+            <div class="modal-amount">
+                <span class="ma-label">Số tiền thanh toán</span>
+                <span class="ma-value" id="modalAmount">100,000 VNĐ</span>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-modal-primary" onclick="doPayOS()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    Mở PayOS ngay
+                </button>
+                <button class="btn-modal-cancel" onclick="closeModal()">← Hủy và quay lại</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast">
+        <div class="toast-head">
+            <div class="toast-title" id="toastTitle">✅ Nạp tiền thành công!</div>
+            <button class="toast-close" onclick="closeToast()">✕</button>
+        </div>
+        <div class="toast-body" id="toastBody">Token đã được mint vào ví của bạn</div>
+        <div class="toast-amount" id="toastAmount">+100,000 Charity Token</div>
+        <div class="toast-balance" id="toastBalance">Số dư mới: 1,350,000 Token</div>
+        <div class="toast-actions" style="margin-top:12px">
+            <button class="toast-btn-p" onclick="closeToast()">Quyên góp ngay →</button>
+            <button class="toast-btn-s" onclick="closeToast()">Xem giao dịch ↗</button>
+        </div>
+    </div>
+
+    <!-- ═══ SIDEBAR ═══ -->
+    <nav class="sidebar" id="sidebar">
+        <a href="dcp-home.html" class="sb-logo">
+            <div class="sb-logo-icon"><svg viewBox="0 0 24 24">
+                    <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
+                </svg></div>
+            <div><span class="sb-logo-name">DCP</span><span class="sb-logo-sub">Decentralized Charity</span></div>
+        </a>
+
+        <div class="sb-user">
+            <div class="sb-user-row">
+                <div class="sb-avatar">NVA</div>
+                <div>
+                    <div class="sb-user-name">Nguyễn Văn A</div>
+                    <div class="sb-user-addr">0x3a4f...9b2c</div>
+                </div>
+            </div>
+            <div class="sb-badge">💛 Donor</div>
+            <div class="sb-balance">
+                <div class="sb-balance-lbl">Số dư Token</div>
+                <div class="sb-balance-num" id="sbBalNum">1,250,000</div>
+                <div class="sb-balance-token">Charity Token</div>
+                <div class="sb-balance-vnd">≈ 1,250,000 VNĐ</div>
+            </div>
+        </div>
+
+        <nav class="sb-nav">
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                </svg>
+                Tổng quan
+            </a>
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path
+                        d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+                </svg>
+                Dự án từ thiện
+            </a>
+            <a class="sb-nav-item active" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="1" x2="12" y2="23" />
+                    <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+                </svg>
+                Nạp tiền
+            </a>
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+                    <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                Quyên góp
+            </a>
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                </svg>
+                Lịch sử giao dịch
+            </a>
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" />
+                    <line x1="8" y1="21" x2="16" y2="21" />
+                    <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                Transparency
+            </a>
+
+            <div class="sb-nav-sep"></div>
+            <a class="sb-nav-item" href="#">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                        d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
+                Cài đặt
+            </a>
+        </nav>
+
+        <div class="sb-bottom">
+            <a class="sb-nav-item" href="dcp-login.html" style="color:rgba(239,68,68,0.7)">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                    stroke-linecap="round" stroke-linejoin="round" style="color:rgba(239,68,68,0.7)">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Đăng xuất
+            </a>
+        </div>
+    </nav>
+
+    <!-- ═══ MAIN ═══ -->
+    <main class="main">
+        <!-- Page header -->
+        <div class="page-header">
+            <div class="breadcrumb">
+                <a href="#">Tổng quan</a>
+                <svg viewBox="0 0 24 24">
+                    <polyline points="9 18 15 12 9 6" />
+                </svg>
+                <span style="color:var(--teal);font-weight:500">Nạp tiền</span>
+            </div>
+            <div class="page-title">💰 Nạp tiền</div>
+            <div class="page-sub">Chuyển VNĐ thành Charity Token để bắt đầu quyên góp cho dự án từ thiện</div>
+        </div>
+
+        <div class="content-grid">
+            <!-- LEFT COLUMN -->
+            <div class="left-col">
+
+                <!-- Card 1: Amount input -->
+                <div class="card">
+                    <div class="card-step">
+                        <div class="card-step-num">1</div> Nhập số tiền nạp
+                    </div>
+
+                    <div class="amount-wrap" id="amountWrap">
+                        <div class="amount-prefix">
+                            <div class="amount-prefix-main">VNĐ</div>
+                            <div class="amount-prefix-sub">Việt Nam Đồng</div>
+                        </div>
+                        <input type="text" class="amount-input" id="amountInput" placeholder="0" inputmode="numeric"
+                            autocomplete="off" oninput="handleAmount(this)" aria-label="Số tiền nạp (VNĐ)" />
+                        <div class="amount-suffix">
+                            <div class="token-preview empty" id="tokenPreview">Token</div>
+                            <div class="token-label">Nhận được</div>
+                        </div>
+                    </div>
+
+                    <div class="rate-hint">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 2a10 10 0 100 20A10 10 0 0012 2z" />
+                            <path d="M8 12l2 2 4-4" />
+                        </svg>
+                        Tỷ lệ cố định: <span>1 VNĐ = 1 Charity Token</span> · Không phí chuyển đổi
+                    </div>
+
+                    <div class="chips" id="chips">
+                        <div class="chip" onclick="setChip(50000, this)">50.000đ</div>
+                        <div class="chip" onclick="setChip(100000, this)">100.000đ</div>
+                        <div class="chip" onclick="setChip(200000, this)">200.000đ</div>
+                        <div class="chip" onclick="setChip(500000, this)">500.000đ</div>
+                        <div class="chip" onclick="setChip(1000000, this)">1.000.000đ</div>
+                    </div>
+
+                    <div class="val-note hidden" id="valNote">
+                        <svg viewBox="0 0 24 24">
+                            <path
+                                d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                        </svg>
+                        <span id="valNoteText">Số tiền tối thiểu: 10,000 VNĐ</span>
+                    </div>
+                </div>
+
+                <!-- Card 2: Wallet destination -->
+                <div class="card" style="animation-delay:.1s">
+                    <div class="card-step">
+                        <div class="card-step-num">2</div> Token sẽ được gửi đến
+                    </div>
+                    <div class="wallet-box">
+                        <div class="wallet-box-label">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 12V7H5a2 2 0 010-4h14v4" />
+                                <path d="M3 5v14a2 2 0 002 2h16v-5" />
+                                <path d="M18 12a2 2 0 000 4h4v-4h-4z" />
+                            </svg>
+                            Smart Account của bạn
+                        </div>
+                        <div class="wallet-addr">0x3a4f9b2c8e1d4f7a2c3b5d6e7f8a9b0c1d2e3f4a</div>
+                        <div class="wallet-badges">
+                            <div class="wb wb-teal">⛓ Amoy Testnet</div>
+                            <div class="wb wb-teal">ERC-4337</div>
+                            <div class="wb wb-green">✓ Đã xác thực</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Card 3: Summary + CTA -->
+                <div class="card" style="animation-delay:.18s">
+                    <div class="card-step">
+                        <div class="card-step-num">3</div> Xác nhận trước khi thanh toán
+                    </div>
+
+                    <table class="summary-table">
+                        <tr>
+                            <td>Số tiền nạp</td>
+                            <td id="sumAmount">—</td>
+                        </tr>
+                        <tr>
+                            <td>Tỷ lệ quy đổi</td>
+                            <td>1 VNĐ = 1 Token</td>
+                        </tr>
+                        <tr>
+                            <td>Token nhận được</td>
+                            <td id="sumToken">—</td>
+                        </tr>
+                        <tr>
+                            <td>Phí giao dịch</td>
+                            <td class="sum-free">Miễn phí 🎉</td>
+                        </tr>
+                        <tr>
+                            <td>Thời gian xử lý</td>
+                            <td>~30 giây</td>
+                        </tr>
+                        <tr>
+                            <td>Cổng thanh toán</td>
+                            <td>PayOS</td>
+                        </tr>
+                    </table>
+
+                    <div class="sum-total-box">
+                        <div class="stb-label">✅ Tổng nhận được</div>
+                        <div class="stb-value">
+                            <div class="stb-num" id="totalToken">—</div>
+                            <div class="stb-vnd" id="totalVnd">Nhập số tiền để xem</div>
+                        </div>
+                    </div>
+
+                    <button class="payos-btn" id="payosBtn" disabled onclick="openModal()">
+                        <div class="payos-btn-spinner"></div>
+                        <div class="payos-btn-text">
+                            <div class="payos-btn-main">💳 Thanh toán qua PayOS</div>
+                            <div class="payos-btn-sub">Chuyển hướng đến cổng thanh toán an toàn</div>
+                        </div>
+                    </button>
+
+                    <div class="trust-strip">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                        </svg>
+                        Thanh toán bảo mật qua PayOS · Hỗ trợ tất cả ngân hàng Việt Nam
+                    </div>
+                    <div class="bank-logos">
+                        <div class="bank-logo">VCB</div>
+                        <div class="bank-logo">BIDV</div>
+                        <div class="bank-logo">TCB</div>
+                        <div class="bank-logo">VPB</div>
+                        <div class="bank-logo">MBB</div>
+                        <div class="bank-logo">ACB</div>
+                        <div class="bank-logo">+40</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN -->
+            <div class="info-col">
+
+                <!-- Process steps card -->
+                <div class="card" style="padding:24px">
+                    <div
+                        style="font-family:'Be Vietnam Pro',sans-serif;font-weight:700;font-size:15px;color:var(--ink);margin-bottom:18px">
+                        Quy trình nạp tiền</div>
+                    <div class="proc-steps">
+                        <div class="proc-step">
+                            <div class="ps-dot active-s">1</div>
+                            <div class="ps-body">
+                                <div class="ps-title">Nhập số tiền VNĐ</div>
+                                <div class="ps-desc">Chọn số tiền muốn nạp vào ví Charity Token</div>
+                            </div>
+                        </div>
+                        <div class="proc-step">
+                            <div class="ps-dot">2</div>
+                            <div class="ps-body">
+                                <div class="ps-title">Chuyển hướng PayOS</div>
+                                <div class="ps-desc">Thanh toán qua Internet Banking hoặc QR Code</div>
+                            </div>
+                        </div>
+                        <div class="proc-step">
+                            <div class="ps-dot">3</div>
+                            <div class="ps-body">
+                                <div class="ps-title">Xác nhận tự động</div>
+                                <div class="ps-desc">Backend nhận webhook, xác minh chữ ký HMAC</div>
+                            </div>
+                        </div>
+                        <div class="proc-step" style="--last:1">
+                            <div class="ps-dot">4</div>
+                            <div class="ps-body" style="padding-bottom:0">
+                                <div class="ps-title">Token vào ví ngay</div>
+                                <div class="ps-desc">Smart Contract mint token ~30 giây sau khi xác nhận</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent transactions card -->
+                <div class="card" style="padding:24px">
+                    <div class="card-title-row">
+                        <div class="card-title-r">Giao dịch gần đây</div>
+                        <a href="#" class="card-link">Xem tất cả →</a>
+                    </div>
+                    <div class="tx-list-r">
+                        <div class="tx-item-r">
+                            <div class="tx-ico">💰</div>
+                            <div class="tx-body">
+                                <div class="tx-name">Nạp tiền</div>
+                                <div class="tx-date">12/02/2025 · 14:23</div>
+                                <div class="tx-hash-r">0x5c2e...8a1d ↗</div>
+                            </div>
+                            <div class="tx-amt">
+                                <div class="tx-amt-num">+500K</div>
+                                <div class="tx-amt-badge">✅ Thành công</div>
+                            </div>
+                        </div>
+                        <div class="tx-item-r">
+                            <div class="tx-ico">💰</div>
+                            <div class="tx-body">
+                                <div class="tx-name">Nạp tiền</div>
+                                <div class="tx-date">08/02/2025 · 09:15</div>
+                                <div class="tx-hash-r">0x3a4f...9b2c ↗</div>
+                            </div>
+                            <div class="tx-amt">
+                                <div class="tx-amt-num">+200K</div>
+                                <div class="tx-amt-badge">✅ Thành công</div>
+                            </div>
+                        </div>
+                        <div class="tx-item-r">
+                            <div class="tx-ico">💰</div>
+                            <div class="tx-body">
+                                <div class="tx-name">Nạp tiền</div>
+                                <div class="tx-date">01/02/2025 · 20:44</div>
+                                <div class="tx-hash-r">0x8e1d...4f7a ↗</div>
+                            </div>
+                            <div class="tx-amt">
+                                <div class="tx-amt-num">+1M</div>
+                                <div class="tx-amt-badge">✅ Thành công</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Info note card -->
+                <div class="info-note">
+                    <div class="in-title">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="16" x2="12" y2="12" />
+                            <line x1="12" y1="8" x2="12.01" y2="8" />
+                        </svg>
+                        Thông tin quan trọng
+                    </div>
+                    <div class="in-list">
+                        <div class="in-item">
+                            <div class="in-dot"></div><span>Tỷ lệ cố định: <strong>1 VNĐ = 1 Charity
+                                    Token</strong></span>
+                        </div>
+                        <div class="in-item">
+                            <div class="in-dot"></div><span>Số tiền tối thiểu: <strong>10,000 VNĐ</strong></span>
+                        </div>
+                        <div class="in-item">
+                            <div class="in-dot"></div><span>Token được mint sau <strong>2 block
+                                    confirmations</strong></span>
+                        </div>
+                        <div class="in-item">
+                            <div class="in-dot"></div><span>Token chỉ dùng trong hệ thống DCP</span>
+                        </div>
+                        <div class="in-item warn">
+                            <div class="in-dot"></div><span><strong>Không hỗ trợ rút Token về VNĐ</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Mobile bottom nav -->
+    <nav class="mobile-nav">
+        <div class="mn-item" onclick="toggleSidebar()">
+            <div class="mn-icon">☰</div><span>Menu</span>
+        </div>
+        <div class="mn-item">
+            <div class="mn-icon">🏠</div><span>Tổng quan</span>
+        </div>
+        <div class="mn-item active">
+            <div class="mn-icon">💰</div><span>Nạp tiền</span>
+        </div>
+        <div class="mn-item">
+            <div class="mn-icon">🎯</div><span>Dự án</span>
+        </div>
+        <div class="mn-item">
+            <div class="mn-icon">📊</div><span>Lịch sử</span>
+        </div>
+    </nav>
+
+    <script>
+        let rawAmount = 0;
+        const MIN = 10000;
+
+        function fmt(n) { return n.toLocaleString('vi-VN'); }
+
+        function handleAmount(el) {
+            // Strip non-digits
+            const digits = el.value.replace(/\D/g, '');
+            rawAmount = parseInt(digits) || 0;
+            // Format with commas
+            el.value = rawAmount > 0 ? fmt(rawAmount) : '';
+            // Deselect chips
+            document.querySelectorAll('.chip').forEach(c => c.classList.remove('sel'));
+            // Find matching chip
+            document.querySelectorAll('.chip').forEach(c => {
+                if (parseInt(c.dataset.val) === rawAmount) c.classList.add('sel');
+            });
+            updateUI();
+        }
+
+        function setChip(val, el) {
+            rawAmount = val;
+            document.getElementById('amountInput').value = fmt(val);
+            document.querySelectorAll('.chip').forEach(c => c.classList.remove('sel'));
+            el.classList.add('sel');
+            updateUI();
+        }
+
+        function updateUI() {
+            const tp = document.getElementById('tokenPreview');
+            const note = document.getElementById('valNote');
+            const btn = document.getElementById('payosBtn');
+            const wrap = document.getElementById('amountWrap');
+            const sa = document.getElementById('sumAmount');
+            const st = document.getElementById('sumToken');
+            const tt = document.getElementById('totalToken');
+            const tv = document.getElementById('totalVnd');
+
+            if (rawAmount <= 0) {
+                tp.textContent = 'Token'; tp.classList.add('empty');
+                note.classList.add('hidden');
+                btn.disabled = true; wrap.classList.remove('err');
+                sa.textContent = '—'; st.textContent = '—';
+                tt.textContent = '—'; tv.textContent = 'Nhập số tiền để xem';
+                return;
+            }
+            if (rawAmount < MIN) {
+                tp.textContent = fmt(rawAmount); tp.classList.remove('empty');
+                note.classList.remove('hidden');
+                document.getElementById('valNoteText').textContent = 'Số tiền tối thiểu: ' + fmt(MIN) + ' VNĐ';
+                wrap.classList.add('err');
+                btn.disabled = true;
+                sa.textContent = fmt(rawAmount) + ' VNĐ'; st.textContent = fmt(rawAmount) + ' Token';
+                tt.textContent = fmt(rawAmount) + ' Token'; tv.textContent = '≈ ' + fmt(rawAmount) + ' VNĐ';
+                return;
+            }
+            // Valid
+            tp.textContent = fmt(rawAmount); tp.classList.remove('empty');
+            note.classList.add('hidden');
+            wrap.classList.remove('err');
+            btn.disabled = false;
+            sa.textContent = fmt(rawAmount) + ' VNĐ';
+            st.textContent = fmt(rawAmount) + ' Token';
+            tt.textContent = fmt(rawAmount) + ' Token';
+            tv.textContent = '≈ ' + fmt(rawAmount) + ' VNĐ';
+        }
+
+        // Store chip data-val
+        document.querySelectorAll('.chip').forEach((c, i) => {
+            const vals = [50000, 100000, 200000, 500000, 1000000];
+            c.dataset.val = vals[i];
+        });
+
+        function openModal() {
+            document.getElementById('modalAmount').textContent = fmt(rawAmount) + ' VNĐ';
+            document.getElementById('modalOverlay').classList.add('show');
+        }
+        function closeModal() {
+            document.getElementById('modalOverlay').classList.remove('show');
+        }
+
+        function doPayOS() {
+            closeModal();
+            // Show loading on button
+            const btn = document.getElementById('payosBtn');
+            btn.classList.add('loading'); btn.disabled = true;
+            document.getElementById('pbar').classList.add('run');
+
+            // Simulate PayOS redirect & return
+            setTimeout(() => {
+                btn.classList.remove('loading');
+                document.getElementById('pbar').classList.remove('run');
+                document.getElementById('pbar').style.transform = 'scaleX(0)';
+                // Show confirm banner
+                showConfirmBanner();
+            }, 1500);
+        }
+
+        function showConfirmBanner() {
+            const banner = document.getElementById('confirmBanner');
+            banner.classList.add('show');
+            const fill = document.getElementById('cbFill');
+            let w = 0;
+            const iv = setInterval(() => {
+                w += 4;
+                fill.style.width = w + '%';
+                if (w >= 100) {
+                    clearInterval(iv);
+                    setTimeout(() => {
+                        banner.classList.remove('show');
+                        showSuccess();
+                    }, 400);
+                }
+            }, 80);
+        }
+
+        function showSuccess() {
+            const added = rawAmount;
+            const newBal = 1250000 + added;
+            document.getElementById('toastAmount').textContent = '+' + fmt(added) + ' Charity Token';
+            document.getElementById('toastBalance').textContent = 'Số dư mới: ' + fmt(newBal) + ' Token';
+            document.getElementById('sbBalNum').textContent = fmt(newBal);
+            const toast = document.getElementById('toast');
+            toast.classList.remove('error-t');
+            toast.classList.add('show');
+            setTimeout(closeToast, 8000);
+            // Reset form
+            rawAmount = 0;
+            document.getElementById('amountInput').value = '';
+            document.querySelectorAll('.chip').forEach(c => c.classList.remove('sel'));
+            updateUI();
+        }
+
+        function closeToast() {
+            document.getElementById('toast').classList.remove('show');
+        }
+
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+
+        // Prevent form resubmit on enter
+        document.getElementById('amountInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter' && rawAmount >= MIN) openModal();
+        });
+    </script>
+</body>
+
+</html>

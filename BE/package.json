@@ -1,0 +1,28 @@
+{
+  "name": "dcp-backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "echo \"No tests configured yet\"",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "bull": "^4.16.5",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "mongoose": "^9.2.4",
+    "redis": "^5.11.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "nodemon": "^3.1.14"
+  }
+}

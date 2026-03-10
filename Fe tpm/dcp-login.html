@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng nhập — DCP Platform</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Lexend:wght@300;400;500;600&display=swap"
+        rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --teal: #0E7C6B;
+            --teal-dark: #0A5C50;
+            --teal-light: #E6F7F4;
+            --teal-mid: #1AAE97;
+            --amber: #F59E0B;
+            --ink: #0D1117;
+            --ink-mid: #1C2431;
+            --gray: #4B5563;
+            --gray-light: #9CA3AF;
+            --gray-border: #E5E7EB;
+            --cream: #F8FAFB;
+            --white: #FFFFFF;
+            --green: #10B981;
+            --red: #EF4444;
+            --red-light: #FEF2F2;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+            --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.08);
+            --shadow-teal: 0 4px 16px rgba(14, 124, 107, 0.25);
+        }
+
+        html,
+        body {
+            height: 100%;
+            font-family: 'Lexend', 'Be Vietnam Pro', sans-serif;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--ink);
+            background: var(--cream);
+            overflow: hidden;
+        }
+
+        /* ─── LAYOUT ─── */
+        .login-wrapper {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ════════════════════════════
+     LEFT PANEL
+  ════════════════════════════ */
+        .left-panel {
+            background: linear-gradient(160deg, #0E7C6B 0%, #0A5C50 55%, #073D36 100%);
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            padding: 40px 48px;
+        }
+
+        /* hex pattern overlay */
+        .left-panel::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='52'%3E%3Cpolygon points='30,2 58,16 58,44 30,58 2,44 2,16' fill='none' stroke='rgba(255,255,255,0.07)' stroke-width='1.5'/%3E%3C/svg%3E");
+            background-size: 60px 52px;
+            pointer-events: none;
+        }
+
+        /* glow blob top-right */
+        .left-panel::after {
+            content: '';
+            position: absolute;
+            top: -120px;
+            right: -120px;
+            width: 400px;
+            height: 400px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(26, 174, 151, 0.25) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        /* glow blob bottom-left */
+        .glow-bl {
+            position: absolute;
+            bottom: -80px;
+            left: -80px;
+            width: 320px;
+            height: 320px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        /* ── Left: logo ── */
+        .left-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+            position: relative;
+            z-index: 1;
+            animation: fadeDown .5s ease both;
+        }
+
+        .left-logo-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1.5px solid rgba(255, 255, 255, 0.25);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }
+
+        .left-logo-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: white;
+        }
+
+        .left-logo-text {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 19px;
+            color: white;
+            letter-spacing: -0.3px;
+        }
+
+        .left-logo-sub {
+            font-size: 10.5px;
+            color: rgba(255, 255, 255, 0.55);
+            font-weight: 400;
+            display: block;
+            line-height: 1;
+            margin-top: 1px;
+        }
+
+        /* ── Left: quote block ── */
+        .left-quote {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            position: relative;
+            z-index: 1;
+            animation: fadeUp .7s ease .15s both;
+        }
+
+        .quote-icon {
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.12);
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            margin-bottom: 28px;
+        }
+
+        .quote-text {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: clamp(20px, 2.2vw, 26px);
+            font-weight: 700;
+            color: white;
+            line-height: 1.35;
+            letter-spacing: -0.3px;
+            margin-bottom: 16px;
+        }
+
+        .quote-text em {
+            font-style: normal;
+            color: var(--amber);
+        }
+
+        .quote-sub {
+            font-size: 13.5px;
+            color: rgba(255, 255, 255, 0.55);
+            font-weight: 300;
+            font-style: italic;
+            letter-spacing: .2px;
+        }
+
+        /* ── Left: trust cards ── */
+        .trust-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+            z-index: 1;
+            animation: fadeUp .7s ease .3s both;
+        }
+
+        .trust-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.13);
+            border-radius: 12px;
+            padding: 13px 18px;
+            transition: background .2s;
+            cursor: default;
+        }
+
+        .trust-card:hover {
+            background: rgba(255, 255, 255, 0.13);
+        }
+
+        .trust-card-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .trust-card-body {}
+
+        .trust-card-num {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 700;
+            font-size: 14.5px;
+            color: white;
+            line-height: 1.2;
+        }
+
+        .trust-card-label {
+            font-size: 11.5px;
+            color: rgba(255, 255, 255, 0.5);
+            font-weight: 300;
+        }
+
+        /* ── Left: footer ── */
+        .left-footer {
+            position: relative;
+            z-index: 1;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-top: 24px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: fadeUp .5s ease .4s both;
+        }
+
+        .left-footer svg {
+            width: 12px;
+            height: 12px;
+            fill: rgba(255, 255, 255, 0.3);
+            flex-shrink: 0;
+        }
+
+        /* ════════════════════════════
+     RIGHT PANEL
+  ════════════════════════════ */
+        .right-panel {
+            background: var(--cream);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        /* top bar */
+        .right-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 48px;
+            flex-shrink: 0;
+            animation: fadeDown .5s ease both;
+        }
+
+        .back-link {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--gray-light);
+            text-decoration: none;
+            font-weight: 400;
+            transition: color .2s;
+        }
+
+        .back-link svg {
+            width: 14px;
+            height: 14px;
+            stroke: currentColor;
+            fill: none;
+        }
+
+        .back-link:hover {
+            color: var(--teal);
+        }
+
+        .topbar-register {
+            font-size: 13.5px;
+            color: var(--gray);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .topbar-register a {
+            color: var(--teal);
+            font-weight: 600;
+            text-decoration: none;
+            transition: opacity .2s;
+        }
+
+        .topbar-register a:hover {
+            opacity: .75;
+        }
+
+        /* form container */
+        .form-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 24px 72px 32px;
+            max-width: 480px;
+            width: 100%;
+            margin: 0 auto;
+            animation: fadeUp .6s ease .1s both;
+        }
+
+        .form-greeting {
+            font-size: 13.5px;
+            font-weight: 600;
+            color: var(--teal);
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .form-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: clamp(24px, 2.5vw, 30px);
+            font-weight: 800;
+            color: var(--ink);
+            letter-spacing: -0.5px;
+            line-height: 1.2;
+            margin-bottom: 8px;
+        }
+
+        .form-subtitle {
+            font-size: 13.5px;
+            color: var(--gray-light);
+            font-weight: 300;
+            margin-bottom: 32px;
+        }
+
+        /* ── Social buttons ── */
+        .social-btn {
+            width: 100%;
+            height: 50px;
+            border-radius: 10px;
+            border: 1.5px solid var(--gray-border);
+            background: var(--white);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 14.5px;
+            font-weight: 600;
+            color: var(--ink);
+            cursor: pointer;
+            transition: border-color .2s, box-shadow .2s, transform .15s;
+            text-decoration: none;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .social-btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: var(--teal);
+            opacity: 0;
+            transition: opacity .2s;
+        }
+
+        .social-btn:hover {
+            border-color: var(--teal);
+            box-shadow: 0 2px 14px rgba(14, 124, 107, 0.12);
+            transform: translateY(-1px);
+        }
+
+        .social-btn span {
+            position: relative;
+            z-index: 1;
+        }
+
+        .social-btn svg {
+            flex-shrink: 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .social-btn+.social-btn {
+            margin-top: 12px;
+        }
+
+        /* Google icon */
+        .google-icon {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Email icon */
+        .email-icon {
+            width: 20px;
+            height: 20px;
+            color: var(--teal);
+        }
+
+        /* ── Divider ── */
+        .divider {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin: 24px 0;
+            color: var(--gray-light);
+            font-size: 12px;
+            font-weight: 400;
+        }
+
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--gray-border);
+        }
+
+        /* ── Input group ── */
+        .input-group {
+            margin-bottom: 14px;
+        }
+
+        .input-label {
+            display: block;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--gray);
+            margin-bottom: 7px;
+            letter-spacing: .2px;
+        }
+
+        .input-wrap {
+            position: relative;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 18px;
+            height: 18px;
+            color: var(--gray-light);
+            pointer-events: none;
+            transition: color .2s;
+        }
+
+        .input-field {
+            width: 100%;
+            height: 50px;
+            border: 1.5px solid var(--gray-border);
+            border-radius: 10px;
+            background: var(--white);
+            padding: 0 48px 0 44px;
+            font-family: 'Lexend', sans-serif;
+            font-size: 13.5px;
+            font-weight: 400;
+            color: var(--ink);
+            transition: border-color .2s, box-shadow .2s;
+            outline: none;
+        }
+
+        .input-field::placeholder {
+            color: var(--gray-light);
+        }
+
+        .input-field:focus {
+            border-color: var(--teal);
+            box-shadow: 0 0 0 3px rgba(14, 124, 107, 0.1);
+        }
+
+        .input-field:focus~.input-icon,
+        .input-wrap:focus-within .input-icon {
+            color: var(--teal);
+        }
+
+        .input-field.error {
+            border-color: var(--red);
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+        }
+
+        .input-field.success {
+            border-color: var(--green);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        /* paste button */
+        .paste-btn {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--teal);
+            background: var(--teal-light);
+            border: none;
+            border-radius: 6px;
+            padding: 4px 10px;
+            cursor: pointer;
+            transition: background .2s;
+            font-family: 'Lexend', sans-serif;
+        }
+
+        .paste-btn:hover {
+            background: rgba(14, 124, 107, 0.2);
+        }
+
+        /* valid indicator */
+        .valid-icon {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 18px;
+            height: 18px;
+            color: var(--green);
+            display: none;
+        }
+
+        .valid-icon.show {
+            display: block;
+        }
+
+        /* ── Remember me ── */
+        .remember-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .custom-checkbox {
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid var(--gray-border);
+            border-radius: 5px;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: all .2s;
+            position: relative;
+        }
+
+        .custom-checkbox.checked {
+            background: var(--teal);
+            border-color: var(--teal);
+        }
+
+        .custom-checkbox.checked::after {
+            content: '';
+            width: 10px;
+            height: 6px;
+            border-left: 2px solid white;
+            border-bottom: 2px solid white;
+            transform: rotate(-45deg) translateY(-1px);
+            display: block;
+        }
+
+        .remember-label {
+            font-size: 13px;
+            color: var(--gray);
+            cursor: pointer;
+        }
+
+        /* ── Submit button ── */
+        .submit-btn {
+            width: 100%;
+            height: 50px;
+            border-radius: 10px;
+            background: var(--teal);
+            color: white;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 15px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: background .2s, transform .15s, box-shadow .2s;
+            box-shadow: var(--shadow-teal);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .submit-btn:hover:not(:disabled) {
+            background: var(--teal-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(14, 124, 107, 0.35);
+        }
+
+        .submit-btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .submit-btn:disabled {
+            opacity: .65;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .submit-btn .btn-spinner {
+            width: 18px;
+            height: 18px;
+            border: 2.5px solid rgba(255, 255, 255, 0.4);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin .7s linear infinite;
+            display: none;
+        }
+
+        .submit-btn.loading .btn-text {
+            display: none;
+        }
+
+        .submit-btn.loading .btn-spinner {
+            display: block;
+        }
+
+        /* ── Info box ── */
+        .info-box {
+            background: var(--teal-light);
+            border-left: 3px solid var(--teal);
+            border-radius: 10px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+            overflow: hidden;
+            transition: max-height .3s ease;
+        }
+
+        .info-box-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+
+        .info-box-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--teal);
+        }
+
+        .info-box-chevron {
+            width: 16px;
+            height: 16px;
+            color: var(--teal);
+            transition: transform .3s;
+            flex-shrink: 0;
+        }
+
+        .info-box.collapsed .info-box-chevron {
+            transform: rotate(-90deg);
+        }
+
+        .info-box-content {
+            font-size: 12.5px;
+            color: var(--gray);
+            line-height: 1.65;
+            margin-top: 10px;
+            font-weight: 300;
+        }
+
+        .info-box.collapsed .info-box-content {
+            display: none;
+        }
+
+        /* ── Error / Success alerts ── */
+        .alert {
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 400;
+            line-height: 1.5;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            margin-bottom: 16px;
+            animation: shake .35s ease;
+        }
+
+        .alert-error {
+            background: var(--red-light);
+            border-left: 3px solid var(--red);
+            color: #DC2626;
+        }
+
+        .alert-success {
+            background: #D1FAE5;
+            border-left: 3px solid var(--green);
+            color: #065F46;
+        }
+
+        .alert svg {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            margin-top: 1px;
+            fill: currentColor;
+        }
+
+        .alert strong {
+            font-weight: 600;
+            display: block;
+        }
+
+        .alert-hidden {
+            display: none;
+        }
+
+        /* ── Form footer ── */
+        .form-footer {
+            text-align: center;
+            font-size: 12px;
+            color: var(--gray-light);
+            font-weight: 300;
+            line-height: 1.7;
+            padding-top: 16px;
+            border-top: 1px solid var(--gray-border);
+        }
+
+        .form-footer a {
+            color: var(--teal);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .form-footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Progress bar (top) ── */
+        .progress-bar-top {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            z-index: 999;
+            background: linear-gradient(90deg, var(--teal), var(--teal-mid));
+            transform-origin: left;
+            transform: scaleX(0);
+            transition: transform .3s ease;
+        }
+
+        .progress-bar-top.loading {
+            animation: progressLoad 1.8s ease forwards;
+        }
+
+        /* ── Success overlay ── */
+        .success-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(248, 250, 251, 0.92);
+            backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .3s;
+        }
+
+        .success-overlay.show {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .success-circle {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: #D1FAE5;
+            border: 2px solid var(--green);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            transform: scale(0);
+            transition: transform .4s cubic-bezier(.34, 1.56, .64, 1);
+        }
+
+        .success-overlay.show .success-circle {
+            transform: scale(1);
+        }
+
+        .success-circle svg {
+            width: 32px;
+            height: 32px;
+            stroke: var(--green);
+            fill: none;
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .success-title {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--ink);
+            margin-bottom: 8px;
+        }
+
+        .success-sub {
+            font-size: 13.5px;
+            color: var(--gray-light);
+        }
+
+        /* ── Mobile logo (hidden on desktop) ── */
+        .mobile-logo {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px;
+            text-decoration: none;
+        }
+
+        .mobile-logo-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--teal);
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .mobile-logo-icon svg {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
+
+        .mobile-logo-text {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            font-weight: 800;
+            font-size: 17px;
+            color: var(--ink);
+        }
+
+        /* ════════════════════════════
+     ANIMATIONS
+  ════════════════════════════ */
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(16px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeDown {
+            from {
+                opacity: 0;
+                transform: translateY(-12px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @keyframes shake {
+
+            0%,
+            100% {
+                transform: translateX(0)
+            }
+
+            20%,
+            60% {
+                transform: translateX(-5px)
+            }
+
+            40%,
+            80% {
+                transform: translateX(5px)
+            }
+        }
+
+        @keyframes progressLoad {
+            0% {
+                transform: scaleX(0)
+            }
+
+            40% {
+                transform: scaleX(.6)
+            }
+
+            70% {
+                transform: scaleX(.85)
+            }
+
+            100% {
+                transform: scaleX(1)
+            }
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+                transform: scale(1)
+            }
+
+            50% {
+                opacity: .6;
+                transform: scale(.88)
+            }
+        }
+
+        /* ════════════════════════════
+     RESPONSIVE
+  ════════════════════════════ */
+        @media (max-width: 900px) {
+            .login-wrapper {
+                grid-template-columns: 1fr;
+            }
+
+            .left-panel {
+                display: none;
+            }
+
+            .right-panel {
+                overflow-y: auto;
+            }
+
+            .mobile-logo {
+                display: flex;
+            }
+
+            .right-topbar {
+                padding: 12px 24px;
+            }
+
+            .form-container {
+                padding: 16px 28px 40px;
+                max-width: 420px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .form-container {
+                padding: 12px 20px 32px;
+            }
+
+            .right-topbar {
+                padding: 10px 16px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Top progress bar -->
+    <div class="progress-bar-top" id="progressBar"></div>
+
+    <!-- Success overlay -->
+    <div class="success-overlay" id="successOverlay">
+        <div class="success-circle">
+            <svg viewBox="0 0 24 24">
+                <polyline points="20 6 9 17 4 12" />
+            </svg>
+        </div>
+        <div class="success-title">Đăng nhập thành công!</div>
+        <div class="success-sub">Đang tải dashboard của bạn...</div>
+    </div>
+
+    <div class="login-wrapper">
+
+        <!-- ══════════════ LEFT PANEL ══════════════ -->
+        <div class="left-panel">
+            <div class="glow-bl"></div>
+
+            <!-- Logo -->
+            <a href="dcp-home.html" class="left-logo">
+                <div class="left-logo-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
+                    </svg>
+                </div>
+                <div>
+                    <span class="left-logo-text">DCP</span>
+                    <span class="left-logo-sub">Decentralized Charity Platform</span>
+                </div>
+            </a>
+
+            <!-- Quote -->
+            <div class="left-quote">
+                <div class="quote-icon">⛓</div>
+                <div class="quote-text">
+                    Mỗi đồng quyên góp đều để lại <em>dấu vết</em> trên Blockchain.
+                </div>
+                <div class="quote-sub">— Không thể xóa. Không thể giả mạo. Mãi minh bạch.</div>
+            </div>
+
+            <!-- Trust cards -->
+            <div class="trust-cards">
+                <div class="trust-card">
+                    <div class="trust-card-icon">⛓</div>
+                    <div class="trust-card-body">
+                        <div class="trust-card-num">98,341 giao dịch</div>
+                        <div class="trust-card-label">đã ghi nhận trên Blockchain</div>
+                    </div>
+                </div>
+                <div class="trust-card">
+                    <div class="trust-card-icon">🔒</div>
+                    <div class="trust-card-body">
+                        <div class="trust-card-num">Smart Contract bảo vệ</div>
+                        <div class="trust-card-label">100% giải ngân qua đa chữ ký</div>
+                    </div>
+                </div>
+                <div class="trust-card">
+                    <div class="trust-card-icon">👥</div>
+                    <div class="trust-card-body">
+                        <div class="trust-card-num">15,842 nhà hảo tâm</div>
+                        <div class="trust-card-label">đang tin dùng DCP</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Left footer -->
+            <div class="left-footer">
+                <svg viewBox="0 0 24 24">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                </svg>
+                Được bảo mật bởi ERC-4337 Account Abstraction
+            </div>
+        </div>
+
+        <!-- ══════════════ RIGHT PANEL ══════════════ -->
+        <div class="right-panel">
+
+            <!-- Mobile logo -->
+            <a href="dcp-home.html" class="mobile-logo">
+                <div class="mobile-logo-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
+                    </svg>
+                </div>
+                <span class="mobile-logo-text">DCP</span>
+            </a>
+
+            <!-- Top bar -->
+            <div class="right-topbar">
+                <a href="dcp-home.html" class="back-link">
+                    <svg viewBox="0 0 24 24" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                    Về trang chủ
+                </a>
+                <div class="topbar-register">
+                    Chưa có tài khoản?&nbsp;<a href="dcp-register.html">Đăng ký →</a>
+                </div>
+            </div>
+
+            <!-- Form -->
+            <div class="form-container">
+
+                <div class="form-greeting">Chào mừng trở lại 👋</div>
+                <h1 class="form-title">Đăng nhập vào DCP</h1>
+                <p class="form-subtitle">Tiếp tục hành trình từ thiện minh bạch của bạn</p>
+
+                <!-- Alert (hidden by default) -->
+                <div class="alert alert-error alert-hidden" id="alertBox">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13"
+                            style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round" />
+                        <line x1="12" y1="17" x2="12.01" y2="17"
+                            style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round" />
+                    </svg>
+                    <div id="alertText"><strong>Lỗi xác thực</strong>Vui lòng kiểm tra lại thông tin.</div>
+                </div>
+
+                <!-- Google login -->
+                <button class="social-btn" id="btnGoogle" onclick="handleSocialLogin('google')">
+                    <svg class="google-icon" viewBox="0 0 24 24">
+                        <path fill="#4285F4"
+                            d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                        <path fill="#34A853"
+                            d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                        <path fill="#FBBC05"
+                            d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
+                        <path fill="#EA4335"
+                            d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                    </svg>
+                    <span>Tiếp tục với Google</span>
+                </button>
+
+                <button class="social-btn" onclick="handleSocialLogin('email')">
+                    <svg class="email-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                        <polyline points="22,6 12,13 2,6" />
+                    </svg>
+                    <span>Tiếp tục với Email</span>
+                </button>
+
+                <!-- Divider -->
+                <div class="divider">hoặc đăng nhập bằng ví</div>
+
+                <!-- Wallet input -->
+                <div class="input-group">
+                    <label class="input-label" for="walletInput">Địa chỉ ví</label>
+                    <div class="input-wrap">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12V7H5a2 2 0 010-4h14v4" />
+                            <path d="M3 5v14a2 2 0 002 2h16v-5" />
+                            <path d="M18 12a2 2 0 000 4h4v-4h-4z" />
+                        </svg>
+                        <input type="text" class="input-field" id="walletInput" placeholder="0x1a2b3c4d5e6f..."
+                            autocomplete="off" spellcheck="false" />
+                        <button class="paste-btn" id="pasteBtn" onclick="handlePaste()">Dán</button>
+                        <svg class="valid-icon" id="validIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Remember me -->
+                <div class="remember-row">
+                    <div class="custom-checkbox checked" id="rememberCheckbox" onclick="toggleCheckbox()"></div>
+                    <span class="remember-label" onclick="toggleCheckbox()">Ghi nhớ đăng nhập trong 30 ngày</span>
+                </div>
+
+                <!-- Submit -->
+                <button class="submit-btn" id="submitBtn" onclick="handleWalletLogin()">
+                    <div class="btn-spinner"></div>
+                    <span class="btn-text">Đăng nhập với Ví</span>
+                </button>
+
+                <!-- Info box -->
+                <div class="info-box" id="infoBox">
+                    <div class="info-box-header" onclick="toggleInfoBox()">
+                        <div class="info-box-title">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10" />
+                                <line x1="12" y1="16" x2="12" y2="12" />
+                                <line x1="12" y1="8" x2="12.01" y2="8" />
+                            </svg>
+                            Tại sao không cần seed phrase?
+                        </div>
+                        <svg class="info-box-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                    </div>
+                    <div class="info-box-content">
+                        DCP sử dụng công nghệ <strong style="color:var(--teal)">Account Abstraction (ERC-4337)</strong>
+                        — ví của bạn được tạo tự động từ tài khoản Google hoặc Email. An toàn như ngân hàng, không cần
+                        ghi nhớ hay lưu trữ khóa bí mật. Mọi giao dịch vẫn được ghi nhận đầy đủ trên Blockchain.
+                    </div>
+                </div>
+
+                <!-- Form footer -->
+                <div class="form-footer">
+                    Bằng cách đăng nhập, bạn đồng ý với
+                    <a href="#">Điều khoản sử dụng</a> và <a href="#">Chính sách bảo mật</a> của DCP.
+                </div>
+
+            </div>
+        </div><!-- end right-panel -->
+    </div><!-- end login-wrapper -->
+
+    <script>
+        /* ── Checkbox toggle ── */
+        function toggleCheckbox() {
+            const cb = document.getElementById('rememberCheckbox');
+            cb.classList.toggle('checked');
+        }
+
+        /* ── Info box toggle ── */
+        function toggleInfoBox() {
+            document.getElementById('infoBox').classList.toggle('collapsed');
+        }
+
+        /* ── Wallet input validation ── */
+        const walletInput = document.getElementById('walletInput');
+        const validIcon = document.getElementById('validIcon');
+        const pasteBtn = document.getElementById('pasteBtn');
+
+        function isValidAddress(val) {
+            return /^0x[0-9a-fA-F]{40}$/.test(val.trim());
+        }
+
+        walletInput.addEventListener('input', function () {
+            const val = this.value.trim();
+            if (!val) {
+                this.classList.remove('success', 'error');
+                validIcon.classList.remove('show');
+                pasteBtn.style.display = '';
+                return;
+            }
+            if (isValidAddress(val)) {
+                this.classList.add('success');
+                this.classList.remove('error');
+                validIcon.classList.add('show');
+                pasteBtn.style.display = 'none';
+            } else {
+                this.classList.remove('success');
+                // only show red if user has typed enough chars
+                if (val.length > 5) {
+                    this.classList.add('error');
+                    validIcon.classList.remove('show');
+                }
+            }
+        });
+
+        /* ── Paste button ── */
+        async function handlePaste() {
+            try {
+                const text = await navigator.clipboard.readText();
+                walletInput.value = text;
+                walletInput.dispatchEvent(new Event('input'));
+            } catch (e) {
+                // fallback: focus the field so user can paste manually
+                walletInput.focus();
+            }
+        }
+
+        /* ── Show alert ── */
+        function showAlert(type, title, message) {
+            const box = document.getElementById('alertBox');
+            const text = document.getElementById('alertText');
+            box.className = `alert alert-${type}`;
+            text.innerHTML = `<strong>${title}</strong>${message}`;
+            box.style.display = 'flex';
+        }
+        function hideAlert() {
+            document.getElementById('alertBox').classList.add('alert-hidden');
+        }
+
+        /* ── Social login ── */
+        function handleSocialLogin(provider) {
+            hideAlert();
+            const bar = document.getElementById('progressBar');
+            bar.classList.add('loading');
+
+            // Simulate OAuth redirect
+            setTimeout(() => {
+                bar.classList.remove('loading');
+                bar.style.transform = 'scaleX(1)';
+                showSuccess();
+            }, 1800);
+        }
+
+        /* ── Wallet login ── */
+        function handleWalletLogin() {
+            hideAlert();
+            const val = walletInput.value.trim();
+
+            if (!val) {
+                showAlert('error', 'Thiếu thông tin', ' — Vui lòng nhập địa chỉ ví của bạn.');
+                walletInput.focus();
+                return;
+            }
+            if (!isValidAddress(val)) {
+                showAlert('error', 'Địa chỉ ví không hợp lệ', ' — Địa chỉ phải bắt đầu bằng 0x và có 42 ký tự.');
+                walletInput.classList.add('error');
+                walletInput.focus();
+                return;
+            }
+
+            // Loading state
+            const btn = document.getElementById('submitBtn');
+            btn.classList.add('loading');
+            btn.disabled = true;
+
+            const bar = document.getElementById('progressBar');
+            bar.classList.add('loading');
+
+            setTimeout(() => {
+                btn.classList.remove('loading');
+                btn.disabled = false;
+                bar.classList.remove('loading');
+                bar.style.transform = 'scaleX(1)';
+                showSuccess();
+            }, 2000);
+        }
+
+        /* ── Success overlay ── */
+        function showSuccess() {
+            const overlay = document.getElementById('successOverlay');
+            overlay.classList.add('show');
+            // Auto-redirect simulation
+            setTimeout(() => {
+                overlay.querySelector('.success-sub').textContent = 'Chuyển hướng trong giây lát...';
+            }, 1200);
+        }
+
+        /* ── Keyboard shortcut: Enter ── */
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const active = document.activeElement;
+                if (active === walletInput || active === document.getElementById('submitBtn')) {
+                    handleWalletLogin();
+                }
+            }
+        });
+
+        /* ── Autofocus Google button on load ── */
+        window.addEventListener('load', () => {
+            // small delay to let animation settle
+            setTimeout(() => {
+                document.getElementById('btnGoogle').focus();
+            }, 600);
+        });
+    </script>
+</body>
+
+</html>
