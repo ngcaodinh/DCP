@@ -2,13 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-type AlertState = {
-  isVisible: boolean;
-  type: 'error' | 'success';
-  title: string;
-  message: string;
-};
-
 const honeycombOverlayDataUri =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='52'%3E%3Cpolygon points='30,2 58,16 58,44 30,58 2,44 2,16' fill='none' stroke='rgba(255,255,255,0.07)' stroke-width='1.5'/%3E%3C/svg%3E";
 
@@ -39,27 +32,9 @@ const HoneycombOverlay = () => (
  */
 export default function LoginPage() {
   const googleButtonRef = useRef<HTMLButtonElement | null>(null);
-  const [walletValue, setWalletValue] = useState('');
-  const [isRememberChecked, setIsRememberChecked] = useState(true);
   const [isInfoCollapsed, setIsInfoCollapsed] = useState(false);
-  const [isPasteVisible, setIsPasteVisible] = useState(true);
-  const [isValidVisible, setIsValidVisible] = useState(false);
-  const [isSubmitLoading, setIsSubmitLoading] = useState(false);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [isSuccessVisible, setIsSuccessVisible] = useState(false);
-  const [alertState, setAlertState] = useState<AlertState>({
-    isVisible: false,
-    type: 'error',
-    title: '',
-    message: '',
-  });
-
-  const walletValueTrimmed = walletValue.trim();
-
-  /**
-   * Hàm kiểm tra địa chỉ ví theo định dạng chuẩn.
-   */
-  const isValidWalletAddress = (value: string) => /^0x[0-9a-fA-F]{40}$/.test(value.trim());
 
   /**
    * Hàm tạo dữ liệu thống kê minh bạch cho khối nội dung bên trái.
@@ -71,58 +46,12 @@ export default function LoginPage() {
   ];
 
   /**
-   * Hàm cập nhật trạng thái hiển thị theo input ví.
-   */
-  useEffect(() => {
-    if (!walletValueTrimmed) {
-      setIsPasteVisible(true);
-      setIsValidVisible(false);
-      return;
-    }
-
-    if (isValidWalletAddress(walletValueTrimmed)) {
-      setIsPasteVisible(false);
-      setIsValidVisible(true);
-      return;
-    }
-
-    setIsPasteVisible(true);
-    setIsValidVisible(false);
-  }, [walletValueTrimmed]);
-
-  /**
-   * Hàm kiểm soát phím Enter để submit nhanh.
-   */
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter') {
-        return;
-      }
-
-      const activeElement = document.activeElement;
-      if (activeElement && activeElement.id === 'walletInput') {
-        handleWalletLogin();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  });
-
-  /**
    * Hàm focus nút Google để đồng bộ cảm giác theo mẫu.
    */
   useEffect(() => {
     const timer = window.setTimeout(() => googleButtonRef.current?.focus(), 600);
     return () => window.clearTimeout(timer);
   }, []);
-
-  /**
-   * Hàm đổi trạng thái checkbox ghi nhớ đăng nhập.
-   */
-  const handleToggleRemember = () => {
-    setIsRememberChecked(previousValue => !previousValue);
-  };
 
   /**
    * Hàm đổi trạng thái hộp thông tin.
@@ -140,66 +69,13 @@ export default function LoginPage() {
   };
 
   /**
-   * Hàm hiển thị thông báo lỗi hoặc thành công.
-   */
-  const showAlert = (type: AlertState['type'], title: string, message: string) => {
-    setAlertState({ isVisible: true, type, title, message });
-  };
-
-  /**
-   * Hàm ẩn thông báo hiện tại.
-   */
-  const hideAlert = () => {
-    setAlertState(previousValue => ({ ...previousValue, isVisible: false }));
-  };
-
-  /**
    * Hàm xử lý đăng nhập bằng mạng xã hội.
    */
   const handleSocialLogin = () => {
-    hideAlert();
     triggerProgressBar();
     window.setTimeout(() => {
       setIsSuccessVisible(true);
     }, 1800);
-  };
-
-  /**
-   * Hàm dán địa chỉ ví từ clipboard nếu có quyền.
-   */
-  const handlePasteWallet = async () => {
-    try {
-      const clipboardText = await navigator.clipboard.readText();
-      setWalletValue(clipboardText);
-    } catch {
-      const walletInput = document.getElementById('walletInput');
-      walletInput?.focus();
-    }
-  };
-
-  /**
-   * Hàm xử lý đăng nhập bằng ví với kiểm tra dữ liệu.
-   */
-  const handleWalletLogin = () => {
-    hideAlert();
-
-    if (!walletValueTrimmed) {
-      showAlert('error', 'Thiếu thông tin', ' — Vui lòng nhập địa chỉ ví của bạn.');
-      return;
-    }
-
-    if (!isValidWalletAddress(walletValueTrimmed)) {
-      showAlert('error', 'Địa chỉ ví không hợp lệ', ' — Địa chỉ phải bắt đầu bằng 0x và có 42 ký tự.');
-      return;
-    }
-
-    setIsSubmitLoading(true);
-    triggerProgressBar();
-
-    window.setTimeout(() => {
-      setIsSubmitLoading(false);
-      setIsSuccessVisible(true);
-    }, 2000);
   };
 
   return (
@@ -301,26 +177,7 @@ export default function LoginPage() {
           <h1 className="text-[28px] font-extrabold text-[#0d1117]">Đăng nhập vào DCP</h1>
           <p className="mt-2 text-sm text-[#9ca3af]">Tiếp tục hành trình từ thiện minh bạch của bạn</p>
 
-          {alertState.isVisible && (
-            <div
-              className={`mt-6 flex items-start gap-3 rounded-xl px-4 py-3 text-sm ${alertState.type === 'error'
-                ? 'border-l-[3px] border-[#ef4444] bg-[#fef2f2] text-[#dc2626]'
-                : 'border-l-[3px] border-[#10b981] bg-[#d1fae5] text-[#065f46]'
-                }`}
-            >
-              <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 fill-current">
-                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                <line x1="12" y1="9" x2="12" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                <line x1="12" y1="17" x2="12.01" y2="17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <div>
-                <strong className="block font-semibold">{alertState.title}</strong>
-                {alertState.message}
-              </div>
-            </div>
-          )}
-
-          <div className="mt-6 space-y-3">
+          <div className="mt-6">
             <button
               ref={googleButtonRef}
               className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[#e5e7eb] bg-white text-sm font-semibold text-[#0d1117] transition hover:-translate-y-0.5 hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]"
@@ -347,126 +204,7 @@ export default function LoginPage() {
               </svg>
               <span>Tiếp tục với Google</span>
             </button>
-
-            <button
-              className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[#e5e7eb] bg-white text-sm font-semibold text-[#0d1117] transition hover:-translate-y-0.5 hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]"
-              type="button"
-              onClick={handleSocialLogin}
-            >
-              <svg
-                className="h-5 w-5 text-[#0e7c6b]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                <polyline points="22,6 12,13 2,6" />
-              </svg>
-              <span>Tiếp tục với Email</span>
-            </button>
           </div>
-
-          <div className="my-6 flex items-center gap-3 text-xs text-[#9ca3af]">
-            <span className="h-px flex-1 bg-[#e5e7eb]" />
-            hoặc đăng nhập bằng ví
-            <span className="h-px flex-1 bg-[#e5e7eb]" />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-[#4b5563]" htmlFor="walletInput">
-              Địa chỉ ví
-            </label>
-            <div className="relative">
-              <svg
-                className="absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#9ca3af]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M21 12V7H5a2 2 0 010-4h14v4" />
-                <path d="M3 5v14a2 2 0 002 2h16v-5" />
-                <path d="M18 12a2 2 0 000 4h4v-4h-4z" />
-              </svg>
-              <input
-                id="walletInput"
-                type="text"
-                className={`h-12 w-full rounded-xl border bg-white pl-11 pr-16 text-sm text-[#0d1117] outline-none transition ${walletValueTrimmed && !isValidWalletAddress(walletValueTrimmed)
-                  ? 'border-[#ef4444] ring-2 ring-[#ef4444]/10'
-                  : isValidWalletAddress(walletValueTrimmed)
-                    ? 'border-[#10b981] ring-2 ring-[#10b981]/10'
-                    : 'border-[#e5e7eb] focus:border-[#0e7c6b] focus:ring-2 focus:ring-[#0e7c6b]/10'
-                  }`}
-                placeholder="0x1a2b3c4d5e6f..."
-                autoComplete="off"
-                spellCheck={false}
-                value={walletValue}
-                onChange={event => setWalletValue(event.target.value)}
-              />
-              {isPasteVisible && (
-                <button
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md bg-[#e6f7f4] px-2.5 py-1 text-xs font-semibold text-[#0e7c6b] transition hover:bg-[#0e7c6b]/20"
-                  type="button"
-                  onClick={handlePasteWallet}
-                >
-                  Dán
-                </button>
-              )}
-              <svg
-                className={`absolute right-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-[#10b981] ${isValidVisible ? 'opacity-100' : 'opacity-0'
-                  } transition-opacity`}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-center gap-3 text-sm text-[#4b5563]">
-            <button
-              type="button"
-              aria-checked={isRememberChecked}
-              role="checkbox"
-              onClick={handleToggleRemember}
-              className={`flex h-5 w-5 items-center justify-center rounded-[6px] border transition ${isRememberChecked
-                ? 'border-[#0e7c6b] bg-[#0e7c6b] shadow-[0_0_0_3px_rgba(14,124,107,0.18)]'
-                : 'border-[#e5e7eb] bg-white shadow-[0_0_0_3px_rgba(229,231,235,0.6)]'
-                }`}
-            >
-              {isRememberChecked && (
-                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              )}
-            </button>
-            <button type="button" onClick={handleToggleRemember} className="text-left">
-              Ghi nhớ đăng nhập trong 30 ngày
-            </button>
-          </div>
-
-          <button
-            className={`mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#0e7c6b] text-sm font-bold text-white shadow-[0_4px_16px_rgba(14,124,107,0.25)] transition hover:-translate-y-0.5 hover:bg-[#0a5c50] ${isSubmitLoading ? 'cursor-not-allowed opacity-70' : ''
-              }`}
-            type="button"
-            onClick={handleWalletLogin}
-            disabled={isSubmitLoading}
-          >
-            {isSubmitLoading ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            ) : (
-              <span>Đăng nhập với Ví</span>
-            )}
-          </button>
 
           <div className="mt-6 rounded-xl border-l-[3px] border-[#0e7c6b] bg-[#e6f7f4] px-4 py-3 text-sm text-[#4b5563]">
             <button
@@ -496,8 +234,8 @@ export default function LoginPage() {
             </button>
             {!isInfoCollapsed && (
               <p className="mt-3 text-xs leading-relaxed text-[#4b5563]">
-                DCP sử dụng công nghệ <strong className="font-semibold text-[#0e7c6b]">Account Abstraction (ERC-4337)</strong> — ví
-                của bạn được tạo tự động từ tài khoản Google hoặc Email. An toàn như ngân hàng, không cần ghi nhớ hay lưu trữ khóa bí mật.
+                DCP sử dụng công nghệ <strong className="font-semibold text-[#0e7c6b]">Account Abstraction (ERC-4337)</strong> — tài khoản
+                của bạn được tạo tự động từ Google. An toàn như ngân hàng, không cần ghi nhớ hay lưu trữ khóa bí mật.
                 Mọi giao dịch vẫn được ghi nhận đầy đủ trên Blockchain.
               </p>
             )}
