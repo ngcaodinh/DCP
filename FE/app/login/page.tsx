@@ -1,6 +1,43 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { persistAuthSession } from '../utils/authSession';
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: {
+            client_id: string;
+            callback: (response: { credential?: string }) => void;
+            use_fedcm_for_prompt?: boolean;
+          }) => void;
+          prompt: (notificationHandler?: (notification: {
+            isNotDisplayed?: () => boolean;
+            isSkippedMoment?: () => boolean;
+            isDismissedMoment?: () => boolean;
+            getNotDisplayedReason?: () => string;
+            getSkippedReason?: () => string;
+            getDismissedReason?: () => string;
+          }) => void) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: {
+              type?: 'standard' | 'icon';
+              theme?: 'outline' | 'filled_blue' | 'filled_black';
+              size?: 'large' | 'medium' | 'small';
+              text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin';
+              shape?: 'rectangular' | 'pill' | 'circle' | 'square';
+              width?: string;
+            }
+          ) => void;
+        };
+      };
+    };
+  }
+}
+
 
 const honeycombOverlayDataUri =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='52'%3E%3Cpolygon points='30,2 58,16 58,44 30,58 2,44 2,16' fill='none' stroke='rgba(255,255,255,0.07)' stroke-width='1.5'/%3E%3C/svg%3E";
@@ -31,10 +68,68 @@ const HoneycombOverlay = () => (
  * Mục đích: hiển thị giao diện đăng nhập theo mẫu DCP.
  */
 export default function LoginPage() {
-  const googleButtonRef = useRef<HTMLButtonElement | null>(null);
   const [isInfoCollapsed, setIsInfoCollapsed] = useState(false);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [isSuccessVisible, setIsSuccessVisible] = useState(false);
+  const [authErrorMessage, setAuthErrorMessage] = useState('');
+  const [walletAddress, setWalletAddress] = useState('');
+  const [userFullName, setUserFullName] = useState('');
+  const [correlationId, setCorrelationId] = useState('');
+
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+  /**
+   * Hàm lấy đối tượng Google Accounts ID từ GSI script.
+   * Mục đích: gom logic truy cập window.google để tái sử dụng và dễ debug.
+   */
+  const getGoogleAccountsId = useCallback(() => window.google?.accounts?.id, []);
+
+  const googleRedirectButtonContainerId = 'googleRedirectButtonContainer';
+
+  /**
+   * Hàm hiển thị nút Google redirect/popup do GSI cung cấp.
+   * Mục đích: tạo đường đăng nhập chủ động khi One Tap/FedCM không hoạt động ổn định.
+   */
+  const renderGoogleRedirectButton = useCallback(() => {
+    const googleAccounts = getGoogleAccountsId();
+    if (!googleAccounts) {
+      return;
+    }
+
+    const containerElement = document.getElementById(googleRedirectButtonContainerId);
+    if (!containerElement) {
+      return;
+    }
+
+    // Ghi chú logic phức tạp: luôn xóa nội dung cũ trước khi render lại để tránh nhân bản nút Google.
+    containerElement.innerHTML = '';
+    googleAccounts.renderButton(containerElement, {
+      type: 'standard',
+      theme: 'outline',
+      size: 'large',
+      text: 'continue_with',
+      shape: 'rectangular',
+      width: '320'
+    });
+  }, [getGoogleAccountsId]);
+
+
+  /**
+   * Hàm chuẩn hóa Google Client ID từ biến môi trường.
+   * Mục đích: loại bỏ khoảng trắng thừa gây lỗi thiếu client_id khi khởi tạo GSI.
+   */
+  const normalizeGoogleClientId = (rawGoogleClientId: string) => rawGoogleClientId.trim();
+
+  /**
+   * Hàm kiểm tra định dạng Google Client ID.
+   * Mục đích: đảm bảo FE chỉ khởi tạo GSI khi client ID hợp lệ.
+   */
+  const isGoogleClientIdValid = (googleClientIdValue: string) =>
+    googleClientIdValue.length > 0 && googleClientIdValue.includes('.apps.googleusercontent.com');
+
+  const googleClientId = normalizeGoogleClientId(
+    process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ''
+  );
 
   /**
    * Hàm tạo dữ liệu thống kê minh bạch cho khối nội dung bên trái.
@@ -44,14 +139,6 @@ export default function LoginPage() {
     { icon: '🔒', title: 'Smart Contract bảo vệ', label: '100% giải ngân qua đa chữ ký' },
     { icon: '👥', title: '15,842 nhà hảo tâm', label: 'đang tin dùng DCP' },
   ];
-
-  /**
-   * Hàm focus nút Google để đồng bộ cảm giác theo mẫu.
-   */
-  useEffect(() => {
-    const timer = window.setTimeout(() => googleButtonRef.current?.focus(), 600);
-    return () => window.clearTimeout(timer);
-  }, []);
 
   /**
    * Hàm đổi trạng thái hộp thông tin.
@@ -69,14 +156,124 @@ export default function LoginPage() {
   };
 
   /**
-   * Hàm xử lý đăng nhập bằng mạng xã hội.
+   * Hàm gọi backend để xác thực Google ID token và tạo ví blockchain.
    */
-  const handleSocialLogin = () => {
-    triggerProgressBar();
-    window.setTimeout(() => {
-      setIsSuccessVisible(true);
-    }, 1800);
-  };
+  const requestGoogleLogin = useCallback(
+    async (idToken: string) => {
+      setAuthErrorMessage('');
+      triggerProgressBar();
+
+      try {
+        const response = await fetch(`${backendBaseUrl}/auth/google-login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ idToken }),
+        });
+        const responseData = await response.json();
+
+        // Ghi chú logic phức tạp: luôn kiểm tra trạng thái HTTP trước khi dùng dữ liệu trả về
+        if (!response.ok) {
+          throw new Error(responseData?.message || 'Đăng nhập thất bại, vui lòng thử lại.');
+        }
+
+        const accessToken = responseData?.accessToken as string | undefined;
+        const refreshToken = responseData?.refreshToken as string | undefined;
+        const csrfToken = responseData?.csrfToken as string | undefined;
+        const refreshSessionId = responseData?.refreshSessionId as string | undefined;
+        const refreshTokenExpiresAt = responseData?.expiresAt as string | undefined;
+        const userData = responseData?.user as { fullName?: string; walletAddress?: string } | undefined;
+        const correlationIdValue = responseData?.correlationId as string | undefined;
+
+        persistAuthSession({
+          accessToken,
+          refreshToken,
+          csrfToken,
+          refreshSessionId,
+          refreshTokenExpiresAt
+        });
+
+        setUserFullName(userData?.fullName || '');
+        setWalletAddress(userData?.walletAddress || '');
+        setCorrelationId(correlationIdValue || '');
+        setIsSuccessVisible(true);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';
+        setAuthErrorMessage(errorMessage);
+      } finally {
+        // Ghi chú logic phức tạp: giữ khối finally để đảm bảo luồng xử lý luôn khép kín sau request.
+      }
+    },
+    [backendBaseUrl]
+  );
+
+  /**
+   * Hàm xử lý phản hồi credential từ Google.
+   */
+  const handleGoogleCredential = useCallback(
+    (response: { credential?: string }) => {
+      if (!response.credential) {
+        setAuthErrorMessage('Không nhận được thông tin đăng nhập từ Google.');
+        return;
+      }
+
+      requestGoogleLogin(response.credential);
+    },
+    [requestGoogleLogin]
+  );
+
+  /**
+   * Hàm khởi tạo Google Identity Services.
+   * Mục đích: đăng ký callback nhận credential và render nút Google chính thức.
+   */
+  const initializeGoogleLogin = useCallback(() => {
+    if (!isGoogleClientIdValid(googleClientId)) {
+      setAuthErrorMessage('Thiếu hoặc sai cấu hình Google Client ID.');
+      return false;
+    }
+
+    const googleAccounts = getGoogleAccountsId();
+    if (!googleAccounts) {
+      return false;
+    }
+
+    googleAccounts.initialize({
+      client_id: googleClientId,
+      callback: handleGoogleCredential,
+      use_fedcm_for_prompt: true,
+    });
+
+    renderGoogleRedirectButton();
+    return true;
+  }, [getGoogleAccountsId, googleClientId, handleGoogleCredential, renderGoogleRedirectButton]);
+
+  /**
+   * Hàm chuẩn bị Google Identity khi script sẵn sàng.
+   */
+  useEffect(() => {
+    // Ghi chú logic phức tạp: script GSI có thể tải sau khi component mount,
+    // nên cần polling ngắn hạn để tránh bấm prompt khi initialize chưa chạy.
+    const initializeWhenScriptReady = () => {
+      return initializeGoogleLogin();
+    };
+
+    if (initializeWhenScriptReady()) {
+      return;
+    }
+
+    const initializationTimer = window.setInterval(() => {
+      const isInitialized = initializeWhenScriptReady();
+      if (isInitialized) {
+        window.clearInterval(initializationTimer);
+      }
+    }, 300);
+
+    return () => {
+      window.clearInterval(initializationTimer);
+    };
+  }, [initializeGoogleLogin]);
+
 
   return (
     <main className="grid min-h-screen grid-cols-1 overflow-hidden bg-[#f8fafb] text-[#0d1117] lg:h-screen lg:grid-cols-2">
@@ -178,32 +375,26 @@ export default function LoginPage() {
           <p className="mt-2 text-sm text-[#9ca3af]">Tiếp tục hành trình từ thiện minh bạch của bạn</p>
 
           <div className="mt-6">
-            <button
-              ref={googleButtonRef}
-              className="flex h-12 w-full items-center justify-center gap-3 rounded-xl border border-[#e5e7eb] bg-white text-sm font-semibold text-[#0d1117] transition hover:-translate-y-0.5 hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]"
-              type="button"
-              onClick={handleSocialLogin}
-            >
-              <svg className="h-5 w-5" viewBox="0 0 24 24">
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                />
-              </svg>
-              <span>Tiếp tục với Google</span>
-            </button>
+            {authErrorMessage ? (
+              <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+                {authErrorMessage}
+              </div>
+            ) : null}
+            <div className="mt-3">
+              {/* Ghi chú logic phức tạp: dùng duy nhất viền của nút Google để tránh cảm giác lồng khung 2 lớp,
+                  còn hiệu ứng hover được đặt ở lớp ngoài để đồng bộ cảm giác với nút tùy biến cũ. */}
+              <div className="group flex h-12 w-full items-center justify-center rounded-xl bg-white transition hover:-translate-y-0.5 hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]">
+                <div id={googleRedirectButtonContainerId} className="flex min-h-[40px] w-full items-center justify-center text-sm font-semibold text-[#0d1117]" />
+              </div>
+            </div>
+            {(userFullName || walletAddress || correlationId) && (
+              <div className="mt-4 rounded-xl border border-[#e5e7eb] bg-white px-4 py-3 text-xs text-[#4b5563]">
+                <div className="text-[11px] font-semibold uppercase text-[#9ca3af]">Thông tin ví sau đăng nhập</div>
+                {userFullName && <div className="mt-2">Tên người dùng: <span className="font-semibold text-[#0d1117]">{userFullName}</span></div>}
+                {walletAddress && <div className="mt-1">Ví blockchain: <span className="font-semibold text-[#0d1117]">{walletAddress}</span></div>}
+                {correlationId && <div className="mt-1">Correlation ID: <span className="font-semibold text-[#0d1117]">{correlationId}</span></div>}
+              </div>
+            )}
           </div>
 
           <div className="mt-6 rounded-xl border-l-[3px] border-[#0e7c6b] bg-[#e6f7f4] px-4 py-3 text-sm text-[#4b5563]">

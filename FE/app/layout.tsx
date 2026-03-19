@@ -1,5 +1,7 @@
 import './globals.css';
+import Script from 'next/script';
 import { Be_Vietnam_Pro, Lexend } from 'next/font/google';
+import AuthSessionManager from './components/AuthSessionManager';
 
 const beVietnamProFont = Be_Vietnam_Pro({
   subsets: ['latin', 'vietnamese'],
@@ -25,7 +27,11 @@ export const metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <body className={`${beVietnamProFont.variable} ${lexendFont.variable}`}>{children}</body>
+      <body className={`${beVietnamProFont.variable} ${lexendFont.variable}`}>
+        {children}
+        <AuthSessionManager />
+      </body>
+      <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
     </html>
   );
 }
