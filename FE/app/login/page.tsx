@@ -381,10 +381,10 @@ export default function LoginPage() {
               </div>
             ) : null}
             <div className="mt-3">
-              {/* Ghi chú logic phức tạp: dùng duy nhất viền của nút Google để tránh cảm giác lồng khung 2 lớp,
-                  còn hiệu ứng hover được đặt ở lớp ngoài để đồng bộ cảm giác với nút tùy biến cũ. */}
-              <div className="group flex h-12 w-full items-center justify-center rounded-xl bg-white transition hover:-translate-y-0.5 hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]">
-                <div id={googleRedirectButtonContainerId} className="flex min-h-[40px] w-full items-center justify-center text-sm font-semibold text-[#0d1117]" />
+              {/* Ghi chú logic phức tạp: lớp bao ngoài mô phỏng chính xác social button trong file mẫu,
+                  còn nút thật vẫn do Google render để giữ nguyên luồng xác thực hiện tại. */}
+              <div className="group flex h-[50px] w-full items-center justify-center rounded-[10px] border-[1.5px] border-[#e5e7eb] bg-white font-['Be_Vietnam_Pro',sans-serif] text-[14.5px] font-semibold text-[#0d1117] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]">
+                <div id={googleRedirectButtonContainerId} className="flex min-h-[40px] w-full items-center justify-center" />
               </div>
             </div>
             {(userFullName || walletAddress || correlationId) && (
@@ -438,6 +438,15 @@ export default function LoginPage() {
           </div>
         </div>
       </section>
+
+      <style jsx global>{`
+        /* Ghi chú logic phức tạp: chỉ tinh chỉnh lớp CSS do Google render để bỏ viền khung mặc định,
+           không thay đổi hành vi đăng nhập hoặc callback xác thực. */
+        #googleRedirectButtonContainer .nsm7Bb-HzV7m-LgbsSe-bN97Pc-sM5MNb {
+          border: none !important;
+          box-shadow: none !important;
+        }
+      `}</style>
     </main>
   );
 }

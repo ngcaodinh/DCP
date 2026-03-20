@@ -3,6 +3,7 @@ type LogMetadata = {
   errorMessage?: string;
   errorStack?: string;
   smartAccountAddress?: string;
+  fallbackWalletAddress?: string;
 };
 
 const logger = {
