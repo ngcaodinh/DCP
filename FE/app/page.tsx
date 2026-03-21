@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
 
 type Project = {
   id: number;
@@ -276,6 +277,12 @@ export default function HomePage() {
   });
   const [statValues, setStatValues] = useState(() => stats.map(() => 0));
   const [transactions, setTransactions] = useState<TransactionItem[]>(initialTransactions);
+  const [authenticatedUserName, setAuthenticatedUserName] = useState('');
+  const [isUserMenuVisible, setIsUserMenuVisible] = useState(false);
+  const userMenuContainerRef = useRef<HTMLDivElement | null>(null);
+  const userMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const logoutMenuItemRef = useRef<HTMLButtonElement | null>(null);
+  const userMenuId = 'headerUserMenu';
   const { linePath, areaPath, points } = useChartPath();
 
   useEffect(() => {
@@ -364,6 +371,109 @@ export default function HomePage() {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    /**
+     * Hàm đồng bộ trạng thái đăng nhập từ localStorage vào header trang chủ.
+     * Mục đích: giữ đúng hiển thị sau refresh và sau khi đăng nhập Google.
+     */
+    const syncAuthenticatedUserName = () => {
+      const authSession = readAuthSession();
+      const hasAccessToken = Boolean(authSession.accessToken);
+
+      // Ghi chú logic phức tạp: chỉ hiện tên người dùng khi đã có access token hợp lệ trong session.
+      if (!hasAccessToken) {
+        setAuthenticatedUserName('');
+        setIsUserMenuVisible(false);
+        return;
+      }
+
+      setAuthenticatedUserName(authSession.userFullName || 'Người dùng');
+    };
+
+    syncAuthenticatedUserName();
+    window.addEventListener(authenticationSessionUpdatedEventName, syncAuthenticatedUserName);
+
+    return () => {
+      window.removeEventListener(authenticationSessionUpdatedEventName, syncAuthenticatedUserName);
+    };
+  }, []);
+
+  /**
+   * Hàm bật/tắt menu người dùng trên header.
+   * Mục đích: hiển thị menu dropdown chứa hành động đăng xuất.
+   */
+  const handleToggleUserMenu = () => {
+    setIsUserMenuVisible(currentState => !currentState);
+  };
+
+  /**
+   * Hàm xử lý phím trên nút người dùng.
+   * Mục đích: mở menu bằng Enter/Space để cải thiện truy cập bàn phím.
+   */
+  const handleUserMenuButtonKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+
+    event.preventDefault();
+    setIsUserMenuVisible(true);
+  };
+
+  /**
+   * Hàm xử lý đăng xuất từ menu người dùng.
+   * Mục đích: xóa toàn bộ session client và cập nhật UI ngay không cần reload.
+   */
+  const handleHeaderUserLogout = () => {
+    clearAuthSession();
+    setAuthenticatedUserName('');
+    setIsUserMenuVisible(false);
+  };
+
+  useEffect(() => {
+    /**
+     * Hàm đóng menu khi người dùng click ra ngoài vùng menu.
+     * Mục đích: đảm bảo dropdown hoạt động đúng UX phổ biến.
+     */
+    const handleClickOutsideUserMenu = (event: MouseEvent) => {
+      // Ghi chú logic phức tạp: kiểm tra phần tử chứa để tránh đóng menu khi click bên trong.
+      if (!userMenuContainerRef.current?.contains(event.target as Node)) {
+        setIsUserMenuVisible(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handleClickOutsideUserMenu);
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutsideUserMenu);
+    };
+  }, []);
+
+  useEffect(() => {
+    /**
+     * Hàm xử lý bàn phím cho menu người dùng.
+     * Mục đích: hỗ trợ phím Escape để đóng menu theo chuẩn truy cập cơ bản.
+     */
+    const handleEscapeForUserMenu = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setIsUserMenuVisible(false);
+      userMenuButtonRef.current?.focus();
+    };
+
+    window.addEventListener('keydown', handleEscapeForUserMenu);
+    return () => {
+      window.removeEventListener('keydown', handleEscapeForUserMenu);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Ghi chú logic phức tạp: khi menu mở, đưa focus vào action chính để thao tác bàn phím nhanh và rõ ràng.
+    if (isUserMenuVisible) {
+      logoutMenuItemRef.current?.focus();
+    }
+  }, [isUserMenuVisible]);
+
   return (
     <main className="home-root">
       <nav id="navbar" className={isNavbarScrolled ? 'scrolled' : ''}>
@@ -393,10 +503,45 @@ export default function HomePage() {
           </li>
         </ul>
         <div className="nav-actions">
-          <a href="dcp-login.html" className="btn-ghost">
-            Đăng nhập
-          </a>
-          <a href="dcp-deposit.html" className="btn-amber">
+          {authenticatedUserName ? (
+            <div className="relative" ref={userMenuContainerRef}>
+              <button
+                ref={userMenuButtonRef}
+                type="button"
+                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0e7c6b] focus-visible:ring-offset-2"
+                aria-label="Mở menu người dùng"
+                aria-haspopup="menu"
+                aria-expanded={isUserMenuVisible}
+                aria-controls={userMenuId}
+                onClick={handleToggleUserMenu}
+                onKeyDown={handleUserMenuButtonKeyDown}
+              >
+                <span aria-hidden="true">👤</span> {authenticatedUserName}
+              </button>
+              <div
+                id={userMenuId}
+                role="menu"
+                aria-hidden={!isUserMenuVisible}
+                className={`absolute right-0 top-[calc(100%+10px)] z-20 min-w-[170px] rounded-xl border border-[#e5e7eb] bg-white p-1.5 shadow-[0_12px_32px_rgba(13,17,23,0.14)] transition-all duration-150 ease-out ${isUserMenuVisible ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
+                  }`}
+              >
+                <button
+                  ref={logoutMenuItemRef}
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-[44px] w-full items-center justify-start rounded-lg px-3.5 py-2.5 text-sm font-semibold text-[#0d1117] transition-colors duration-150 hover:bg-[#f3f4f6] active:bg-[#e5e7eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0e7c6b]"
+                  onClick={handleHeaderUserLogout}
+                >
+                  Đăng xuất
+                </button>
+              </div>
+            </div>
+          ) : (
+            <a href="/login" className="btn-ghost">
+              Đăng nhập
+            </a>
+          )}
+          <a href="/deposit" className="btn-amber">
             💰 Nạp tiền
           </a>
         </div>

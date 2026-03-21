@@ -1,6 +1,8 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { persistAuthSession } from '../utils/authSession';
 
 declare global {
@@ -77,6 +79,7 @@ export default function LoginPage() {
   const [correlationId, setCorrelationId] = useState('');
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+  const router = useRouter();
 
   /**
    * Hàm lấy đối tượng Google Accounts ID từ GSI script.
@@ -191,13 +194,17 @@ export default function LoginPage() {
           refreshToken,
           csrfToken,
           refreshSessionId,
-          refreshTokenExpiresAt
+          refreshTokenExpiresAt,
+          userFullName: userData?.fullName || 'Người dùng'
         });
 
-        setUserFullName(userData?.fullName || '');
+        setUserFullName(userData?.fullName || 'Người dùng');
         setWalletAddress(userData?.walletAddress || '');
         setCorrelationId(correlationIdValue || '');
         setIsSuccessVisible(true);
+
+        // Ghi chú logic phức tạp: chuyển trang sau khi lưu session để Home đọc được trạng thái đăng nhập ngay.
+        router.push('/');
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';
         setAuthErrorMessage(errorMessage);
@@ -205,7 +212,7 @@ export default function LoginPage() {
         // Ghi chú logic phức tạp: giữ khối finally để đảm bảo luồng xử lý luôn khép kín sau request.
       }
     },
-    [backendBaseUrl]
+    [backendBaseUrl, router]
   );
 
   /**
@@ -365,7 +372,7 @@ export default function LoginPage() {
             Về trang chủ
           </a>
           <div>
-            Chưa có tài khoản? <a href="#" className="font-semibold text-[#0e7c6b]">Đăng ký →</a>
+            Chưa có tài khoản? <Link href="/register" className="font-semibold text-[#0e7c6b]">Đăng ký →</Link>
           </div>
         </div>
 

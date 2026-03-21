@@ -2,7 +2,43 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { persistAuthSession } from "../utils/authSession";
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: {
+            client_id: string;
+            callback: (response: { credential?: string }) => void;
+            use_fedcm_for_prompt?: boolean;
+          }) => void;
+          prompt: (notificationHandler?: (notification: {
+            isNotDisplayed?: () => boolean;
+            isSkippedMoment?: () => boolean;
+            isDismissedMoment?: () => boolean;
+            getNotDisplayedReason?: () => string;
+            getSkippedReason?: () => string;
+            getDismissedReason?: () => string;
+          }) => void) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: {
+              type?: "standard" | "icon";
+              theme?: "outline" | "filled_blue" | "filled_black";
+              size?: "large" | "medium" | "small";
+              text?: "signin_with" | "signup_with" | "continue_with" | "signin";
+              shape?: "rectangular" | "pill" | "circle" | "square";
+              width?: string;
+            }
+          ) => void;
+        };
+      };
+    };
+  }
+}
 
 const honeycombOverlayDataUri =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='52'%3E%3Cpolygon points='30,2 58,16 58,44 30,58 2,44 2,16' fill='none' stroke='rgba(255,255,255,0.07)' stroke-width='1.5'/%3E%3C/svg%3E";
@@ -193,6 +229,7 @@ export default function RegisterPage() {
   const [isDonorSuccessVisible, setIsDonorSuccessVisible] = useState<boolean>(false);
   const [isOrganizationSuccessVisible, setIsOrganizationSuccessVisible] = useState<boolean>(false);
   const [isProgressLoading, setIsProgressLoading] = useState<boolean>(false);
+  const [isGoogleSuccessVisible, setIsGoogleSuccessVisible] = useState<boolean>(false);
   const [organizationName, setOrganizationName] = useState<string>("");
   const [organizationTaxCode, setOrganizationTaxCode] = useState<string>("");
   const [organizationWebsite, setOrganizationWebsite] = useState<string>("");
@@ -204,11 +241,11 @@ export default function RegisterPage() {
   const [isTermsShake, setIsTermsShake] = useState<boolean>(false);
 
   const [isRegisterProcessing, setIsRegisterProcessing] = useState<boolean>(false);
-  const [isGoogleInitialized, setIsGoogleInitialized] = useState<boolean>(false);
   const [registerErrorMessage, setRegisterErrorMessage] = useState<string>("");
   const [createdWalletAddress, setCreatedWalletAddress] = useState<string>("");
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
+  const router = useRouter();
 
   /**
    * Hàm chuẩn hóa Google Client ID từ biến môi trường.
@@ -226,6 +263,7 @@ export default function RegisterPage() {
   const googleClientId = normalizeGoogleClientId(
     process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""
   );
+  const googleRedirectButtonContainerId = "googleRedirectButtonContainer";
 
   const stepIndicatorState = useMemo(
     () => buildStepIndicatorState(currentStep, selectedRole),
@@ -306,7 +344,7 @@ export default function RegisterPage() {
     setIsInfoCollapsed((previousState) => !previousState);
   };
 
-  // Ghi chú: Lưu thông tin đăng ký thành công và điều hướng theo vai trò.
+  // Ghi chú: Lưu thông tin phiên sau khi xác thực Google thành công.
   const handleRegisterSuccess = useCallback(
     (responseData: {
       accessToken?: string;
@@ -324,24 +362,30 @@ export default function RegisterPage() {
         csrfToken: responseData?.csrfToken,
         refreshSessionId: responseData?.refreshSessionId,
         refreshTokenExpiresAt: responseData?.expiresAt,
+        userFullName: responseData?.user?.fullName || "Người dùng",
       });
 
-      if (selectedRole === "organization") {
-        setCurrentStep(3);
-      } else {
-        setIsDonorSuccessVisible(true);
-      }
+      setIsGoogleSuccessVisible(true);
+      router.push("/");
     },
-    [selectedRole]
+    [router]
   );
+
+  /**
+   * Hàm bật trạng thái loading của thanh tiến trình.
+   * Mục đích: đồng bộ hiệu ứng loading Google với trang đăng nhập.
+   */
+  const triggerProgressBar = () => {
+    setIsProgressLoading(true);
+    window.setTimeout(() => setIsProgressLoading(false), 1800);
+  };
 
   // Ghi chú: Gửi Google ID token về backend để tạo Smart Account và phiên đăng nhập.
   const requestGoogleRegister = useCallback(
     async (idToken: string) => {
       setIsRegisterProcessing(true);
       setRegisterErrorMessage("");
-      setIsProgressLoading(true);
-      setIsLoadingVisible(true);
+      triggerProgressBar();
 
       try {
         const response = await fetch(`${backendBaseUrl}/auth/google-login`, {
@@ -355,17 +399,15 @@ export default function RegisterPage() {
 
         // Ghi chú logic phức tạp: luôn kiểm tra trạng thái HTTP trước khi dùng dữ liệu trả về
         if (!response.ok) {
-          throw new Error(responseData?.message || "Đăng ký thất bại, vui lòng thử lại.");
+          throw new Error(responseData?.message || "Đăng nhập thất bại, vui lòng thử lại.");
         }
 
         handleRegisterSuccess(responseData);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : "Không thể đăng ký, vui lòng thử lại.";
+        const errorMessage = error instanceof Error ? error.message : "Không thể đăng nhập, vui lòng thử lại.";
         setRegisterErrorMessage(errorMessage);
       } finally {
         setIsRegisterProcessing(false);
-        setIsProgressLoading(false);
-        setIsLoadingVisible(false);
       }
     },
     [backendBaseUrl, handleRegisterSuccess]
@@ -388,20 +430,44 @@ export default function RegisterPage() {
    * Hàm lấy đối tượng Google Accounts ID từ GSI script.
    * Mục đích: gom logic truy cập window.google để tái sử dụng và dễ debug.
    */
-  const getGoogleAccountsId = () => window.google?.accounts?.id;
+  const getGoogleAccountsId = useCallback(() => window.google?.accounts?.id, []);
 
+  /**
+   * Hàm hiển thị nút Google do GSI cung cấp trên trang đăng ký.
+   * Mục đích: đồng bộ luồng nhấn nút Google với trang đăng nhập.
+   */
+  const renderGoogleRedirectButton = useCallback(() => {
+    const googleAccounts = getGoogleAccountsId();
+    if (!googleAccounts) {
+      return;
+    }
 
-  // Ghi chú: Khởi tạo Google Identity Services.
+    const containerElement = document.getElementById(googleRedirectButtonContainerId);
+    if (!containerElement) {
+      return;
+    }
+
+    // Ghi chú logic phức tạp: luôn xóa nội dung cũ trước khi render lại để tránh nhân bản nút Google.
+    containerElement.innerHTML = "";
+    googleAccounts.renderButton(containerElement, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "rectangular",
+      width: "320",
+    });
+  }, [getGoogleAccountsId, googleRedirectButtonContainerId]);
+
+  // Ghi chú: Khởi tạo Google Identity Services và render nút Google.
   const initializeGoogleRegister = useCallback(() => {
     if (!isGoogleClientIdValid(googleClientId)) {
       setRegisterErrorMessage("Thiếu hoặc sai cấu hình Google Client ID.");
-      setIsGoogleInitialized(false);
       return false;
     }
 
     const googleAccounts = getGoogleAccountsId();
     if (!googleAccounts) {
-      setIsGoogleInitialized(false);
       return false;
     }
 
@@ -411,22 +477,15 @@ export default function RegisterPage() {
       use_fedcm_for_prompt: true,
     });
 
-    setIsGoogleInitialized(true);
+    renderGoogleRedirectButton();
     return true;
-  }, [googleClientId, handleGoogleCredential]);
+  }, [getGoogleAccountsId, googleClientId, handleGoogleCredential, renderGoogleRedirectButton]);
 
-  // Ghi chú: Đảm bảo Google Identity Services sẵn sàng trước khi bấm đăng ký.
+  // Ghi chú: Đảm bảo Google Identity Services sẵn sàng trước khi người dùng thao tác.
   useEffect(() => {
     // Ghi chú logic phức tạp: script GSI có thể tải sau khi component mount,
-    // nên cần polling ngắn hạn để tránh bấm prompt khi initialize chưa chạy.
-    const initializeWhenScriptReady = () => {
-      const googleAccounts = getGoogleAccountsId();
-      if (!googleAccounts) {
-        return false;
-      }
-
-      return initializeGoogleRegister();
-    };
+    // nên cần polling ngắn hạn để tránh bỏ lỡ bước initialize.
+    const initializeWhenScriptReady = () => initializeGoogleRegister();
 
     if (initializeWhenScriptReady()) {
       return;
@@ -444,30 +503,17 @@ export default function RegisterPage() {
     };
   }, [initializeGoogleRegister]);
 
-  // Ghi chú: Kích hoạt popup đăng ký Google.
-  const triggerGoogleRegister = useCallback(() => {
-    setRegisterErrorMessage("");
-
-    if (!isGoogleClientIdValid(googleClientId)) {
-      setRegisterErrorMessage("Thiếu hoặc sai cấu hình Google Client ID.");
+  /**
+   * Hàm đồng bộ render nút Google khi bước đăng ký được hiển thị.
+   * Mục đích: đảm bảo container xuất hiện sau khi người dùng chuyển sang bước 2 vẫn có nút Google.
+   */
+  useEffect(() => {
+    if (currentStep !== 2) {
       return;
     }
 
-    const googleAccounts = getGoogleAccountsId();
-    if (!googleAccounts) {
-      setRegisterErrorMessage("Google Identity chưa sẵn sàng, vui lòng thử lại sau.");
-      return;
-    }
-
-    // Ghi chú logic phức tạp: bắt buộc initialize thành công trước khi prompt,
-    // tránh lỗi FedCM do gọi prompt khi trạng thái GSI chưa sẵn sàng.
-    if (!isGoogleInitialized && !initializeGoogleRegister()) {
-      setRegisterErrorMessage("Google Identity chưa khởi tạo xong. Vui lòng thử lại sau vài giây.");
-      return;
-    }
-
-    googleAccounts.prompt();
-  }, [googleClientId, initializeGoogleRegister, isGoogleInitialized]);
+    renderGoogleRedirectButton();
+  }, [currentStep, renderGoogleRedirectButton]);
 
   // Ghi chú: Chuyển từ bước chọn vai trò sang bước đăng ký Google.
   const handleContinueFromRole = () => {
@@ -478,17 +524,14 @@ export default function RegisterPage() {
     setCurrentStep(2);
   };
 
-  // Ghi chú: Bắt đầu đăng ký Google khi người dùng đã đồng ý điều khoản.
+  // Ghi chú: Kiểm tra điều khoản trước khi cho phép thao tác với nút Google.
   const handleGoogleRegister = () => {
     if (!isTermsAccepted) {
       setIsTermsShake(true);
       window.setTimeout(() => {
         setIsTermsShake(false);
       }, 350);
-      return;
     }
-
-    triggerGoogleRegister();
   };
 
   // Ghi chú: Đóng màn hình chúc mừng cho Donor.
@@ -1002,36 +1045,14 @@ export default function RegisterPage() {
                   Đổi vai trò
                 </button>
 
-                <button
-                  className="mt-6 flex w-full items-center justify-center gap-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isRegisterProcessing}
-                  onClick={handleGoogleRegister}
-                >
-                  <svg className="h-7 w-7" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                <div className="mt-6" onClick={handleGoogleRegister}>
+                  <div className="group flex h-[50px] w-full items-center justify-center rounded-[10px] border-[1.5px] border-[#e5e7eb] bg-white font-['Be_Vietnam_Pro',sans-serif] text-[14.5px] font-semibold text-[#0d1117] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]">
+                    <div
+                      id={googleRedirectButtonContainerId}
+                      className={`flex min-h-[40px] w-full items-center justify-center ${!isTermsAccepted || isRegisterProcessing ? "pointer-events-none opacity-60" : ""}`}
                     />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                    />
-                  </svg>
-                  <div className="text-left">
-                    <div className="text-sm font-semibold text-slate-900">
-                      {isRegisterProcessing ? "Đang đăng ký..." : "Đăng ký với Google"}
-                    </div>
-                    <div className="text-xs text-slate-500">Tiếp tục với tài khoản Google của bạn</div>
                   </div>
-                </button>
+                </div>
 
                 {registerErrorMessage && (
                   <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
@@ -1267,6 +1288,14 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
+      <style jsx global>{`
+        /* Ghi chú logic phức tạp: chỉ tinh chỉnh lớp CSS do Google render để đồng nhất giao diện nút với trang đăng nhập, */
+        /* không thay đổi hành vi callback xác thực Google. */
+        #googleRedirectButtonContainer .nsm7Bb-HzV7m-LgbsSe-bN97Pc-sM5MNb {
+          border: none !important;
+          box-shadow: none !important;
+        }
+      `}</style>
     </div>
   );
 }
