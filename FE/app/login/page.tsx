@@ -160,6 +160,7 @@ export default function LoginPage() {
 
   /**
    * Hàm gọi backend để xác thực Google ID token và tạo ví blockchain.
+   * Mục đích: luôn gửi kèm role mặc định donor để tương thích payload backend mới.
    */
   const requestGoogleLogin = useCallback(
     async (idToken: string) => {
@@ -172,7 +173,7 @@ export default function LoginPage() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ idToken }),
+          body: JSON.stringify({ idToken, role: 'donor' }),
         });
         const responseData = await response.json();
 

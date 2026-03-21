@@ -5,20 +5,36 @@ import {
   logFailedGoogleLogin,
   revokeAllRefreshSessionsForUser
 } from '../services/authService';
+import { submitOrganizationKyc } from '../services/organizationKycService';
 import { getLogger } from '../config/logger';
 
 const logger = getLogger();
 
+type GoogleLoginPayload = {
+  identityToken: string;
+  role: 'donor' | 'organization';
+};
+
 /**
- * Hàm đọc token đăng nhập từ request.
- * Mục đích: chuẩn hóa cách lấy identity token từ body.
+ * Hàm đọc payload đăng nhập Google từ request.
+ * Mục đích: chuẩn hóa dữ liệu idToken và vai trò người dùng trước khi xử lý.
  */
-function extractIdentityToken(request: Request): string | null {
+function extractGoogleLoginPayload(request: Request): GoogleLoginPayload | null {
   const identityToken = request.body?.idToken;
+  const role = request.body?.role;
+
   if (typeof identityToken !== 'string' || identityToken.trim().length === 0) {
     return null;
   }
-  return identityToken.trim();
+
+  if (role !== 'donor' && role !== 'organization') {
+    return null;
+  }
+
+  return {
+    identityToken: identityToken.trim(),
+    role
+  };
 }
 
 /**
@@ -78,19 +94,24 @@ function extractLogoutAllPayload(request: Request): { userId: string } | null {
  * Mục đích: xác thực token, tạo ví blockchain và trả access/refresh token.
  */
 export async function handleGoogleLogin(request: Request, response: Response): Promise<void> {
-  const identityToken = extractIdentityToken(request);
+  const googleLoginPayload = extractGoogleLoginPayload(request);
   const metadata = extractRequestMetadata(request);
 
-  if (!identityToken) {
-    logger.warn('Google login request missing identity token.');
+  if (!googleLoginPayload) {
+    logger.warn('Google login request missing identity token or role.');
     response.status(400).json({
-      message: 'Thiếu thông tin xác thực Google.'
+      message: 'Thiếu thông tin xác thực Google hoặc vai trò tài khoản.'
     });
     return;
   }
 
   try {
-    const loginResult = await loginWithGoogle(identityToken, metadata.ipAddress, metadata.userAgent);
+    const loginResult = await loginWithGoogle(
+      googleLoginPayload.identityToken,
+      googleLoginPayload.role,
+      metadata.ipAddress,
+      metadata.userAgent
+    );
     logger.info('Google login success.', { correlationId: loginResult.correlationId });
 
     response.status(200).json({
@@ -160,6 +181,46 @@ export async function handleRefreshToken(request: Request, response: Response): 
     });
   }
 }
+
+/**
+ * Hàm xử lý nộp hồ sơ KYC cho tổ chức từ thiện.
+ * Mục đích: nhận metadata tài liệu và lưu hồ sơ KYC phiên bản hóa lên hệ thống.
+ */
+export async function handleOrganizationKycSubmission(request: Request, response: Response): Promise<void> {
+  const authenticatedRequest = request as Request & {
+    authenticatedUser?: { userId: string; role: string };
+  };
+
+  if (!authenticatedRequest.authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  if (authenticatedRequest.authenticatedUser.role !== 'organization') {
+    response.status(403).json({
+      message: 'Chỉ tài khoản tổ chức từ thiện mới được nộp KYC.'
+    });
+    return;
+  }
+
+  try {
+    const submissionResult = await submitOrganizationKyc(authenticatedRequest.authenticatedUser.userId, request.body);
+    response.status(201).json({
+      message: 'Nộp hồ sơ KYC thành công.',
+      submission: submissionResult
+    });
+  } catch (error) {
+    logger.error('Organization KYC submission failed.', {
+      errorMessage: (error as Error).message
+    });
+    response.status(400).json({
+      message: (error as Error).message
+    });
+  }
+}
+
 
 /**
  * Hàm xử lý đăng xuất tất cả thiết bị.

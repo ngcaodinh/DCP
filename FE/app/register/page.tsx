@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { persistAuthSession } from "../utils/authSession";
+import { persistAuthSession, readAuthSession } from "../utils/authSession";
 
 declare global {
   interface Window {
@@ -129,6 +129,7 @@ type LoadingTexts = {
 };
 
 type UploadInfo = {
+  id: string;
   name: string;
   sizeLabel: string;
   icon: string;
@@ -156,6 +157,8 @@ const fallbackSmartAccountAddress = "0x3a4f...9b2c (Amoy Testnet)";
 
 const knowYourCustomerCharacterLimit = 300;
 const maxUploadBytes = 10 * 1024 * 1024;
+const maximumKycFileCount = 3;
+const acceptedKycMimeTypes = ["application/pdf", "image/png", "image/jpeg"];
 
 
 // Ghi chú: Tạo cấu hình class cho vòng tròn và nhãn bước.
@@ -213,10 +216,32 @@ const resolveUploadIcon = (fileName: string): string => {
 
 // Ghi chú: Tạo thông tin hiển thị file upload.
 const createUploadInfo = (file: File): UploadInfo => ({
+  id: `${file.name}-${file.lastModified}`,
   name: file.name,
   sizeLabel: formatFileSize(file.size),
   icon: resolveUploadIcon(file.name),
 });
+
+/**
+ * Hàm chuyển file sang chuỗi base64.
+ * Mục đích: chuẩn hóa dữ liệu file để gửi trong payload JSON đến backend.
+ */
+const convertFileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const fileReader = new FileReader();
+    fileReader.onload = () => {
+      const readerResult = fileReader.result;
+      if (typeof readerResult !== "string") {
+        reject(new Error("Không thể đọc nội dung file upload."));
+        return;
+      }
+
+      const base64Content = readerResult.includes(",") ? readerResult.split(",")[1] : readerResult;
+      resolve(base64Content);
+    };
+    fileReader.onerror = () => reject(new Error("Không thể đọc nội dung file upload."));
+    fileReader.readAsDataURL(file);
+  });
 
 // Ghi chú: Trang đăng ký tài khoản DCP theo luồng nhiều bước.
 export default function RegisterPage() {
@@ -234,15 +259,17 @@ export default function RegisterPage() {
   const [organizationTaxCode, setOrganizationTaxCode] = useState<string>("");
   const [organizationWebsite, setOrganizationWebsite] = useState<string>("");
   const [organizationDescription, setOrganizationDescription] = useState<string>("");
-  const [organizationFile, setOrganizationFile] = useState<File | null>(null);
-  const [uploadInfo, setUploadInfo] = useState<UploadInfo | null>(null);
+  const [organizationFiles, setOrganizationFiles] = useState<File[]>([]);
+  const [uploadInfoList, setUploadInfoList] = useState<UploadInfo[]>([]);
   const [isUploadHover, setIsUploadHover] = useState<boolean>(false);
   const [isCopySuccess, setIsCopySuccess] = useState<boolean>(false);
   const [isTermsShake, setIsTermsShake] = useState<boolean>(false);
 
   const [isRegisterProcessing, setIsRegisterProcessing] = useState<boolean>(false);
   const [registerErrorMessage, setRegisterErrorMessage] = useState<string>("");
+  const [kycSubmitErrorMessage, setKycSubmitErrorMessage] = useState<string>("");
   const [createdWalletAddress, setCreatedWalletAddress] = useState<string>("");
+  const [registeredUserEmail, setRegisteredUserEmail] = useState<string>("");
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
   const router = useRouter();
@@ -278,7 +305,8 @@ export default function RegisterPage() {
     organizationName.trim().length > 0 &&
     organizationTaxCode.trim().length > 0 &&
     organizationDescription.trim().length > 0 &&
-    Boolean(organizationFile);
+    organizationFiles.length > 0 &&
+    organizationFiles.length <= maximumKycFileCount;
 
   const descriptionCount = organizationDescription.length;
 
@@ -352,10 +380,16 @@ export default function RegisterPage() {
       csrfToken?: string;
       refreshSessionId?: string;
       expiresAt?: string;
-      user?: { fullName?: string; walletAddress?: string };
+      user?: {
+        fullName?: string;
+        walletAddress?: string;
+        email?: string;
+        role?: "donor" | "organization";
+      };
     }) => {
       const userWalletAddress = responseData?.user?.walletAddress || "";
       setCreatedWalletAddress(userWalletAddress);
+      setRegisteredUserEmail(responseData?.user?.email || "");
       persistAuthSession({
         accessToken: responseData?.accessToken,
         refreshToken: responseData?.refreshToken,
@@ -364,6 +398,11 @@ export default function RegisterPage() {
         refreshTokenExpiresAt: responseData?.expiresAt,
         userFullName: responseData?.user?.fullName || "Người dùng",
       });
+
+      if (responseData?.user?.role === "organization") {
+        setCurrentStep(3);
+        return;
+      }
 
       setIsGoogleSuccessVisible(true);
       router.push("/");
@@ -393,7 +432,7 @@ export default function RegisterPage() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ idToken }),
+          body: JSON.stringify({ idToken, role: selectedRole }),
         });
         const responseData = await response.json();
 
@@ -410,7 +449,7 @@ export default function RegisterPage() {
         setIsRegisterProcessing(false);
       }
     },
-    [backendBaseUrl, handleRegisterSuccess]
+    [backendBaseUrl, handleRegisterSuccess, selectedRole]
   );
 
   // Ghi chú: Nhận credential từ Google Identity Services để bắt đầu đăng ký.
@@ -564,43 +603,77 @@ export default function RegisterPage() {
     setOrganizationDescription(value);
   };
 
-  // Ghi chú: Xóa thông tin file upload để người dùng chọn lại.
+  // Ghi chú: Xóa toàn bộ thông tin file upload để người dùng chọn lại từ đầu.
   const resetUploadState = () => {
-    setOrganizationFile(null);
-    setUploadInfo(null);
+    setOrganizationFiles([]);
+    setUploadInfoList([]);
   };
 
-  // Ghi chú: Kiểm tra file và cập nhật trạng thái upload.
-  const handleFileSelection = (file: File | null) => {
-    if (!file) {
-      return;
+  /**
+   * Hàm kiểm tra file hồ sơ KYC theo đúng rule nghiệp vụ.
+   * Mục đích: chặn sớm file sai định dạng hoặc vượt giới hạn dung lượng ngay ở client.
+   */
+  const validateKycFile = (file: File): string | null => {
+    if (!acceptedKycMimeTypes.includes(file.type)) {
+      return `File ${file.name} không đúng định dạng cho phép.`;
     }
 
     if (file.size > maxUploadBytes) {
-      window.alert("File vượt quá 10MB. Vui lòng chọn file nhỏ hơn.");
+      return `File ${file.name} vượt quá 10MB.`;
+    }
+
+    return null;
+  };
+
+  // Ghi chú: Kiểm tra danh sách file và cập nhật trạng thái upload cho KYC.
+  const handleFileSelection = (fileList: FileList | File[] | null) => {
+    if (!fileList) {
       return;
     }
 
-    setOrganizationFile(file);
-    setUploadInfo(createUploadInfo(file));
+    const incomingFiles = Array.from(fileList);
+    if (incomingFiles.length === 0) {
+      return;
+    }
+
+    // Ghi chú logic phức tạp: gộp file hiện có + file mới, bỏ trùng theo tên và thời gian sửa đổi,
+    // sau đó giới hạn tối đa 3 file để bám sát UC1.3.
+    const mergedFileMap = new Map<string, File>();
+    [...organizationFiles, ...incomingFiles].forEach((file) => {
+      const uniqueFileKey = `${file.name}-${file.lastModified}`;
+      mergedFileMap.set(uniqueFileKey, file);
+    });
+
+    const mergedFiles = Array.from(mergedFileMap.values()).slice(0, maximumKycFileCount);
+    const invalidMessage = mergedFiles.map(validateKycFile).find((message) => Boolean(message));
+
+    if (invalidMessage) {
+      setKycSubmitErrorMessage(invalidMessage || "File KYC không hợp lệ.");
+      return;
+    }
+
+    setKycSubmitErrorMessage("");
+    setOrganizationFiles(mergedFiles);
+    setUploadInfoList(mergedFiles.map(createUploadInfo));
   };
 
-  // Ghi chú: Gỡ file đã chọn mà không kích hoạt click vùng upload.
-  const handleRemoveFile = (event: React.MouseEvent<HTMLButtonElement>) => {
+  // Ghi chú: Gỡ 1 file đã chọn theo id mà không kích hoạt click vùng upload.
+  const handleRemoveFile = (event: React.MouseEvent<HTMLButtonElement>, uploadInfoId: string) => {
     event.stopPropagation();
-    resetUploadState();
+    const filteredFiles = organizationFiles.filter((file) => `${file.name}-${file.lastModified}` !== uploadInfoId);
+    setOrganizationFiles(filteredFiles);
+    setUploadInfoList(filteredFiles.map(createUploadInfo));
   };
 
-  // Ghi chú: Mở dialog chọn file upload.
+  // Ghi chú: Mở dialog chọn nhiều file upload.
   const handleUploadClick = () => {
     const uploadInput = document.getElementById("organizationFileInput") as HTMLInputElement | null;
     uploadInput?.click();
   };
 
-  // Ghi chú: Nhận file từ input file.
+  // Ghi chú: Nhận danh sách file từ input file.
   const handleUploadChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
-    handleFileSelection(file);
+    handleFileSelection(event.target.files);
   };
 
   // Ghi chú: Bật hiệu ứng hover khi kéo file vào vùng upload.
@@ -614,28 +687,80 @@ export default function RegisterPage() {
     setIsUploadHover(false);
   };
 
-  // Ghi chú: Nhận file được thả vào vùng upload.
+  // Ghi chú: Nhận danh sách file được thả vào vùng upload.
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsUploadHover(false);
-    const file = event.dataTransfer.files?.[0] ?? null;
-    handleFileSelection(file);
+    handleFileSelection(event.dataTransfer.files);
   };
 
-  // Ghi chú: Giả lập nộp hồ sơ KYC với lớp overlay.
-  const handleSubmitKyc = () => {
-    setLoadingTexts({
-      title: "Đang nộp hồ sơ KYC...",
-      subtitle: "Đang tải giấy tờ lên IPFS",
-    });
-    setIsProgressLoading(true);
-    setIsLoadingVisible(true);
+  /**
+   * Hàm gửi hồ sơ KYC của tổ chức lên backend.
+   * Mục đích: nộp metadata KYC và file base64 tới API xác minh tổ chức.
+   */
+  const handleSubmitKyc = async () => {
+    if (organizationFiles.length === 0) {
+      setKycSubmitErrorMessage("Vui lòng chọn ít nhất 1 file hồ sơ.");
+      return;
+    }
 
-    window.setTimeout(() => {
+    if (organizationFiles.length > maximumKycFileCount) {
+      setKycSubmitErrorMessage("Bạn chỉ được upload tối đa 3 file hồ sơ.");
+      return;
+    }
+
+    const persistedSession = readAuthSession();
+    if (!persistedSession.accessToken) {
+      setKycSubmitErrorMessage("Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.");
+      return;
+    }
+
+    try {
+      setKycSubmitErrorMessage("");
+      setLoadingTexts({
+        title: "Đang nộp hồ sơ KYC...",
+        subtitle: "Đang tải giấy tờ lên IPFS",
+      });
+      setIsProgressLoading(true);
+      setIsLoadingVisible(true);
+
+      const kycFilesPayload = await Promise.all(
+        organizationFiles.map(async (file) => ({
+          fileName: file.name,
+          mimeType: file.type,
+          fileSize: file.size,
+          base64Content: await convertFileToBase64(file),
+          documentType: "LEGAL_DOCUMENT",
+        }))
+      );
+
+      const response = await fetch(`${backendBaseUrl}/auth/organization/kyc-submissions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${persistedSession.accessToken}`,
+        },
+        body: JSON.stringify({
+          organizationName: organizationName.trim(),
+          legalRegistrationNumber: organizationTaxCode.trim(),
+          organizationDescription: organizationDescription.trim(),
+          files: kycFilesPayload,
+        }),
+      });
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData?.message || "Nộp hồ sơ KYC thất bại.");
+      }
+
+      setIsOrganizationSuccessVisible(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Nộp hồ sơ KYC thất bại.";
+      setKycSubmitErrorMessage(errorMessage);
+    } finally {
       setIsProgressLoading(false);
       setIsLoadingVisible(false);
-      setIsOrganizationSuccessVisible(true);
-    }, 2000);
+    }
   };
 
   const resolvedWalletAddress = createdWalletAddress || fallbackSmartAccountAddress;
@@ -774,7 +899,7 @@ export default function RegisterPage() {
             <div className="text-lg font-semibold text-slate-800">{organizationSuccessTitle}</div>
             <div className="mt-1 text-sm text-slate-500">{organizationSuccessSubtitle}</div>
             <div className="mt-3 text-sm text-slate-500">
-              Email thông báo gửi đến: <strong className="font-semibold text-slate-700">your@gmail.com</strong>
+              Email thông báo gửi đến: <strong className="font-semibold text-slate-700">{registeredUserEmail || "your@gmail.com"}</strong>
             </div>
             <Link
               className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-teal-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-700"
@@ -1226,27 +1351,32 @@ export default function RegisterPage() {
                       type="file"
                       className="hidden"
                       accept=".pdf,.jpg,.jpeg,.png"
+                      multiple
                       onChange={handleUploadChange}
                     />
-                    <div
-                      className={`mt-3 items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm ${uploadInfo ? "flex" : "hidden"
-                        }`}
-                    >
-                      <div className="text-xl">{uploadInfo?.icon ?? "📄"}</div>
-                      <div className="flex-1">
-                        <div className="text-sm font-semibold text-slate-700">{uploadInfo?.name ?? "file.pdf"}</div>
-                        <div className="text-xs text-slate-500">{uploadInfo?.sizeLabel ?? "0 MB"}</div>
-                      </div>
-                      <button
-                        type="button"
-                        className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500"
-                        onClick={handleRemoveFile}
-                      >
-                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                          <line x1="18" y1="6" x2="6" y2="18" />
-                          <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
+                    <div className="mt-2 text-xs text-slate-500">
+                      Đã chọn {organizationFiles.length}/{maximumKycFileCount} file
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {uploadInfoList.map((uploadInfo) => (
+                        <div key={uploadInfo.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                          <div className="text-xl">{uploadInfo.icon}</div>
+                          <div className="flex-1">
+                            <div className="text-sm font-semibold text-slate-700">{uploadInfo.name}</div>
+                            <div className="text-xs text-slate-500">{uploadInfo.sizeLabel}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-400 hover:border-rose-300 hover:text-rose-500"
+                            onClick={(event) => handleRemoveFile(event, uploadInfo.id)}
+                          >
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <line x1="18" y1="6" x2="6" y2="18" />
+                              <line x1="6" y1="6" x2="18" y2="18" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -1283,6 +1413,12 @@ export default function RegisterPage() {
                     📤 Nộp hồ sơ KYC
                   </button>
                 </div>
+
+                {kycSubmitErrorMessage && (
+                  <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {kycSubmitErrorMessage}
+                  </div>
+                )}
               </div>
             )}
           </div>

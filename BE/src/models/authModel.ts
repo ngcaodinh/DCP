@@ -9,6 +9,9 @@ export type AuthUser = {
   socialProvider: string;
   socialAccountId: string;
   isEmailVerified: boolean;
+  accountStatus: 'ACTIVE' | 'INACTIVE_PENDING_KYC';
+  organizationName: string | null;
+  legalRegistrationNumber: string | null;
   lastLoginAt: Date;
   lastLoginIp: string | null;
   lastLoginUserAgent: string | null;
@@ -49,6 +52,9 @@ const authUserSchema = new Schema<AuthUser>({
   socialProvider: { type: String, required: true },
   socialAccountId: { type: String, required: true },
   isEmailVerified: { type: Boolean, required: true },
+  accountStatus: { type: String, required: true },
+  organizationName: { type: String, default: null },
+  legalRegistrationNumber: { type: String, default: null, unique: true, sparse: true },
   lastLoginAt: { type: Date, required: true },
   lastLoginIp: { type: String, default: null },
   lastLoginUserAgent: { type: String, default: null },
@@ -83,6 +89,14 @@ const auditLogSchema = new Schema<AuditLogEntry>({
 const AuthUserModel = mongoose.model<AuthUser>('AuthUser', authUserSchema);
 const RefreshSessionModel = mongoose.model<RefreshSession>('RefreshSession', refreshSessionSchema);
 const AuditLogModel = mongoose.model<AuditLogEntry>('AuditLog', auditLogSchema);
+
+/**
+ * Hàm tìm người dùng theo mã số đăng ký pháp lý.
+ * Mục đích: kiểm tra trùng dữ liệu pháp lý của tổ chức.
+ */
+export async function findUserByLegalRegistrationNumber(legalRegistrationNumber: string): Promise<AuthUser | null> {
+  return AuthUserModel.findOne({ legalRegistrationNumber }).lean<AuthUser>().exec();
+}
 
 /**
  * Hàm tìm người dùng theo email.

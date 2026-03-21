@@ -275,9 +275,14 @@ function handleNewDeviceLogin(user: AuthUser, ipAddress: string, userAgent: stri
 
 /**
  * Hàm xử lý đăng nhập bằng Google.
- * Mục đích: tạo hoặc cập nhật người dùng và trả về access/refresh token.
+ * Mục đích: tạo hoặc cập nhật người dùng theo vai trò và trả về access/refresh token.
  */
-export async function loginWithGoogle(identityToken: string, ipAddress: string, userAgent: string) {
+export async function loginWithGoogle(
+  identityToken: string,
+  role: 'donor' | 'organization',
+  ipAddress: string,
+  userAgent: string
+) {
   const googlePayload = await verifyGoogleIdentityToken(identityToken);
   const userProfile = buildGoogleUserProfile(googlePayload);
   const correlationId = createCorrelationId();
@@ -292,11 +297,14 @@ export async function loginWithGoogle(identityToken: string, ipAddress: string, 
         id: crypto.randomUUID(),
         email: userProfile.email,
         fullName: userProfile.fullName,
-        role: 'donor',
+        role,
         walletAddress,
         socialProvider: 'google',
         socialAccountId: userProfile.socialAccountId,
         isEmailVerified: userProfile.isEmailVerified,
+        accountStatus: role === 'organization' ? 'INACTIVE_PENDING_KYC' : 'ACTIVE',
+        organizationName: null,
+        legalRegistrationNumber: null,
         lastLoginAt: new Date(),
         lastLoginIp: ipAddress,
         lastLoginUserAgent: userAgent,
@@ -324,6 +332,12 @@ export async function loginWithGoogle(identityToken: string, ipAddress: string, 
     }
   } else {
     handleNewDeviceLogin(existingUser, ipAddress, userAgent);
+
+    // Ghi chú logic phức tạp: khóa vai trò theo tài khoản đã tồn tại để tránh nâng quyền trái phép từ phía client.
+    if (existingUser.role !== role) {
+      throw new Error('Vai trò đăng nhập không khớp với tài khoản đã đăng ký.');
+    }
+
     authenticatedUser = await updateUser({
       ...existingUser,
       lastLoginAt: new Date(),
@@ -346,7 +360,8 @@ export async function loginWithGoogle(identityToken: string, ipAddress: string, 
       email: authenticatedUser.email,
       fullName: authenticatedUser.fullName,
       walletAddress: authenticatedUser.walletAddress,
-      role: authenticatedUser.role
+      role: authenticatedUser.role,
+      accountStatus: authenticatedUser.accountStatus
     },
     correlationId
   };
