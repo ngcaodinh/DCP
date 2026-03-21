@@ -20,7 +20,7 @@ const minimumRefreshDelayMs = 15 * 1000;
 
 // Ghi chú: Quản lý auto refresh token theo hạn phiên nhận từ backend.
 export default function AuthSessionManager() {
-  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshTimerRef = useRef<number | null>(null);
 
   const backendBaseUrl = useMemo(
     () => process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000',
@@ -86,8 +86,6 @@ export default function AuthSessionManager() {
       });
     } catch (error) {
       clearAuthSession();
-    } finally {
-      scheduleRefresh();
     }
   }, [backendBaseUrl, clearRefreshTimer]);
 
@@ -99,8 +97,9 @@ export default function AuthSessionManager() {
       return;
     }
 
-    refreshTimerRef.current = window.setTimeout(() => {
-      executeTokenRefresh();
+    refreshTimerRef.current = window.setTimeout(async () => {
+      await executeTokenRefresh();
+      scheduleRefresh();
     }, delayMs);
   }, [calculateNextRefreshDelay, clearRefreshTimer, executeTokenRefresh]);
 
