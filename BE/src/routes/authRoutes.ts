@@ -3,7 +3,9 @@ import {
   handleGoogleLogin,
   handleRefreshToken,
   handleLogoutAll,
-  handleOrganizationKycSubmission
+  handleOrganizationKycSubmission,
+  handleGetPendingOrganizationKycSubmissions,
+  handleReviewOrganizationKycSubmission
 } from '../controllers/authController';
 import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
 import { createRefreshCsrfMiddleware } from '../middleware/csrfMiddleware';
@@ -38,6 +40,20 @@ export function createAuthRoutes(): Router {
     authenticationMiddleware,
     kycRateLimit,
     handleOrganizationKycSubmission
+  );
+  router.get(
+    '/organization/kyc-submissions/pending',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    kycRateLimit,
+    handleGetPendingOrganizationKycSubmissions
+  );
+  router.patch(
+    '/organization/kyc-submissions/:submissionId/review',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    kycRateLimit,
+    handleReviewOrganizationKycSubmission
   );
 
   return router;

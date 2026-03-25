@@ -67,6 +67,7 @@ const RadialGlow = ({ className }: { className: string }) => (
 
 type StepStatus = "upcoming" | "active" | "done";
 type RoleType = "donor" | "organization" | null;
+type AuthenticatedRoleType = "donor" | "organization" | "honor" | null;
 
 type StepStyle = {
   circleClass: string;
@@ -270,6 +271,7 @@ export default function RegisterPage() {
   const [kycSubmitErrorMessage, setKycSubmitErrorMessage] = useState<string>("");
   const [createdWalletAddress, setCreatedWalletAddress] = useState<string>("");
   const [registeredUserEmail, setRegisteredUserEmail] = useState<string>("");
+  const [authenticatedRole, setAuthenticatedRole] = useState<AuthenticatedRoleType>(null);
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
   const router = useRouter();
@@ -346,6 +348,7 @@ export default function RegisterPage() {
   // Ghi chú: Chọn vai trò và giữ lại bước đầu tiên của luồng đăng ký.
   const handleRoleSelect = (role: RoleType) => {
     setSelectedRole(role);
+    setAuthenticatedRole(null);
     setCurrentStep(1);
   };
 
@@ -384,12 +387,14 @@ export default function RegisterPage() {
         fullName?: string;
         walletAddress?: string;
         email?: string;
-        role?: "donor" | "organization";
+        role?: "donor" | "organization" | "honor";
       };
     }) => {
       const userWalletAddress = responseData?.user?.walletAddress || "";
+      const responseUserRole = (responseData?.user?.role || null) as AuthenticatedRoleType;
       setCreatedWalletAddress(userWalletAddress);
       setRegisteredUserEmail(responseData?.user?.email || "");
+      setAuthenticatedRole(responseUserRole);
       persistAuthSession({
         accessToken: responseData?.accessToken,
         refreshToken: responseData?.refreshToken,
@@ -399,7 +404,20 @@ export default function RegisterPage() {
         userFullName: responseData?.user?.fullName || "Người dùng",
       });
 
-      if (responseData?.user?.role === "organization") {
+      // Ghi chú logic phức tạp: trong luồng đăng ký tổ chức, luôn xét role từ response đăng nhập mới nhất.
+      // - role organization: đã có tài khoản tổ chức => chặn tạo lại.
+      // - role donor/honor/chưa có role rõ ràng (null): cho phép đi tiếp Step 3 để nộp KYC.
+      const isOrganizationRegistrationFlow = selectedRole === "organization";
+      if (isOrganizationRegistrationFlow) {
+        if (responseUserRole === "organization") {
+          setRegisterErrorMessage("Bạn đã có tài khoản tổ chức từ thiện rồi, không cần tạo lại. Hệ thống sẽ chuyển hướng về trang chủ.");
+          setCurrentStep(2);
+          window.setTimeout(() => {
+            router.push("/");
+          }, 1800);
+          return;
+        }
+
         setCurrentStep(3);
         return;
       }
@@ -407,7 +425,7 @@ export default function RegisterPage() {
       setIsGoogleSuccessVisible(true);
       router.push("/");
     },
-    [router]
+    [router, selectedRole]
   );
 
   /**
@@ -424,6 +442,10 @@ export default function RegisterPage() {
     async (idToken: string) => {
       setIsRegisterProcessing(true);
       setRegisterErrorMessage("");
+
+      // Ghi chú logic phức tạp: luôn reset role đã xác thực trước khi login mới,
+      // để quyền nộp KYC chỉ dựa trên kết quả đăng nhập hiện tại từ backend.
+      setAuthenticatedRole(null);
       triggerProgressBar();
 
       try {
@@ -699,6 +721,13 @@ export default function RegisterPage() {
    * Mục đích: nộp metadata KYC và file base64 tới API xác minh tổ chức.
    */
   const handleSubmitKyc = async () => {
+    const isAllowedRoleForOrganizationKyc =
+      authenticatedRole === "honor" || authenticatedRole === "donor" || authenticatedRole === null;
+    if (selectedRole !== "organization" || !isAllowedRoleForOrganizationKyc) {
+      setKycSubmitErrorMessage("Bạn không có quyền nộp hồ sơ KYC ở luồng này.");
+      return;
+    }
+
     if (organizationFiles.length === 0) {
       setKycSubmitErrorMessage("Vui lòng chọn ít nhất 1 file hồ sơ.");
       return;
@@ -743,6 +772,7 @@ export default function RegisterPage() {
         body: JSON.stringify({
           organizationName: organizationName.trim(),
           legalRegistrationNumber: organizationTaxCode.trim(),
+          officialWebsite: organizationWebsite.trim(),
           organizationDescription: organizationDescription.trim(),
           files: kycFilesPayload,
         }),
@@ -794,7 +824,7 @@ export default function RegisterPage() {
       return;
     }
 
-    if (currentStep === 3 && isKycReady) {
+    if (currentStep === 3 && selectedRole === "organization" && isKycReady) {
       handleSubmitKyc();
     }
   };
@@ -1240,7 +1270,7 @@ export default function RegisterPage() {
               </div>
             )}
 
-            {currentStep === 3 && (
+            {currentStep === 3 && selectedRole === "organization" && (
               <div>
                 <div className="text-sm font-semibold text-emerald-600">Xác minh tổ chức 🏛</div>
                 <h1 className="mt-2 text-2xl font-semibold text-slate-900">Hoàn tất KYC</h1>

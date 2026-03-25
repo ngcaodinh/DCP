@@ -2,8 +2,12 @@ import crypto from 'crypto';
 import { AuthUser, findUserById, findUserByLegalRegistrationNumber, updateUser } from '../models/authModel';
 import {
   OrganizationKycFile,
+  OrganizationKycSubmission,
   createOrganizationKycSubmission,
-  getLatestSubmissionVersion
+  findPendingKycSubmissions,
+  findSubmissionBySubmissionId,
+  getLatestSubmissionVersion,
+  updateOrganizationKycSubmissionReview
 } from '../models/organizationKycModel';
 
 export type OrganizationKycFileInput = {
@@ -17,6 +21,7 @@ export type OrganizationKycFileInput = {
 export type OrganizationKycSubmitPayload = {
   organizationName: string;
   legalRegistrationNumber: string;
+  officialWebsite: string;
   organizationDescription: string;
   files: OrganizationKycFileInput[];
 };
@@ -137,8 +142,8 @@ export async function submitOrganizationKyc(
   validateOrganizationKycPayload(payload);
 
   const organizationUser = await findUserById(userId);
-  if (!organizationUser || organizationUser.role !== 'organization') {
-    throw new Error('Tài khoản không hợp lệ để nộp KYC.');
+  if (!organizationUser || (organizationUser.role !== 'honor' && organizationUser.role !== 'donor')) {
+    throw new Error('Chỉ tài khoản role donor hoặc honor mới được nộp hồ sơ KYC.');
   }
 
   const existingLegalRegistrationOwner = await findUserByLegalRegistrationNumber(payload.legalRegistrationNumber.trim());
@@ -171,6 +176,10 @@ export async function submitOrganizationKyc(
     await createOrganizationKycSubmission({
       submissionId,
       organizationId: organizationUser.id,
+      organizationName: payload.organizationName.trim(),
+      legalRegistrationNumber: payload.legalRegistrationNumber.trim(),
+      officialWebsite: payload.officialWebsite.trim() || null,
+      organizationDescription: payload.organizationDescription.trim(),
       version: nextVersion,
       status: 'PENDING_REVIEW',
       submittedBy: organizationUser.id,
@@ -195,6 +204,10 @@ export async function submitOrganizationKyc(
     await createOrganizationKycSubmission({
       submissionId,
       organizationId: organizationUser.id,
+      organizationName: payload.organizationName.trim(),
+      legalRegistrationNumber: payload.legalRegistrationNumber.trim(),
+      officialWebsite: payload.officialWebsite.trim() || null,
+      organizationDescription: payload.organizationDescription.trim(),
       version: nextVersion,
       status: 'SUBMISSION_ERROR',
       submittedBy: organizationUser.id,
@@ -206,6 +219,124 @@ export async function submitOrganizationKyc(
     });
 
     throw new Error('Đã upload file lên IPFS nhưng lưu metadata thất bại. Hồ sơ ở trạng thái SUBMISSION_ERROR.');
+  }
+}
+
+export type OrganizationKycReviewAction = 'approve' | 'reject';
+
+export type OrganizationKycReviewPayload = {
+  action: OrganizationKycReviewAction;
+  rejectionReason?: string;
+};
+
+export type OrganizationKycReviewResult = {
+  submission: OrganizationKycSubmission;
+  accountUpdate: {
+    userId: string;
+    previousRole: string;
+    updatedRole: string;
+    previousAccountStatus: AuthUser['accountStatus'];
+    updatedAccountStatus: AuthUser['accountStatus'];
+    roleUpdated: boolean;
+  };
+};
+
+/**
+ * Hàm lấy danh sách hồ sơ KYC chờ duyệt.
+ * Mục đích: cung cấp dữ liệu cho giao diện regulatory xử lý phê duyệt.
+ */
+export async function getPendingOrganizationKycSubmissions(): Promise<OrganizationKycSubmission[]> {
+  return findPendingKycSubmissions();
+}
+
+/**
+ * Hàm xử lý phê duyệt hoặc từ chối hồ sơ KYC.
+ * Mục đích: cập nhật đồng bộ trạng thái hồ sơ và trạng thái tài khoản theo kết quả review.
+ */
+export async function reviewOrganizationKycSubmission(
+  reviewerUserId: string,
+  payload: { submissionId: string; reviewPayload: OrganizationKycReviewPayload }
+): Promise<OrganizationKycReviewResult> {
+  const existingSubmission = await findSubmissionBySubmissionId(payload.submissionId);
+  if (!existingSubmission) {
+    throw new Error('Không tìm thấy hồ sơ KYC cần xử lý.');
+  }
+
+  if (existingSubmission.status !== 'PENDING_REVIEW') {
+    throw new Error('Hồ sơ này không còn ở trạng thái chờ duyệt.');
+  }
+
+  const organizationUser = await findUserById(existingSubmission.organizationId);
+  if (!organizationUser) {
+    throw new Error('Không tìm thấy tài khoản tổ chức tương ứng hồ sơ KYC.');
+  }
+
+  const normalizedAction = payload.reviewPayload.action;
+  const normalizedRejectionReason = payload.reviewPayload.rejectionReason?.trim() || '';
+
+  if (normalizedAction === 'reject' && normalizedRejectionReason.length === 0) {
+    throw new Error('Vui lòng nhập lý do từ chối hồ sơ KYC.');
+  }
+
+  const reviewStatus = normalizedAction === 'approve' ? 'APPROVED' : 'REJECTED';
+  const reviewDateTime = new Date();
+  const nextRole = normalizedAction === 'approve' ? 'organizations' : organizationUser.role;
+  const nextAccountStatus = normalizedAction === 'approve' ? 'ACTIVE' : 'INACTIVE_PENDING_KYC';
+
+  const reviewedFiles = existingSubmission.files.map((fileItem) => ({
+    ...fileItem,
+    reviewStatus,
+    reviewedBy: reviewerUserId,
+    reviewedAt: reviewDateTime,
+    rejectionReason: normalizedAction === 'reject' ? normalizedRejectionReason : null
+  }));
+
+  const updatedSubmission = await updateOrganizationKycSubmissionReview(existingSubmission.submissionId, {
+    status: reviewStatus,
+    reviewedBy: reviewerUserId,
+    reviewedAt: reviewDateTime,
+    rejectionReason: normalizedAction === 'reject' ? normalizedRejectionReason : null,
+    files: reviewedFiles
+  });
+
+  if (!updatedSubmission) {
+    throw new Error('Cập nhật trạng thái hồ sơ KYC thất bại.');
+  }
+
+  try {
+    const updatedOrganizationUser = await updateUser({
+      ...organizationUser,
+      role: nextRole,
+      accountStatus: nextAccountStatus
+    });
+
+    if (normalizedAction === 'approve' && updatedOrganizationUser.role !== 'organizations') {
+      throw new Error('Đã phê duyệt hồ sơ nhưng không thể cập nhật role tài khoản thành organizations.');
+    }
+
+    return {
+      submission: updatedSubmission,
+      accountUpdate: {
+        userId: organizationUser.id,
+        previousRole: organizationUser.role,
+        updatedRole: updatedOrganizationUser.role,
+        previousAccountStatus: organizationUser.accountStatus,
+        updatedAccountStatus: updatedOrganizationUser.accountStatus,
+        roleUpdated: organizationUser.role !== updatedOrganizationUser.role
+      }
+    };
+  } catch (error) {
+    // Ghi chú logic phức tạp: rollback trạng thái submission về PENDING_REVIEW khi cập nhật account thất bại,
+    // nhằm tránh sai lệch dữ liệu kiểu "hồ sơ đã approve nhưng role chưa đổi".
+    await updateOrganizationKycSubmissionReview(existingSubmission.submissionId, {
+      status: existingSubmission.status,
+      reviewedBy: existingSubmission.reviewedBy,
+      reviewedAt: existingSubmission.reviewedAt,
+      rejectionReason: existingSubmission.rejectionReason,
+      files: existingSubmission.files
+    });
+
+    throw new Error(error instanceof Error ? error.message : 'Phê duyệt hồ sơ thất bại do lỗi cập nhật role tài khoản.');
   }
 }
 

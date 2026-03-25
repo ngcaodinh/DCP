@@ -333,11 +333,9 @@ export async function loginWithGoogle(
   } else {
     handleNewDeviceLogin(existingUser, ipAddress, userAgent);
 
-    // Ghi chú logic phức tạp: khóa vai trò theo tài khoản đã tồn tại để tránh nâng quyền trái phép từ phía client.
-    if (existingUser.role !== role) {
-      throw new Error('Vai trò đăng nhập không khớp với tài khoản đã đăng ký.');
-    }
-
+    // Ghi chú logic phức tạp: với tài khoản đã tồn tại, hệ thống luôn lấy role từ DB làm nguồn sự thật.
+    // Cách này cho phép tài khoản regulatory/admin đăng nhập ổn định ngay cả khi FE gửi role mặc định donor.
+    // Đồng thời vẫn không làm thay đổi role trong DB, nên không phát sinh nâng quyền trái phép từ client.
     authenticatedUser = await updateUser({
       ...existingUser,
       lastLoginAt: new Date(),

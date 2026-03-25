@@ -5,7 +5,11 @@ import {
   logFailedGoogleLogin,
   revokeAllRefreshSessionsForUser
 } from '../services/authService';
-import { submitOrganizationKyc } from '../services/organizationKycService';
+import {
+  getPendingOrganizationKycSubmissions,
+  reviewOrganizationKycSubmission,
+  submitOrganizationKyc
+} from '../services/organizationKycService';
 import { getLogger } from '../config/logger';
 
 const logger = getLogger();
@@ -198,9 +202,9 @@ export async function handleOrganizationKycSubmission(request: Request, response
     return;
   }
 
-  if (authenticatedRequest.authenticatedUser.role !== 'organization') {
+  if (authenticatedRequest.authenticatedUser.role !== 'honor' && authenticatedRequest.authenticatedUser.role !== 'donor') {
     response.status(403).json({
-      message: 'Chỉ tài khoản tổ chức từ thiện mới được nộp KYC.'
+      message: 'Chỉ tài khoản role donor hoặc honor mới được nộp hồ sơ KYC.'
     });
     return;
   }
@@ -215,6 +219,94 @@ export async function handleOrganizationKycSubmission(request: Request, response
     logger.error('Organization KYC submission failed.', {
       errorMessage: (error as Error).message
     });
+    response.status(400).json({
+      message: (error as Error).message
+    });
+  }
+
+}
+
+/**
+ * Hàm lấy danh sách hồ sơ KYC chờ duyệt cho Regulatory/Admin.
+ * Mục đích: cung cấp dữ liệu review theo đúng trạng thái PENDING_REVIEW.
+ */
+export async function handleGetPendingOrganizationKycSubmissions(request: Request, response: Response): Promise<void> {
+  const authenticatedRequest = request as Request & {
+    authenticatedUser?: { userId: string; role: string };
+  };
+
+  if (!authenticatedRequest.authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
+    response.status(403).json({
+      message: 'Bạn không có quyền xem danh sách hồ sơ KYC chờ duyệt.'
+    });
+    return;
+  }
+
+  const pendingSubmissionList = await getPendingOrganizationKycSubmissions();
+  response.status(200).json({
+    submissions: pendingSubmissionList
+  });
+}
+
+/**
+ * Hàm xử lý duyệt hoặc từ chối hồ sơ KYC.
+ * Mục đích: cập nhật trạng thái hồ sơ theo hành động review từ Regulatory/Admin.
+ */
+export async function handleReviewOrganizationKycSubmission(request: Request, response: Response): Promise<void> {
+  const authenticatedRequest = request as Request & {
+    authenticatedUser?: { userId: string; role: string };
+  };
+
+  if (!authenticatedRequest.authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
+    response.status(403).json({
+      message: 'Bạn không có quyền duyệt hồ sơ KYC.'
+    });
+    return;
+  }
+
+  const submissionId = typeof request.params.submissionId === 'string' ? request.params.submissionId.trim() : '';
+  if (submissionId.length === 0) {
+    response.status(400).json({
+      message: 'Thiếu submissionId để xử lý hồ sơ.'
+    });
+    return;
+  }
+
+  try {
+    const reviewResult = await reviewOrganizationKycSubmission(authenticatedRequest.authenticatedUser.userId, {
+      submissionId,
+      reviewPayload: request.body
+    });
+
+    logger.info('Organization KYC review completed.', {
+      submissionId,
+      accountUpdate: reviewResult.accountUpdate
+    });
+
+    response.status(200).json({
+      message: 'Cập nhật trạng thái hồ sơ KYC thành công.',
+      submission: reviewResult.submission,
+      accountUpdate: reviewResult.accountUpdate
+    });
+  } catch (error) {
+    logger.error('Organization KYC review failed.', {
+      errorMessage: (error as Error).message
+    });
+
     response.status(400).json({
       message: (error as Error).message
     });

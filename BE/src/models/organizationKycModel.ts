@@ -18,15 +18,19 @@ export type OrganizationKycFile = {
 export type OrganizationKycSubmission = {
   submissionId: string;
   organizationId: string;
+  organizationName: string;
+  legalRegistrationNumber: string;
+  officialWebsite: string | null;
+  organizationDescription: string;
   version: number;
   status:
-    | 'DRAFT'
-    | 'SUBMITTED'
-    | 'PENDING_REVIEW'
-    | 'APPROVED'
-    | 'REJECTED'
-    | 'RESUBMITTED'
-    | 'SUBMISSION_ERROR';
+  | 'DRAFT'
+  | 'SUBMITTED'
+  | 'PENDING_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'RESUBMITTED'
+  | 'SUBMISSION_ERROR';
   submittedBy: string;
   submittedAt: Date;
   reviewedBy: string | null;
@@ -53,6 +57,10 @@ const organizationKycFileSchema = new Schema<OrganizationKycFile>({
 const organizationKycSubmissionSchema = new Schema<OrganizationKycSubmission>({
   submissionId: { type: String, required: true, unique: true },
   organizationId: { type: String, required: true, index: true },
+  organizationName: { type: String, required: true },
+  legalRegistrationNumber: { type: String, required: true },
+  officialWebsite: { type: String, default: null },
+  organizationDescription: { type: String, required: true },
   version: { type: Number, required: true },
   status: { type: String, required: true },
   submittedBy: { type: String, required: true },
@@ -102,5 +110,53 @@ export async function findSubmissionsByOrganizationId(
     .sort({ version: -1 })
     .lean<OrganizationKycSubmission[]>()
     .exec();
+}
+
+/**
+ * Hàm lấy danh sách hồ sơ KYC chờ duyệt.
+ * Mục đích: phục vụ màn hình review cho Regulatory/Admin.
+ */
+export async function findPendingKycSubmissions(): Promise<OrganizationKycSubmission[]> {
+  return OrganizationKycSubmissionModel.find({ status: 'PENDING_REVIEW' })
+    .sort({ submittedAt: 1 })
+    .lean<OrganizationKycSubmission[]>()
+    .exec();
+}
+
+/**
+ * Hàm tìm hồ sơ KYC theo submissionId.
+ * Mục đích: lấy đúng bản ghi để xử lý phê duyệt hoặc từ chối.
+ */
+export async function findSubmissionBySubmissionId(submissionId: string): Promise<OrganizationKycSubmission | null> {
+  return OrganizationKycSubmissionModel.findOne({ submissionId }).lean<OrganizationKycSubmission>().exec();
+}
+
+/**
+ * Hàm cập nhật kết quả review hồ sơ KYC.
+ * Mục đích: lưu trạng thái duyệt cuối cùng và metadata reviewer.
+ */
+export async function updateOrganizationKycSubmissionReview(
+  submissionId: string,
+  reviewData: {
+    status: 'APPROVED' | 'REJECTED';
+    reviewedBy: string;
+    reviewedAt: Date;
+    rejectionReason: string | null;
+    files: OrganizationKycFile[];
+  }
+): Promise<OrganizationKycSubmission | null> {
+  const updatedSubmission = await OrganizationKycSubmissionModel.findOneAndUpdate(
+    { submissionId },
+    {
+      status: reviewData.status,
+      reviewedBy: reviewData.reviewedBy,
+      reviewedAt: reviewData.reviewedAt,
+      rejectionReason: reviewData.rejectionReason,
+      files: reviewData.files
+    },
+    { returnDocument: 'after' }
+  ).exec();
+
+  return updatedSubmission ? (updatedSubmission.toObject() as OrganizationKycSubmission) : null;
 }
 

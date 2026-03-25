@@ -187,7 +187,7 @@ export default function LoginPage() {
         const csrfToken = responseData?.csrfToken as string | undefined;
         const refreshSessionId = responseData?.refreshSessionId as string | undefined;
         const refreshTokenExpiresAt = responseData?.expiresAt as string | undefined;
-        const userData = responseData?.user as { fullName?: string; walletAddress?: string } | undefined;
+        const userData = responseData?.user as { fullName?: string; walletAddress?: string; role?: string } | undefined;
         const correlationIdValue = responseData?.correlationId as string | undefined;
 
         persistAuthSession({
@@ -204,8 +204,9 @@ export default function LoginPage() {
         setCorrelationId(correlationIdValue || '');
         setIsSuccessVisible(true);
 
-        // Ghi chú logic phức tạp: chuyển trang sau khi lưu session để Home đọc được trạng thái đăng nhập ngay.
-        router.push('/');
+        // Ghi chú logic phức tạp: điều hướng theo role để Regulatory vào đúng màn hình nghiệp vụ ngay sau đăng nhập.
+        const redirectPath = userData?.role === 'regulatory' ? '/regulatory-bodies' : '/';
+        router.push(redirectPath);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';
         setAuthErrorMessage(errorMessage);

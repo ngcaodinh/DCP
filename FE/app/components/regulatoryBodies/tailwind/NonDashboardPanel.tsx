@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { readAuthSession } from '../../../utils/authSession';
 import { getPageTitle } from './helpers';
 import type { PageKey, UrgentRequestItem } from './types';
 
@@ -213,142 +214,333 @@ function DisbursementPanel({ onOpenDisbursementRequest }: { onOpenDisbursementRe
   );
 }
 
-type KycProfileItem = {
-  profileId: string;
-  organizationNameText: string;
-  submittedDateText: string;
-  versionText: string;
-  reviewStateCodeText: string;
-  statusLabelText: string;
-  statusClassName: string;
-  avatarGradientClassName: string;
-  legalNameText: string;
-  taxCodeText: string;
-  representativeNameText: string;
-  registeredDateText: string;
-  addressText: string;
-  ipfsDocumentNameList: string[];
-  ipfsCidText: string;
+type KycSubmissionFileItem = {
+  cid: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  documentType: string;
 };
 
-const kycProfileItemList: KycProfileItem[] = [
-  {
-    profileId: 'ORG-061', organizationNameText: 'Hội Từ thiện Cần Thơ', submittedDateText: '21/03/2026', versionText: 'v1', reviewStateCodeText: 'PENDING_REVIEW',
-    statusLabelText: 'Chờ duyệt', statusClassName: 'bg-amber-100 text-amber-700 border-amber-200', avatarGradientClassName: 'from-sky-500 to-slate-900',
-    legalNameText: 'Hội Từ thiện Cần Thơ', taxCodeText: '1800123456', representativeNameText: 'Nguyễn Văn Minh', registeredDateText: '15/06/2019',
-    addressText: '150 Trần Hưng Đạo, Ninh Kiều, Cần Thơ', ipfsDocumentNameList: ['Giấy phép hoạt động.pdf', 'Điều lệ tổ chức.pdf', 'CCCD người đại diện.pdf'], ipfsCidText: 'Qmf4z9R...xPwL3K'
-  },
-  {
-    profileId: 'ORG-058', organizationNameText: 'Quỹ Hy Vọng Xanh', submittedDateText: '20/03/2026', versionText: 'v2', reviewStateCodeText: 'RESUBMITTED',
-    statusLabelText: 'Chờ duyệt', statusClassName: 'bg-amber-100 text-amber-700 border-amber-200', avatarGradientClassName: 'from-amber-500 to-orange-600',
-    legalNameText: 'Quỹ Hy Vọng Xanh', taxCodeText: '0102234567', representativeNameText: 'Lê Thị Thanh', registeredDateText: '03/09/2020',
-    addressText: '12 Lê Đại Hành, Hai Bà Trưng, Hà Nội', ipfsDocumentNameList: ['Hồ sơ cập nhật pháp lý.pdf', 'Biên bản đại hội.pdf'], ipfsCidText: 'QmL8g2Y...kPq81B'
-  },
-  {
-    profileId: 'ORG-053', organizationNameText: 'Tổ chức Thiện Tâm VN', submittedDateText: '19/03/2026', versionText: 'v1', reviewStateCodeText: 'PENDING_REVIEW',
-    statusLabelText: 'Chờ duyệt', statusClassName: 'bg-amber-100 text-amber-700 border-amber-200', avatarGradientClassName: 'from-emerald-500 to-green-700',
-    legalNameText: 'Tổ chức Thiện Tâm Việt Nam', taxCodeText: '0304455667', representativeNameText: 'Phan Quốc Khánh', registeredDateText: '11/01/2018',
-    addressText: '88 Pasteur, Quận 1, TP Hồ Chí Minh', ipfsDocumentNameList: ['Giấy xác nhận địa chỉ.pdf'], ipfsCidText: 'QmN3f7A...jR2kLm'
-  },
-  {
-    profileId: 'ORG-047', organizationNameText: 'Mái ấm Từ Tâm', submittedDateText: '18/03/2026', versionText: 'v1', reviewStateCodeText: 'APPROVED',
-    statusLabelText: 'Đã duyệt', statusClassName: 'bg-emerald-100 text-emerald-700 border-emerald-200', avatarGradientClassName: 'from-indigo-500 to-indigo-700',
-    legalNameText: 'Mái ấm Từ Tâm', taxCodeText: '0409988776', representativeNameText: 'Trịnh Anh Khoa', registeredDateText: '07/07/2017',
-    addressText: '5 Nguyễn Văn Linh, Hải Châu, Đà Nẵng', ipfsDocumentNameList: ['Giấy chứng nhận hoạt động xã hội.pdf'], ipfsCidText: 'QmP8w4D...hL19mZ'
-  },
-  {
-    profileId: 'ORG-039', organizationNameText: 'Sen Vàng Foundation', submittedDateText: '17/03/2026', versionText: 'v1', reviewStateCodeText: 'REJECTED',
-    statusLabelText: 'Từ chối', statusClassName: 'bg-red-100 text-red-700 border-red-200', avatarGradientClassName: 'from-rose-500 to-red-800',
-    legalNameText: 'Sen Vàng Foundation', taxCodeText: '0312348899', representativeNameText: 'Đinh Gia Hưng', registeredDateText: '26/04/2021',
-    addressText: '20 Võ Văn Kiệt, Ninh Kiều, Cần Thơ', ipfsDocumentNameList: ['Hồ sơ pháp lý thiếu chữ ký.pdf'], ipfsCidText: 'QmA1b5X...pQ83cV'
-  }
-];
+type KycSubmissionItem = {
+  submissionId: string;
+  organizationId: string;
+  version: number;
+  status: string;
+  submittedAt: string;
+  rejectionReason: string | null;
+  organizationName: string;
+  legalRegistrationNumber: string;
+  officialWebsite: string | null;
+  organizationDescription: string;
+  files: KycSubmissionFileItem[];
+};
 
-/** Hàm hiển thị panel Duyệt Hồ sơ KYC bám theo bố cục split-layout của file mẫu. */
+/** Hàm chuyển byte sang chuỗi dung lượng để hiển thị danh sách tài liệu dễ đọc. */
+function formatFileSize(fileSizeInBytes: number): string {
+  if (fileSizeInBytes < 1024) return `${fileSizeInBytes} B`;
+  if (fileSizeInBytes < 1024 * 1024) return `${(fileSizeInBytes / 1024).toFixed(1)} KB`;
+  return `${(fileSizeInBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/** Hàm định dạng thời gian nộp hồ sơ KYC theo locale tiếng Việt. */
+function formatSubmissionTime(submittedAt: string): string {
+  return new Date(submittedAt).toLocaleString('vi-VN');
+}
+
+/** Hàm chuẩn hóa nhãn loại tài liệu để người dùng dễ hiểu hơn. */
+function resolveDocumentTypeLabel(documentType: string): string {
+  if (documentType === 'LEGAL_DOCUMENT') {
+    return 'Giấy tờ pháp lý';
+  }
+
+  return documentType;
+}
+
+/** Hàm hiển thị panel Duyệt Hồ sơ KYC bằng dữ liệu backend thật. */
 function KycPanel() {
-  const [selectedProfileId, setSelectedProfileId] = useState(kycProfileItemList[0]?.profileId ?? '');
-  const selectedProfileItem = kycProfileItemList.find((kycProfileItem) => kycProfileItem.profileId === selectedProfileId) ?? kycProfileItemList[0];
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [submissionList, setSubmissionList] = useState<KycSubmissionItem[]>([]);
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [isApproveConfirmModalVisible, setIsApproveConfirmModalVisible] = useState(false);
+
+  const selectedSubmission = submissionList.find(submissionItem => submissionItem.submissionId === selectedSubmissionId) || null;
+
+  /** Hàm gọi API lấy danh sách hồ sơ KYC chờ duyệt. */
+  const loadPendingSubmissionList = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const authSession = readAuthSession();
+      const accessToken = authSession.accessToken || '';
+
+      if (!accessToken) {
+        throw new Error('Bạn cần đăng nhập tài khoản Regulatory/Admin trước khi duyệt KYC.');
+      }
+
+      const response = await fetch(`${backendBaseUrl}/auth/organization/kyc-submissions/pending`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const responseData = await response.json();
+
+      if (response.status === 401) {
+        throw new Error('Phiên đăng nhập đã hết hạn hoặc thiếu access token. Vui lòng đăng nhập lại.');
+      }
+
+      if (response.status === 403) {
+        throw new Error('Bạn không có quyền truy cập màn hình duyệt KYC. Chỉ Regulatory/Admin được phép.');
+      }
+
+      if (!response.ok) throw new Error(responseData?.message || 'Không thể tải danh sách hồ sơ KYC.');
+
+      // Ghi chú logic phức tạp: chuẩn hóa dữ liệu fallback để UI luôn hiển thị đủ thông tin chính.
+      const normalizedSubmissionList = (responseData?.submissions || []).map((submissionItem: any) => ({
+        ...submissionItem,
+        organizationName: submissionItem.organizationName || submissionItem.organizationId,
+        legalRegistrationNumber: submissionItem.legalRegistrationNumber || 'Chưa cập nhật',
+        officialWebsite: submissionItem.officialWebsite || null,
+        organizationDescription: submissionItem.organizationDescription || 'Chưa cập nhật mô tả tổ chức.'
+      })) as KycSubmissionItem[];
+
+      setSubmissionList(normalizedSubmissionList);
+      setSelectedSubmissionId((previousSubmissionId) => {
+        // Ghi chú logic phức tạp: nếu hồ sơ cũ đã được duyệt và biến mất khỏi danh sách,
+        // tự động chọn hồ sơ đầu tiên còn lại để tránh panel chi tiết rơi vào trạng thái rỗng.
+        const hasPreviousSubmission = normalizedSubmissionList.some(
+          (submissionItem) => submissionItem.submissionId === previousSubmissionId
+        );
+        if (hasPreviousSubmission) {
+          return previousSubmissionId;
+        }
+
+        return normalizedSubmissionList[0]?.submissionId || '';
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Không thể tải danh sách hồ sơ KYC.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [backendBaseUrl]);
+
+  /** Hàm gửi hành động duyệt hồ sơ KYC lên backend. */
+  const submitKycReview = useCallback(async (action: 'approve' | 'reject') => {
+    if (!selectedSubmission) return;
+    if (action === 'reject' && rejectReason.trim().length === 0) {
+      setErrorMessage('Vui lòng nhập lý do từ chối trước khi Reject.');
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      const authSession = readAuthSession();
+      const accessToken = authSession.accessToken || '';
+
+      if (!accessToken) {
+        throw new Error('Bạn cần đăng nhập tài khoản Regulatory/Admin trước khi duyệt KYC.');
+      }
+
+      const response = await fetch(`${backendBaseUrl}/auth/organization/kyc-submissions/${selectedSubmission.submissionId}/review`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ action, rejectionReason: action === 'reject' ? rejectReason.trim() : undefined })
+      });
+      const responseData = await response.json();
+
+      if (response.status === 401) {
+        throw new Error('Phiên đăng nhập đã hết hạn hoặc thiếu access token. Vui lòng đăng nhập lại.');
+      }
+
+      if (response.status === 403) {
+        throw new Error('Bạn không có quyền duyệt hồ sơ KYC. Chỉ Regulatory/Admin được phép.');
+      }
+
+      if (!response.ok) throw new Error(responseData?.message || 'Cập nhật trạng thái hồ sơ thất bại.');
+
+      if (action === 'approve') {
+        const accountUpdate = responseData?.accountUpdate;
+        const isRoleUpdatedCorrectly = accountUpdate?.updatedRole === 'organizations';
+
+        // Ghi chú logic phức tạp: FE chỉ báo thành công khi backend xác nhận đã đổi role đúng nghiệp vụ.
+        if (!isRoleUpdatedCorrectly) {
+          throw new Error('Backend chưa xác nhận cập nhật role tài khoản thành organizations. Vui lòng kiểm tra lại.');
+        }
+      }
+
+      setRejectReason('');
+      setSuccessMessage(
+        action === 'approve'
+          ? 'Phê duyệt hồ sơ KYC thành công.'
+          : 'Từ chối hồ sơ KYC thành công.'
+      );
+      await loadPendingSubmissionList();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Cập nhật trạng thái hồ sơ thất bại.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  }, [backendBaseUrl, loadPendingSubmissionList, rejectReason, selectedSubmission]);
+
+  /** Hàm mở modal xác nhận trước khi phê duyệt hồ sơ KYC. */
+  const openApproveConfirmModal = () => {
+    setErrorMessage('');
+    setSuccessMessage('');
+    setIsApproveConfirmModalVisible(true);
+  };
+
+  /** Hàm đóng modal xác nhận phê duyệt hồ sơ KYC. */
+  const closeApproveConfirmModal = () => {
+    if (isSubmittingReview) {
+      return;
+    }
+
+    setIsApproveConfirmModalVisible(false);
+  };
+
+  /** Hàm xác nhận phê duyệt hồ sơ sau khi người dùng bấm nút chắc chắn. */
+  const handleConfirmApproveReview = async () => {
+    setIsApproveConfirmModalVisible(false);
+    await submitKycReview('approve');
+  };
+
+  /** Hàm tải dữ liệu KYC khi panel được hiển thị. */
+  useEffect(() => {
+    loadPendingSubmissionList();
+  }, [loadPendingSubmissionList]);
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
         <h2 className="text-lg font-bold text-slate-900">Duyệt Hồ sơ KYC</h2>
-        <p className="mt-1 text-xs text-slate-500">Xác minh danh tính và hồ sơ pháp lý tổ chức từ thiện</p>
+        <p className="mt-1 text-xs text-slate-500">Danh sách hồ sơ chờ duyệt (PENDING_REVIEW) từ backend</p>
       </div>
-
-      <div className="grid overflow-hidden rounded-xl border border-emerald-900/15 bg-white lg:grid-cols-[340px_1fr]">
-        <div className="border-r border-emerald-900/15 bg-white">
-          <div className="border-b border-emerald-900/15 bg-slate-50 p-4">
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500">
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true"><path d="M11.7 10.3l3 3-1.4 1.4-3-3a6 6 0 111.4-1.4zm-5.7 1a4 4 0 100-8 4 4 0 000 8z" /></svg>
-              <input type="text" placeholder="Tìm tổ chức..." className="w-full bg-transparent text-xs text-slate-700 outline-none placeholder:text-slate-400" />
-            </div>
-          </div>
-
-          <div className="max-h-[620px] overflow-y-auto">
-            {kycProfileItemList.map((kycProfileItem) => {
-              const isActiveItem = kycProfileItem.profileId === selectedProfileItem.profileId;
-              return (
-                <button
-                  key={kycProfileItem.profileId}
-                  type="button"
-                  onClick={() => setSelectedProfileId(kycProfileItem.profileId)}
-                  className={`flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left transition ${isActiveItem ? 'border-l-4 border-l-cyan-500 bg-blue-50' : 'hover:bg-slate-50'}`}
-                >
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-xs font-bold text-white ${kycProfileItem.avatarGradientClassName}`}>{kycProfileItem.organizationNameText.charAt(0)}</div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12.5px] font-semibold text-slate-900">{kycProfileItem.organizationNameText}</p>
-                    <p className="mt-0.5 text-[10.5px] text-slate-500">Nộp: {kycProfileItem.submittedDateText}</p>
-                    <p className="mt-0.5 font-mono text-[10px] text-slate-400">{kycProfileItem.versionText} · {kycProfileItem.reviewStateCodeText}</p>
-                  </div>
-                  <span className={`inline-flex rounded-md border px-2 py-1 text-[9.5px] font-semibold ${kycProfileItem.statusClassName}`}>{kycProfileItem.statusLabelText}</span>
-                </button>
-              );
-            })}
-          </div>
+      {errorMessage ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">{errorMessage}</div> : null}
+      {successMessage ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{successMessage}</div> : null}
+      <div className="grid gap-4 overflow-hidden rounded-xl border border-emerald-900/15 bg-white p-4 lg:grid-cols-[320px_1fr]">
+        <div className="max-h-[620px] overflow-y-auto border-r border-slate-100 pr-3">
+          {isLoading ? <p className="text-xs text-slate-500">Đang tải hồ sơ...</p> : null}
+          {!isLoading && submissionList.length === 0 ? <p className="text-xs text-slate-500">Không có hồ sơ chờ duyệt.</p> : null}
+          {submissionList.map(submissionItem => (
+            <button key={submissionItem.submissionId} type="button" onClick={() => setSelectedSubmissionId(submissionItem.submissionId)} className={`mb-2 w-full rounded-lg border px-3 py-2 text-left ${selectedSubmissionId === submissionItem.submissionId ? 'border-cyan-500 bg-cyan-50' : 'border-slate-200 bg-white'}`}>
+              <p className="text-xs font-semibold text-slate-900">{submissionItem.organizationName}</p>
+              <p className="mt-1 font-mono text-[10px] text-slate-500">submissionId: {submissionItem.submissionId}</p>
+            </button>
+          ))}
         </div>
+        <div>
+          {selectedSubmission ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {selectedSubmission.organizationName} · Phiên bản v{selectedSubmission.version}
+                </h3>
+                <div className="mt-3 grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+                  <p><span className="font-semibold">Mã hồ sơ:</span> {selectedSubmission.submissionId}</p>
+                  <p><span className="font-semibold">Mã tổ chức:</span> {selectedSubmission.organizationId}</p>
+                  <p><span className="font-semibold">Tên tổ chức:</span> {selectedSubmission.organizationName}</p>
+                  <p><span className="font-semibold">MST:</span> {selectedSubmission.legalRegistrationNumber}</p>
+                  <p className="sm:col-span-2"><span className="font-semibold">Website chính thức:</span> {selectedSubmission.officialWebsite || 'Chưa cập nhật'}</p>
+                  <p className="sm:col-span-2"><span className="font-semibold">Mô tả tổ chức:</span> {selectedSubmission.organizationDescription}</p>
+                  <p><span className="font-semibold">Nộp lúc:</span> {formatSubmissionTime(selectedSubmission.submittedAt)}</p>
+                </div>
+              </div>
 
-        <div className="max-h-[620px] overflow-y-auto p-6">
-          <div className="mb-5 flex items-start gap-3 border-b border-emerald-900/15 pb-5">
-            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl font-bold text-white ${selectedProfileItem.avatarGradientClassName}`}>{selectedProfileItem.organizationNameText.charAt(0)}</div>
-            <div>
-              <p className="text-xl font-bold text-slate-900">{selectedProfileItem.organizationNameText}</p>
-              <p className="mt-1 font-mono text-xs text-slate-500">MST: {selectedProfileItem.taxCodeText} · Phiên bản: {selectedProfileItem.versionText}</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-semibold ${selectedProfileItem.statusClassName}`}>⏳ {selectedProfileItem.reviewStateCodeText}</span>
-                <span className="inline-flex rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">Nộp: {selectedProfileItem.submittedDateText}</span>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="mb-3 text-xs font-semibold text-slate-800">Danh sách tài liệu KYC (CID/IPFS)</p>
+                <div className="space-y-3">
+                  {selectedSubmission.files.map((fileItem, fileIndex) => (
+                    <div key={`${selectedSubmission.submissionId}-${fileItem.cid}-${fileItem.fileName}`} className="rounded-lg border border-slate-200 p-3">
+                      <p className="text-xs font-semibold text-slate-900">Tài liệu #{fileIndex + 1}: {fileItem.fileName}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">
+                        {resolveDocumentTypeLabel(fileItem.documentType)} · {fileItem.mimeType} · {formatFileSize(fileItem.fileSize)}
+                      </p>
+                      <p className="mt-2 break-all font-mono text-[11px] text-cyan-700">CID: {fileItem.cid}</p>
+                      <a
+                        href={`https://gateway.pinata.cloud/ipfs/${fileItem.cid}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-2 inline-flex rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100"
+                      >
+                        Mở tài liệu IPFS
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <label className="block text-xs font-semibold text-amber-800">Lý do từ chối (bắt buộc khi từ chối)</label>
+                <textarea
+                  value={rejectReason}
+                  onChange={event => setRejectReason(event.target.value)}
+                  rows={3}
+                  className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
+                  placeholder="Nhập lý do từ chối hồ sơ..."
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isSubmittingReview}
+                  onClick={() => submitKycReview('reject')}
+                  className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  Từ chối
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingReview}
+                  onClick={openApproveConfirmModal}
+                  className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  Chấp nhận
+                </button>
               </div>
             </div>
-          </div>
+          ) : (
+            <p className="text-xs text-slate-500">Chọn hồ sơ để xem chi tiết.</p>
+          )}
+        </div>
+      </div>
 
-          <p className="mb-2 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Thông tin tổ chức</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10.5px] text-slate-500">Tên pháp nhân</p><p className="mt-1 text-xs font-semibold text-slate-900">{selectedProfileItem.legalNameText}</p></div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10.5px] text-slate-500">Mã số thuế</p><p className="mt-1 font-mono text-xs font-semibold text-slate-900">{selectedProfileItem.taxCodeText}</p></div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10.5px] text-slate-500">Người đại diện</p><p className="mt-1 text-xs font-semibold text-slate-900">{selectedProfileItem.representativeNameText}</p></div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3"><p className="text-[10.5px] text-slate-500">Ngày đăng ký</p><p className="mt-1 text-xs font-semibold text-slate-900">{selectedProfileItem.registeredDateText}</p></div>
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 sm:col-span-2"><p className="text-[10.5px] text-slate-500">Địa chỉ</p><p className="mt-1 text-xs font-semibold text-slate-900">{selectedProfileItem.addressText}</p></div>
-          </div>
-
-          <p className="mb-2 mt-5 text-xs font-bold uppercase tracking-[0.08em] text-slate-500">Tài liệu đính kèm (IPFS)</p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {selectedProfileItem.ipfsDocumentNameList.map((ipfsDocumentNameText) => (
-              <button key={ipfsDocumentNameText} type="button" className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left transition hover:bg-slate-50">
-                <span className="text-base">📄</span>
-                <span className="text-xs font-medium text-slate-700">{ipfsDocumentNameText}</span>
+      {isApproveConfirmModalVisible ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-bold text-slate-900">Xác nhận phê duyệt hồ sơ KYC</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Bạn có chắc chắn muốn phê duyệt hồ sơ này không? Sau khi phê duyệt, vai trò tài khoản sẽ được cập nhật.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeApproveConfirmModal}
+                disabled={isSubmittingReview}
+                className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Hủy
               </button>
-            ))}
-          </div>
-          <p className="mt-3 text-[10.5px] text-slate-500">CID: <span className="font-mono text-cyan-600">{selectedProfileItem.ipfsCidText}</span></p>
-
-          <div className="mt-5 border-t border-emerald-900/15 pt-4">
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="flex-1 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200 active:translate-y-px">✗ Từ chối KYC</button>
-              <button type="button" className="flex-[2] rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-200 active:translate-y-px">✓ Phê duyệt KYC</button>
+              <button
+                type="button"
+                onClick={handleConfirmApproveReview}
+                disabled={isSubmittingReview}
+                className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Chắc chắn
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
