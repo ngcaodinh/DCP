@@ -67,7 +67,7 @@ export default function RegulatoryBodiesPageClientTailwind() {
       {isMobileMenuOpen ? (
         <div className="fixed inset-0 z-30 lg:hidden">
           <button type="button" className="absolute inset-0 bg-slate-900/40" onClick={() => setIsMobileMenuOpen(false)} aria-label="Đóng menu" />
-          <div className="relative h-full w-[252px]"><Sidebar selectedPageKey={selectedPageKey} navigationItemList={navigationItemList} onSelectPage={setSelectedPageKey} onCloseMobileMenu={() => setIsMobileMenuOpen(false)} onLogout={() => pushToast('Đăng xuất', 'Phiên làm việc sẽ được kết thúc sau khi tích hợp API xác thực.', 'info')} /></div>
+          <div className="relative h-full w-[248px]"><Sidebar selectedPageKey={selectedPageKey} navigationItemList={navigationItemList} onSelectPage={setSelectedPageKey} onCloseMobileMenu={() => setIsMobileMenuOpen(false)} onLogout={() => pushToast('Đăng xuất', 'Phiên làm việc sẽ được kết thúc sau khi tích hợp API xác thực.', 'info')} /></div>
         </div>
       ) : null}
 
@@ -96,7 +96,7 @@ export default function RegulatoryBodiesPageClientTailwind() {
 
               <AuditTable auditLogItemList={auditLogItemList} />
             </>
-          ) : <NonDashboardPanel selectedPageKey={selectedPageKey} />}
+          ) : <NonDashboardPanel selectedPageKey={selectedPageKey} onOpenDisbursementRequest={handleOpenDrawer} />}
         </div>
       </section>
 

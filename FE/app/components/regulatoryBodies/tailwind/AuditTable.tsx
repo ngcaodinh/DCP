@@ -10,7 +10,7 @@ export default function AuditTable({ auditLogItemList }: AuditTableProps) {
   return (
     <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
       <div className="border-b border-emerald-900/15 px-6 py-3.5">
-        <h2 className="text-[14px] font-bold leading-5 text-slate-900">Top dự án theo giá trị giải ngân theo tháng</h2>
+        <h2 className="text-[14px] font-bold leading-5 text-slate-900">Nhật ký ký duyệt gần nhất</h2>
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5 border-b border-emerald-900/15 bg-slate-50 px-6 py-3">

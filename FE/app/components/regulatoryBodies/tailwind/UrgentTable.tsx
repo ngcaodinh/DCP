@@ -27,31 +27,6 @@ function getSignatureDotClass(dotIndex: number, signedCount: number): string {
   return 'bg-slate-200 text-slate-500';
 }
 
-/** Hàm render icon trạng thái chữ ký bằng SVG để linh hoạt thay đổi theo dữ liệu động. */
-function getSignatureDotIcon(dotIndex: number, signedCount: number) {
-  if (dotIndex < signedCount) {
-    return (
-      <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true">
-        <path d="M3 8.3l2.2 2.2L9.8 5.9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-      </svg>
-    );
-  }
-
-  if (dotIndex === signedCount) {
-    return (
-      <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true">
-        <path d="M8 2.2a5.8 5.8 0 105.8 5.8M8 1v3m0 8v3m7-7h-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg viewBox="0 0 16 16" className="h-3 w-3" aria-hidden="true">
-      <circle cx="8" cy="8" r="2.4" fill="currentColor" />
-    </svg>
-  );
-}
-
 /** Hàm component UrgentTable để hiển thị danh sách yêu cầu gấp và thao tác mở drawer chi tiết. */
 export default function UrgentTable({ urgentRequestItemList, onOpenDrawer }: UrgentTableProps) {
   return (
@@ -85,8 +60,8 @@ export default function UrgentTable({ urgentRequestItemList, onOpenDrawer }: Urg
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1">
                         {Array.from({ length: signatureProgress.totalCount }).map((_, dotIndex) => (
-                          <span key={`${urgentRequestItem.id}-${dotIndex}`} className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${getSignatureDotClass(dotIndex, signatureProgress.signedCount)}`}>
-                            {getSignatureDotIcon(dotIndex, signatureProgress.signedCount)}
+                          <span key={`${urgentRequestItem.id}-${dotIndex}`} className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold ${getSignatureDotClass(dotIndex, signatureProgress.signedCount)}`}>
+                            {dotIndex < signatureProgress.signedCount ? '✓' : dotIndex === signatureProgress.signedCount ? '•' : '○'}
                           </span>
                         ))}
                       </div>
