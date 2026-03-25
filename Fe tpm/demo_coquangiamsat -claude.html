@@ -1,0 +1,3514 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DCP – Cơ quan Giám sát</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Lexend:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --navy: #0A5C50;
+      --navy-mid: #0E7C6B;
+      --navy-light: #1AAE97;
+      --cyan: #1AAE97;
+      --cyan-dim: rgba(26, 174, 151, 0.14);
+      --amber: #F59E0B;
+      --green: #0E9F6E;
+      --red: #DC2626;
+      --bg: #F8FAFB;
+      --card: #FFFFFF;
+      --border: rgba(14, 124, 107, 0.16);
+      --text: #0D1117;
+      --text-mid: #1C2431;
+      --text-light: #6B7280;
+      --mono: 'IBM Plex Mono', monospace;
+      --sans: 'Lexend', 'Be Vietnam Pro', sans-serif;
+      --serif: 'Be Vietnam Pro', sans-serif;
+      --sidebar-w: 248px;
+      --topbar-h: 64px;
+      --radius: 10px;
+      --shadow: 0 2px 12px rgba(13, 17, 23, 0.08);
+      --shadow-md: 0 6px 24px rgba(13, 17, 23, 0.12);
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    html {
+      font-size: 14px;
+      scroll-behavior: smooth
+    }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100vh;
+      overflow-x: hidden
+    }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 99px
+    }
+
+    /* ══════════════════════════════
+   SIDEBAR
+══════════════════════════════ */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-width: var(--sidebar-w);
+      background: var(--navy);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      z-index: 200;
+      overflow-y: auto;
+    }
+
+    .sb-logo {
+      padding: 24px 20px 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .sb-logo .logo-mark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: var(--cyan);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--navy);
+    }
+
+    .logo-text {
+      font-family: var(--serif);
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      line-height: 1.2;
+    }
+
+    .logo-sub {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.45);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .sb-badge {
+      margin-top: 12px;
+      background: rgba(0, 194, 224, 0.12);
+      border: 1px solid rgba(0, 194, 224, 0.25);
+      border-radius: 6px;
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .sb-badge .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan);
+    }
+
+    .sb-badge span {
+      font-size: 10.5px;
+      color: rgba(255, 255, 255, 0.7);
+      letter-spacing: 0.05em;
+      font-weight: 500;
+    }
+
+    .sb-section {
+      padding: 16px 12px 4px;
+      font-size: 9.5px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.3);
+      font-weight: 600;
+    }
+
+    .sb-nav {
+      padding: 0 12px;
+    }
+
+    .sb-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all .18s ease;
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 2px;
+      position: relative;
+      text-decoration: none;
+    }
+
+    .sb-item:hover {
+      background: rgba(255, 255, 255, 0.07);
+      color: #fff;
+    }
+
+    .sb-item.active {
+      background: var(--cyan);
+      color: var(--navy);
+    }
+
+    .sb-item.active .sb-icon {
+      color: var(--navy);
+    }
+
+    .sb-icon {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      opacity: .8;
+    }
+
+    .sb-item.active .sb-icon {
+      opacity: 1;
+    }
+
+    .sb-badge-num {
+      margin-left: auto;
+      background: var(--red);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      border-radius: 99px;
+      padding: 1px 7px;
+      font-family: var(--mono);
+    }
+
+    .sb-item.active .sb-badge-num {
+      background: var(--navy);
+      color: #fff;
+    }
+
+    .sb-footer {
+      margin-top: auto;
+      padding: 16px 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .sb-user {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .sb-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1DB87A, #00C2E0);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .sb-user-info .name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 140px;
+    }
+
+    .sb-user-info .role {
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    .logout-btn {
+      margin-left: auto;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.4);
+      transition: all .15s;
+    }
+
+    .logout-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    /* ══════════════════════════════
+   MAIN WRAPPER
+══════════════════════════════ */
+    .main-wrap {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* ── TOPBAR ── */
+    .topbar {
+      height: var(--topbar-h);
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 28px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      gap: 16px;
+    }
+
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12.5px;
+      color: var(--text-light);
+    }
+
+    .breadcrumb .current {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .bc-sep {
+      color: var(--border);
+      font-size: 10px;
+    }
+
+    .topbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .topbar-logout-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      color: var(--text-mid);
+      font-size: 12px;
+      font-weight: 600;
+      font-family: var(--sans);
+      transition: all .15s;
+    }
+
+    .topbar-logout-btn:hover {
+      background: var(--navy-mid);
+      border-color: var(--navy-mid);
+      color: #fff;
+    }
+
+    .topbar-icon-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-mid);
+      transition: all .15s;
+      position: relative;
+    }
+
+    .topbar-icon-btn:hover {
+      background: var(--bg);
+      border-color: var(--cyan);
+    }
+
+    .notif-badge {
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      width: 16px;
+      height: 16px;
+      background: var(--red);
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #fff;
+    }
+
+    .topbar-divider {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+    }
+
+    .topbar-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 8px;
+      transition: background .15s;
+    }
+
+    .topbar-user:hover {
+      background: var(--bg);
+    }
+
+    .topbar-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #1DB87A, #00C2E0);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .topbar-user-info .tname {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .topbar-user-info .torg {
+      font-size: 10.5px;
+      color: var(--text-light);
+    }
+
+    /* ── CONTENT ── */
+    .content {
+      flex: 1;
+      padding: 28px;
+      overflow-y: auto;
+    }
+
+    /* ── PAGE HEADER ── */
+    .page-header {
+      margin-bottom: 24px;
+    }
+
+    .page-title {
+      font-family: var(--serif);
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.2;
+    }
+
+    .page-sub {
+      font-size: 12.5px;
+      color: var(--text-light);
+      margin-top: 4px;
+    }
+
+    /* ══════════════════════════════
+   METRIC CARDS
+══════════════════════════════ */
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      transition: box-shadow .2s, transform .2s;
+    }
+
+    .metric-card:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+    }
+
+    .metric-card.amber::before {
+      background: linear-gradient(90deg, var(--amber), #FCD34D);
+    }
+
+    .metric-card.cyan::before {
+      background: linear-gradient(90deg, var(--cyan), #7DD3FC);
+    }
+
+    .metric-card.green::before {
+      background: linear-gradient(90deg, var(--green), #6EE7B7);
+    }
+
+    .metric-card.navy::before {
+      background: linear-gradient(90deg, var(--navy-mid), var(--cyan));
+    }
+
+    .metric-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+
+    .metric-card.amber .metric-icon {
+      background: rgba(245, 166, 35, 0.12);
+    }
+
+    .metric-card.cyan .metric-icon {
+      background: rgba(0, 194, 224, 0.12);
+    }
+
+    .metric-card.green .metric-icon {
+      background: rgba(29, 184, 122, 0.12);
+    }
+
+    .metric-card.navy .metric-icon {
+      background: rgba(26, 51, 96, 0.08);
+    }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-size: 28px;
+      font-weight: 500;
+      color: var(--text);
+      line-height: 1;
+    }
+
+    .metric-label {
+      font-size: 11.5px;
+      color: var(--text-light);
+      margin-top: 5px;
+      font-weight: 500;
+    }
+
+    .metric-trend {
+      margin-top: 10px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-family: var(--mono);
+    }
+
+    .trend-up {
+      color: var(--green);
+    }
+
+    .trend-dn {
+      color: var(--red);
+    }
+
+    /* ══════════════════════════════
+   TWO-COLUMN GRID
+══════════════════════════════ */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 16px;
+      margin-bottom: 22px;
+    }
+
+    /* ── CARD BASE ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .card-link {
+      font-size: 11.5px;
+      color: var(--cyan);
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+
+    .card-link:hover {
+      opacity: .7;
+    }
+
+    /* ── URGENT TABLE ── */
+    .urgent-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .urgent-table th {
+      font-size: 10.5px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-light);
+      font-weight: 600;
+      padding: 10px 20px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      background: #FAFBFD;
+    }
+
+    .urgent-table td {
+      padding: 13px 20px;
+      border-bottom: 1px solid #F2F5FB;
+      vertical-align: middle;
+    }
+
+    .urgent-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .urgent-table tr:hover td {
+      background: #F8FAFD;
+    }
+
+    .proj-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .proj-org {
+      font-size: 11px;
+      color: var(--text-light);
+      margin-top: 2px;
+    }
+
+    .amount-cell {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .sig-progress {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sig-dots {
+      display: flex;
+      gap: 3px;
+    }
+
+    .sig-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+    }
+
+    .sig-dot.done {
+      background: var(--green);
+      color: #fff;
+    }
+
+    .sig-dot.mine {
+      background: var(--cyan);
+      color: var(--navy);
+    }
+
+    .sig-dot.pending {
+      background: var(--border);
+      color: var(--text-light);
+    }
+
+    .sig-label {
+      font-size: 11px;
+      color: var(--text-light);
+      font-family: var(--mono);
+    }
+
+    .countdown {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 5px;
+      white-space: nowrap;
+    }
+
+    .countdown.urgent {
+      background: rgba(232, 69, 69, 0.1);
+      color: var(--red);
+    }
+
+    .countdown.normal {
+      background: rgba(245, 166, 35, 0.1);
+      color: #B8820C;
+    }
+
+    .countdown.ok {
+      background: rgba(29, 184, 122, 0.1);
+      color: #138A5A;
+    }
+
+    .action-btn {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      border: none;
+      white-space: nowrap;
+      background: var(--cyan);
+      color: var(--navy);
+    }
+
+    .action-btn:hover {
+      background: #00A8C2;
+      box-shadow: 0 2px 8px rgba(0, 194, 224, 0.35);
+    }
+
+    /* ── DONUT CHART (pure CSS) ── */
+    .donut-wrap {
+      padding: 20px;
+    }
+
+    .donut-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .donut {
+      width: 120px;
+      height: 120px;
+      position: relative;
+    }
+
+    .donut svg {
+      transform: rotate(-90deg);
+    }
+
+    .donut-center {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .donut-total {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .donut-total-label {
+      font-size: 9px;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: .1em;
+    }
+
+    .donut-legend {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    .legend-label {
+      font-size: 11.5px;
+      color: var(--text-mid);
+      flex: 1;
+    }
+
+    .legend-val {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .legend-pct {
+      font-size: 10px;
+      color: var(--text-light);
+    }
+
+    /* ── TIMELINE ── */
+    .timeline {
+      padding: 4px 0;
+    }
+
+    .tl-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 10px 20px;
+      border-bottom: 1px solid #F2F5FB;
+    }
+
+    .tl-item:last-child {
+      border-bottom: none;
+    }
+
+    .tl-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      margin-top: 1px;
+    }
+
+    .tl-icon.sign {
+      background: rgba(0, 194, 224, 0.12);
+      color: var(--cyan);
+    }
+
+    .tl-icon.view {
+      background: rgba(29, 184, 122, 0.12);
+      color: var(--green);
+    }
+
+    .tl-icon.reject {
+      background: rgba(232, 69, 69, 0.1);
+      color: var(--red);
+    }
+
+    .tl-icon.login {
+      background: rgba(26, 51, 96, 0.08);
+      color: var(--navy-mid);
+    }
+
+    .tl-body {
+      flex: 1;
+    }
+
+    .tl-action {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .tl-meta {
+      font-size: 11px;
+      color: var(--text-light);
+      margin-top: 2px;
+    }
+
+    .tl-time {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--text-light);
+      margin-top: 1px;
+      white-space: nowrap;
+    }
+
+    /* ══════════════════════════════
+   AUDIT LOG TABLE
+══════════════════════════════ */
+    .full-card {
+      margin-bottom: 22px;
+    }
+
+    .table-filter-bar {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      background: #FAFBFD;
+    }
+
+    .search-input {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 12px;
+      min-width: 220px;
+    }
+
+    .search-input input {
+      border: none;
+      background: transparent;
+      font-size: 12.5px;
+      color: var(--text);
+      outline: none;
+      width: 100%;
+      font-family: var(--sans);
+    }
+
+    .search-input input::placeholder {
+      color: var(--text-light);
+    }
+
+    .filter-select {
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 10px;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--card);
+      cursor: pointer;
+      outline: none;
+      font-family: var(--sans);
+    }
+
+    .export-btn {
+      margin-left: auto;
+      padding: 7px 14px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-mid);
+      cursor: pointer;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .export-btn:hover {
+      background: var(--navy);
+      color: #fff;
+      border-color: var(--navy);
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .data-table th {
+      padding: 10px 16px;
+      text-align: left;
+      font-size: 10.5px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-light);
+      font-weight: 600;
+      border-bottom: 2px solid var(--border);
+      background: #FAFBFD;
+      white-space: nowrap;
+    }
+
+    .data-table td {
+      padding: 11px 16px;
+      border-bottom: 1px solid #F2F5FB;
+      font-size: 12.5px;
+      vertical-align: middle;
+    }
+
+    .data-table tr:hover td {
+      background: #F8FAFD;
+    }
+
+    .tx-hash {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--cyan);
+      cursor: pointer;
+    }
+
+    .tx-hash:hover {
+      text-decoration: underline;
+    }
+
+    .status-badge {
+      padding: 3px 9px;
+      border-radius: 99px;
+      font-size: 10.5px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge-green {
+      background: rgba(29, 184, 122, 0.1);
+      color: #138A5A;
+    }
+
+    .badge-amber {
+      background: rgba(245, 166, 35, 0.1);
+      color: #B8820C;
+    }
+
+    .badge-red {
+      background: rgba(232, 69, 69, 0.1);
+      color: var(--red);
+    }
+
+    .badge-blue {
+      background: rgba(0, 194, 224, 0.1);
+      color: #0090A8;
+    }
+
+    .badge-gray {
+      background: rgba(138, 155, 184, 0.12);
+      color: var(--text-light);
+    }
+
+    .pagination {
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #FAFBFD;
+    }
+
+    .pag-info {
+      font-size: 12px;
+      color: var(--text-light);
+    }
+
+    .pag-controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .pag-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      color: var(--text-mid);
+      transition: all .15s;
+    }
+
+    .pag-btn:hover,
+    .pag-btn.active {
+      background: var(--navy);
+      color: #fff;
+      border-color: var(--navy);
+    }
+
+    .pag-select {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--card);
+      outline: none;
+    }
+
+    /* ══════════════════════════════
+   DRAWER OVERLAY
+══════════════════════════════ */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 32, 64, 0.45);
+      z-index: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s ease;
+      backdrop-filter: blur(2px);
+    }
+
+    .overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 600px;
+      max-width: 100vw;
+      background: var(--card);
+      z-index: 501;
+      transform: translateX(100%);
+      transition: transform .3s cubic-bezier(.25, .8, .25, 1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #F0F4FA 0%, #fff 100%);
+    }
+
+    .drawer-title {
+      font-family: var(--serif);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .drawer-sub {
+      font-size: 11.5px;
+      color: var(--text-light);
+      margin-top: 3px;
+    }
+
+    .drawer-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-mid);
+      transition: all .15s;
+      flex-shrink: 0;
+    }
+
+    .drawer-close:hover {
+      background: var(--red);
+      color: #fff;
+      border-color: var(--red);
+    }
+
+    .drawer-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: #FAFBFD;
+      flex-shrink: 0;
+    }
+
+    .dtab {
+      padding: 12px 20px;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      color: var(--text-light);
+      transition: all .15s;
+      white-space: nowrap;
+    }
+
+    .dtab.active {
+      color: var(--navy);
+      border-bottom-color: var(--cyan);
+    }
+
+    .dtab:hover:not(.active) {
+      color: var(--text-mid);
+    }
+
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+    }
+
+    .drawer-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #FAFBFD;
+      flex-shrink: 0;
+    }
+
+    .btn-reject {
+      flex: 1;
+      padding: 11px;
+      border-radius: 8px;
+      border: 2px solid var(--red);
+      background: transparent;
+      color: var(--red);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .18s;
+      font-family: var(--sans);
+    }
+
+    .btn-reject:hover {
+      background: var(--red);
+      color: #fff;
+    }
+
+    .btn-approve {
+      flex: 2;
+      padding: 11px;
+      border-radius: 8px;
+      border: none;
+      background: linear-gradient(135deg, #1DB87A, #16A36C);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .18s;
+      font-family: var(--sans);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(29, 184, 122, 0.3);
+    }
+
+    .btn-approve:hover {
+      box-shadow: 0 6px 20px rgba(29, 184, 122, 0.45);
+      transform: translateY(-1px);
+    }
+
+    .btn-sign {
+      flex: 2;
+      padding: 11px;
+      border-radius: 8px;
+      border: none;
+      background: linear-gradient(135deg, var(--cyan), #0090A8);
+      color: var(--navy);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all .18s;
+      font-family: var(--sans);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 16px rgba(0, 194, 224, 0.3);
+    }
+
+    .btn-sign:hover {
+      box-shadow: 0 6px 20px rgba(0, 194, 224, 0.45);
+      transform: translateY(-1px);
+    }
+
+    /* ── DRAWER CONTENT ── */
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .info-item {
+      background: var(--bg);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .info-label {
+      font-size: 10.5px;
+      color: var(--text-light);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .info-value {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .info-value.mono {
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    .info-value.amount {
+      font-family: var(--mono);
+      font-size: 16px;
+      color: var(--navy);
+    }
+
+    .evidence-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .evidence-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .ev-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      flex-shrink: 0;
+    }
+
+    .ev-icon.pdf {
+      background: rgba(232, 69, 69, 0.1);
+      color: var(--red);
+    }
+
+    .ev-icon.img {
+      background: rgba(0, 194, 224, 0.1);
+      color: var(--cyan);
+    }
+
+    .ev-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .ev-size {
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .ev-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 6px;
+    }
+
+    .ev-btn {
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .ev-btn.view {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text-mid);
+    }
+
+    .ev-btn.view:hover {
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    .ev-btn.dl {
+      border: 1px solid var(--navy);
+      background: var(--navy);
+      color: #fff;
+    }
+
+    .ev-btn.dl:hover {
+      opacity: .85;
+    }
+
+    /* Signature Status */
+    .sig-roles {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sig-role-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    .role-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .role-avatar.signed {
+      background: linear-gradient(135deg, var(--green), #16A36C);
+      color: #fff;
+    }
+
+    .role-avatar.mine {
+      background: linear-gradient(135deg, var(--cyan), #0090A8);
+      color: var(--navy);
+    }
+
+    .role-avatar.waiting {
+      background: var(--border);
+      color: var(--text-light);
+    }
+
+    .role-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .role-status {
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .role-badge {
+      margin-left: auto;
+    }
+
+    /* ── PROJECT HISTORY ── */
+    .proj-history-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .ph-item {
+      display: flex;
+      gap: 14px;
+      padding-bottom: 16px;
+      position: relative;
+    }
+
+    .ph-item::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 24px;
+      bottom: 0;
+      width: 1px;
+      background: var(--border);
+    }
+
+    .ph-item:last-child::before {
+      display: none;
+    }
+
+    .ph-dot {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      background: var(--card);
+      border: 2px solid var(--border);
+      position: relative;
+      z-index: 1;
+    }
+
+    .ph-dot.done {
+      border-color: var(--green);
+      background: rgba(29, 184, 122, 0.1);
+      color: var(--green);
+    }
+
+    .ph-body .ph-event {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .ph-body .ph-time {
+      font-size: 11px;
+      color: var(--text-light);
+      font-family: var(--mono);
+      margin-top: 2px;
+    }
+
+    .ph-body .ph-detail {
+      font-size: 11.5px;
+      color: var(--text-mid);
+      margin-top: 4px;
+    }
+
+    /* ── MODAL for confirm ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 32, 64, 0.6);
+      z-index: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .2s;
+      backdrop-filter: blur(3px);
+    }
+
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal {
+      background: var(--card);
+      border-radius: 14px;
+      width: 440px;
+      max-width: calc(100vw - 32px);
+      box-shadow: 0 20px 60px rgba(15, 32, 64, 0.2);
+      transform: translateY(20px) scale(.97);
+      transition: transform .25s cubic-bezier(.25, .8, .25, 1);
+      overflow: hidden;
+    }
+
+    .modal-overlay.open .modal {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-title {
+      font-family: var(--serif);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .modal-body {
+      padding: 20px 24px;
+    }
+
+    .modal-footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+    }
+
+    .modal-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: var(--bg);
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+    }
+
+    .step-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--cyan);
+      color: var(--navy);
+      font-size: 11px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-active .step-num {
+      background: var(--navy);
+    }
+
+    .step-text {
+      font-size: 12px;
+      color: var(--text-mid);
+    }
+
+    .modal-pin-field {
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 20px;
+      font-family: var(--mono);
+      letter-spacing: 8px;
+      text-align: center;
+      color: var(--text);
+      outline: none;
+      width: 100%;
+      transition: border-color .15s;
+    }
+
+    .modal-pin-field:focus {
+      border-color: var(--cyan);
+    }
+
+    .btn-cancel {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text-mid);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: all .15s;
+    }
+
+    .btn-cancel:hover {
+      background: var(--bg);
+    }
+
+    .btn-confirm {
+      flex: 2;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      background: linear-gradient(135deg, var(--green), #16A36C);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: var(--sans);
+      transition: all .18s;
+    }
+
+    .btn-confirm:hover {
+      opacity: .9;
+    }
+
+    /* ── TOAST ── */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 700;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: var(--shadow-md);
+      min-width: 280px;
+      transform: translateX(120%);
+      transition: transform .3s cubic-bezier(.25, .8, .25, 1);
+    }
+
+    .toast.show {
+      transform: translateX(0);
+    }
+
+    .toast-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+
+    .toast.success .toast-icon {
+      background: rgba(29, 184, 122, 0.15);
+      color: var(--green);
+    }
+
+    .toast.error .toast-icon {
+      background: rgba(232, 69, 69, 0.1);
+      color: var(--red);
+    }
+
+    .toast-text {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .toast-sub {
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .toast-close {
+      margin-left: auto;
+      cursor: pointer;
+      color: var(--text-light);
+      font-size: 14px;
+      padding: 2px;
+      line-height: 1;
+    }
+
+    .toast-close:hover {
+      color: var(--text);
+    }
+
+    /* ── CHART BAR (pure CSS) ── */
+    .bar-chart {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0 20px 16px;
+    }
+
+    .bar-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .bar-label {
+      font-size: 11px;
+      color: var(--text-mid);
+      width: 140px;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .bar-track {
+      flex: 1;
+      height: 10px;
+      background: #EEF2FA;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--cyan), var(--navy-mid));
+      transition: width .6s ease;
+    }
+
+    .bar-val {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-mid);
+      width: 80px;
+    }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    .content>* {
+      animation: fadeInUp .35s ease both;
+    }
+
+    .metrics-row .metric-card:nth-child(1) {
+      animation-delay: .05s
+    }
+
+    .metrics-row .metric-card:nth-child(2) {
+      animation-delay: .10s
+    }
+
+    .metrics-row .metric-card:nth-child(3) {
+      animation-delay: .15s
+    }
+
+    .metrics-row .metric-card:nth-child(4) {
+      animation-delay: .20s
+    }
+
+    /* ── TAB CONTENT ── */
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* ── SECTION LABEL ── */
+    .section-label {
+      font-size: 10.5px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: var(--text-light);
+      font-weight: 600;
+      margin-bottom: 8px;
+      margin-top: 16px;
+    }
+
+    .section-label:first-child {
+      margin-top: 0;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 16px 0;
+    }
+
+    /* ── KYC PAGE ── */
+    .kyc-split {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 0;
+      height: calc(100vh - var(--topbar-h) - 56px - 28px);
+      overflow: hidden;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    .kyc-list {
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      background: var(--card);
+    }
+
+    .kyc-list-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      background: #FAFBFD;
+    }
+
+    .kyc-search {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 7px 10px;
+    }
+
+    .kyc-search input {
+      border: none;
+      background: transparent;
+      font-size: 12px;
+      outline: none;
+      width: 100%;
+      font-family: var(--sans);
+      color: var(--text);
+    }
+
+    .kyc-item {
+      padding: 14px 16px;
+      border-bottom: 1px solid #F2F5FB;
+      cursor: pointer;
+      transition: background .15s;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .kyc-item:hover,
+    .kyc-item.active {
+      background: #EEF5FF;
+    }
+
+    .kyc-item.active {
+      border-left: 3px solid var(--cyan);
+    }
+
+    .kyc-org-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .kyc-org-name {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .kyc-org-date {
+      font-size: 10.5px;
+      color: var(--text-light);
+    }
+
+    .kyc-version {
+      font-size: 10px;
+      font-family: var(--mono);
+      color: var(--text-light);
+      margin-top: 2px;
+    }
+
+    .kyc-detail {
+      overflow-y: auto;
+      padding: 24px;
+      background: var(--card);
+    }
+
+    .org-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 20px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .org-avatar-lg {
+      width: 56px;
+      height: 56px;
+      border-radius: 12px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .org-name-lg {
+      font-family: var(--serif);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .org-id {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-light);
+    }
+
+    .doc-thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .doc-thumb {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--bg);
+      aspect-ratio: 4/3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .doc-thumb:hover {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(0, 194, 224, 0.15);
+    }
+
+    .doc-thumb-icon {
+      font-size: 28px;
+    }
+
+    .doc-thumb-name {
+      font-size: 10px;
+      color: var(--text-mid);
+      text-align: center;
+      padding: 0 8px;
+    }
+
+    /* ── CHART CONTAINER ── */
+    .chart-section {
+      padding: 16px 20px 8px;
+    }
+
+    .mini-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .mini-bar-label {
+      font-size: 11px;
+      color: var(--text-mid);
+      width: 90px;
+    }
+
+    .mini-bar-track {
+      flex: 1;
+      height: 8px;
+      background: #EEF2FA;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .mini-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+    }
+
+    .mini-bar-val {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-light);
+      width: 60px;
+      text-align: right;
+    }
+
+    /* ── NAVIGATION ACTIVE ── */
+    .page {
+      display: none;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* ── RESPONSIVE ── */
+    @media(max-width:1200px) {
+      .metrics-row {
+        grid-template-columns: repeat(2, 1fr)
+      }
+
+      .two-col {
+        grid-template-columns: 1fr
+      }
+    }
+
+    @media(max-width:900px) {
+      .sidebar {
+        transform: translateX(-100%)
+      }
+
+      .main-wrap {
+        margin-left: 0
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ══════════════════ SIDEBAR ══════════════════ -->
+  <aside class="sidebar">
+    <div class="sb-logo">
+      <div class="logo-mark">
+        <div class="logo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
+          </svg>
+        </div>
+        <div>
+          <div class="logo-text">DCP</div>
+          <div class="logo-sub">Decentralized Charity Platform</div>
+        </div>
+      </div>
+      <div class="sb-badge" style="margin-top:12px">
+        <div class="dot"></div>
+        <span>Cổng Cơ quan Giám sát</span>
+      </div>
+    </div>
+
+    <div class="sb-section">Điều hướng chính</div>
+    <nav class="sb-nav">
+      <a class="sb-item active" onclick="navigate('dashboard',this)">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2 2h5v5H2zm7 0h5v5H9zm-7 7h5v5H2zm7 0h5v5H9z" />
+        </svg>
+        Tổng quan
+      </a>
+      <a class="sb-item" onclick="navigate('disbursement',this)">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path
+            d="M13 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V3a1 1 0 00-1-1zM8 11l-4-4 1.4-1.4L8 8.2l4.6-4.6L14 5z" />
+        </svg>
+        Ký duyệt Giải ngân
+        <span class="sb-badge-num">3</span>
+      </a>
+      <a class="sb-item" onclick="navigate('kyc',this)">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path
+            d="M4 1h8a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm1 3v1h6V4zm0 3v1h6V7zm0 3v1h4v-1z" />
+        </svg>
+        Duyệt Hồ sơ KYC
+        <span class="sb-badge-num">5</span>
+      </a>
+      <a class="sb-item" onclick="navigate('report',this)">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2 2h12v12H2zm2 2v3h3V4zm5 0v2h2V4zm-5 5v3h8V9zm0-2h8V6H4z" />
+        </svg>
+        Báo cáo Tuân thủ
+      </a>
+      <a class="sb-item" onclick="navigate('transparency',this)">
+        <svg class="sb-icon" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 2a6 6 0 100 12A6 6 0 008 2zm0 2a1 1 0 110 2 1 1 0 010-2zm0 3h2v5H6V7h2z" />
+        </svg>
+        Tra cứu Giao dịch
+      </a>
+    </nav>
+
+    <div class="sb-footer">
+      <div class="sb-user">
+        <div class="sb-avatar">BTC</div>
+        <div class="sb-user-info">
+          <div class="name">Bộ Tài chính</div>
+          <div class="role">Cơ quan giám sát</div>
+        </div>
+        <button class="logout-btn" title="Đăng xuất" onclick="handleLogout()">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M6 2h4v2H6zm0 10h4v2H6zM2 5h2v6H2zm10 0h2v6h-2zM5 4h6v1H5zm0 7h6v1H5z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ══════════════════ MAIN WRAP ══════════════════ -->
+  <div class="main-wrap">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="breadcrumb">
+        <span>DCP</span>
+        <span class="bc-sep">›</span>
+        <span id="breadcrumb-current" class="current">Tổng quan</span>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-icon-btn" onclick="showToast('info','Thông báo','Bạn có 3 yêu cầu ký duyệt mới')">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 2a5 5 0 00-5 5v1L2 10v1h12v-1l-1-2V7a5 5 0 00-5-5zm0 13a2 2 0 002-2H6a2 2 0 002 2z" />
+          </svg>
+          <span class="notif-badge">5</span>
+        </button>
+        <div class="topbar-divider"></div>
+        <div class="topbar-user">
+          <div class="topbar-avatar">BTC</div>
+          <div class="topbar-user-info">
+            <div class="tname">Bộ Tài chính</div>
+            <div class="torg">Vụ Giám sát &amp; Kiểm toán</div>
+          </div>
+        </div>
+        <button class="topbar-logout-btn" onclick="handleLogout()" title="Đăng xuất">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M6 2h4v2H6zm0 10h4v2H6zM2 5h2v6H2zm10 0h2v6h-2zM5 4h6v1H5zm0 7h6v1H5z" />
+          </svg>
+          Đăng xuất
+        </button>
+      </div>
+    </header>
+
+    <!-- ════════════════ PAGE: DASHBOARD ════════════════ -->
+    <div class="content page active" id="page-dashboard">
+      <div class="page-header">
+        <h1 class="page-title">Tổng quan Giám sát</h1>
+        <p class="page-sub">Thứ Sáu, 22/03/2026 — Cập nhật lúc 14:32</p>
+      </div>
+
+      <!-- Metrics -->
+      <div class="metrics-row">
+        <div class="metric-card amber">
+          <div class="metric-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="#F5A623">
+              <path d="M17 4H3a1 1 0 00-1 1v10a1 1 0 001 1h14a1 1 0 001-1V5a1 1 0 00-1-1zm-1 9H4V6h12v7zm-9-5h6v2H7z" />
+            </svg>
+          </div>
+          <div class="metric-value">3</div>
+          <div class="metric-label">Yêu cầu giải ngân chờ ký</div>
+          <div class="metric-trend trend-up">▲ 2 so với tuần trước</div>
+        </div>
+        <div class="metric-card cyan">
+          <div class="metric-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="#00C2E0">
+              <path
+                d="M4 3h12a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V4a1 1 0 011-1zm2 3v2h3V6zm5 0v2h3V6zM6 10v2h8v-2zm0 4v1h8v-1z" />
+            </svg>
+          </div>
+          <div class="metric-value">5</div>
+          <div class="metric-label">Hồ sơ KYC chờ duyệt</div>
+          <div class="metric-trend trend-dn">▼ 1 so với tuần trước</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="#1DB87A">
+              <path d="M16 5L8 13l-4-4 1.4-1.4L8 10.2l6.6-6.6z" />
+            </svg>
+          </div>
+          <div class="metric-value">18</div>
+          <div class="metric-label">Đã ký duyệt tháng này</div>
+          <div class="metric-trend trend-up">▲ 6 so với tháng trước</div>
+        </div>
+        <div class="metric-card navy">
+          <div class="metric-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="#1A3360">
+              <path
+                d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 3a1.5 1.5 0 011.5 1.5h1.5a3 3 0 00-2.5-2.95V3H9v.55A3 3 0 007 6.5c0 1.65 1.35 3 3 3s3 1.35 3 3a3 3 0 01-2.5 2.95V17h-1v-.55A3 3 0 017 13.5h1.5a1.5 1.5 0 003 0c0-.83-.67-1.5-1.5-1.5S7 10.67 7 9.5a3 3 0 012.5-2.95V6H11v-.55A1.5 1.5 0 0110 5z" />
+            </svg>
+          </div>
+          <div class="metric-value">4.2T</div>
+          <div class="metric-label">Tổng giá trị giải ngân (VNĐ)</div>
+          <div class="metric-trend trend-up">▲ 12% so với tháng trước</div>
+        </div>
+      </div>
+
+      <!-- Two column -->
+      <div class="two-col">
+        <!-- Urgent requests table -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">⚡ Yêu cầu cần xử lý gấp</span>
+            <span class="card-link"
+              onclick="navigate('disbursement',document.querySelector('[onclick*=disbursement]'))">Xem tất cả →</span>
+          </div>
+          <table class="urgent-table">
+            <thead>
+              <tr>
+                <th>Dự án / Tổ chức</th>
+                <th>Số tiền</th>
+                <th>Chữ ký</th>
+                <th>Hết hạn</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="proj-name">Xây trường học Tây Nguyên</div>
+                  <div class="proj-org">QUỹ Thiện Nguyên Việt</div>
+                </td>
+                <td>
+                  <div class="amount-cell">₫450,000,000</div>
+                </td>
+                <td>
+                  <div class="sig-progress">
+                    <div class="sig-dots">
+                      <div class="sig-dot done" title="Admin đã ký">✓</div>
+                      <div class="sig-dot done" title="Tổ chức đã ký">✓</div>
+                      <div class="sig-dot mine" title="Cơ quan giám sát - Chưa ký">!</div>
+                    </div>
+                    <span class="sig-label">2/3</span>
+                  </div>
+                </td>
+                <td><span class="countdown urgent">⏰ 18 giờ</span></td>
+                <td><button class="action-btn" onclick="openDrawer('sign')">Xem & Ký</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="proj-name">Nước sạch Đồng bằng SCL</div>
+                  <div class="proj-org">Hội Chữ thập đỏ TP.HCM</div>
+                </td>
+                <td>
+                  <div class="amount-cell">₫280,000,000</div>
+                </td>
+                <td>
+                  <div class="sig-progress">
+                    <div class="sig-dots">
+                      <div class="sig-dot done">✓</div>
+                      <div class="sig-dot pending" title="Chưa ký">○</div>
+                      <div class="sig-dot mine">!</div>
+                    </div>
+                    <span class="sig-label">1/3</span>
+                  </div>
+                </td>
+                <td><span class="countdown normal">⏱ 2 ngày</span></td>
+                <td><button class="action-btn" onclick="openDrawer('sign')">Xem & Ký</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="proj-name">Học bổng sinh viên nghèo</div>
+                  <div class="proj-org">Hội Khuyến học Việt Nam</div>
+                </td>
+                <td>
+                  <div class="amount-cell">₫120,000,000</div>
+                </td>
+                <td>
+                  <div class="sig-progress">
+                    <div class="sig-dots">
+                      <div class="sig-dot done">✓</div>
+                      <div class="sig-dot done">✓</div>
+                      <div class="sig-dot mine">!</div>
+                    </div>
+                    <span class="sig-label">2/3</span>
+                  </div>
+                </td>
+                <td><span class="countdown ok">✅ 5 ngày</span></td>
+                <td><button class="action-btn" onclick="openDrawer('sign')">Xem & Ký</button></td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="proj-name">Cứu trợ lũ lụt miền Trung</div>
+                  <div class="proj-org">Mặt trận Tổ quốc VN</div>
+                </td>
+                <td>
+                  <div class="amount-cell">₫800,000,000</div>
+                </td>
+                <td>
+                  <div class="sig-progress">
+                    <div class="sig-dots">
+                      <div class="sig-dot pending">○</div>
+                      <div class="sig-dot pending">○</div>
+                      <div class="sig-dot mine">!</div>
+                    </div>
+                    <span class="sig-label">0/3</span>
+                  </div>
+                </td>
+                <td><span class="countdown ok">📋 7 ngày</span></td>
+                <td><button class="action-btn" onclick="openDrawer('sign')">Xem & Ký</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Right column: donut + timeline -->
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <!-- Donut chart -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Tình trạng giải ngân tháng 3</span></div>
+            <div class="donut-wrap">
+              <div class="donut-container">
+                <div class="donut">
+                  <svg viewBox="0 0 120 120" width="120" height="120">
+                    <!-- Total circle bg -->
+                    <circle cx="60" cy="60" r="48" fill="none" stroke="#EEF2FA" stroke-width="16" />
+                    <!-- Green: 67% = 301.6 of 452.4 -->
+                    <circle cx="60" cy="60" r="48" fill="none" stroke="#1DB87A" stroke-width="16"
+                      stroke-dasharray="201 301" stroke-linecap="round" />
+                    <!-- Amber: 22% -->
+                    <circle cx="60" cy="60" r="48" fill="none" stroke="#F5A623" stroke-width="16"
+                      stroke-dasharray="66 436" stroke-dashoffset="-201" stroke-linecap="round" />
+                    <!-- Red: 11% -->
+                    <circle cx="60" cy="60" r="48" fill="none" stroke="#E84545" stroke-width="16"
+                      stroke-dasharray="33 469" stroke-dashoffset="-267" stroke-linecap="round" />
+                  </svg>
+                  <div class="donut-center">
+                    <div class="donut-total">18</div>
+                    <div class="donut-total-label">Tổng</div>
+                  </div>
+                </div>
+                <div class="donut-legend" style="width:100%">
+                  <div class="legend-item">
+                    <div class="legend-dot" style="background:#1DB87A"></div><span class="legend-label">Đã ký
+                      duyệt</span><span class="legend-val">12</span><span class="legend-pct">67%</span>
+                  </div>
+                  <div class="legend-item">
+                    <div class="legend-dot" style="background:#F5A623"></div><span class="legend-label">Đang
+                      chờ</span><span class="legend-val">4</span><span class="legend-pct">22%</span>
+                  </div>
+                  <div class="legend-item">
+                    <div class="legend-dot" style="background:#E84545"></div><span class="legend-label">Đã từ
+                      chối</span><span class="legend-val">2</span><span class="legend-pct">11%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Activity timeline -->
+          <div class="card">
+            <div class="card-header"><span class="card-title">Hoạt động gần đây</span></div>
+            <div class="timeline">
+              <div class="tl-item">
+                <div class="tl-icon sign">✓</div>
+                <div class="tl-body">
+                  <div class="tl-action">Ký duyệt giải ngân</div>
+                  <div class="tl-meta">Dự án: Mổ mắt miễn phí Hà Giang</div>
+                </div>
+                <div class="tl-time">14:10</div>
+              </div>
+              <div class="tl-item">
+                <div class="tl-icon view">👁</div>
+                <div class="tl-body">
+                  <div class="tl-action">Xem hồ sơ KYC</div>
+                  <div class="tl-meta">Tổ chức: Hội Từ thiện Cần Thơ</div>
+                </div>
+                <div class="tl-time">11:45</div>
+              </div>
+              <div class="tl-item">
+                <div class="tl-icon reject">✗</div>
+                <div class="tl-body">
+                  <div class="tl-action">Từ chối giải ngân</div>
+                  <div class="tl-meta">Thiếu minh chứng sử dụng tiền</div>
+                </div>
+                <div class="tl-time">09:22</div>
+              </div>
+              <div class="tl-item">
+                <div class="tl-icon login">→</div>
+                <div class="tl-body">
+                  <div class="tl-action">Đăng nhập hệ thống</div>
+                  <div class="tl-meta">IP: 113.161.xx.xx · Chrome/Win</div>
+                </div>
+                <div class="tl-time">08:57</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bar chart for compliance -->
+      <div class="card full-card" style="margin-bottom:22px">
+        <div class="card-header"><span class="card-title">Top dự án theo giá trị giải ngân (tháng 3/2026)</span></div>
+        <div class="bar-chart" style="padding:16px 20px;">
+          <div class="bar-row"><span class="bar-label">Xây trường Tây Nguyên</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:100%"></div>
+            </div><span class="bar-val">₫450,000,000</span>
+          </div>
+          <div class="bar-row"><span class="bar-label">Cứu trợ lũ lụt</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:88%"></div>
+            </div><span class="bar-val">₫396,000,000</span>
+          </div>
+          <div class="bar-row"><span class="bar-label">Nước sạch ĐB SCL</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:62%"></div>
+            </div><span class="bar-val">₫280,000,000</span>
+          </div>
+          <div class="bar-row"><span class="bar-label">Mổ mắt miễn phí</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:44%"></div>
+            </div><span class="bar-val">₫200,000,000</span>
+          </div>
+          <div class="bar-row"><span class="bar-label">Học bổng sinh viên</span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:27%"></div>
+            </div><span class="bar-val">₫120,000,000</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════ PAGE: DISBURSEMENT ════════════════ -->
+    <div class="content page" id="page-disbursement">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <h1 class="page-title">Ký duyệt Giải ngân</h1>
+          <p class="page-sub">Quản lý và ký xác nhận các yêu cầu giải ngân</p>
+        </div>
+        <button class="export-btn">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1v9M5 7l3 3 3-3M2 12v2h12v-2" />
+          </svg>
+          Xuất báo cáo
+        </button>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="card full-card" style="margin-bottom:16px">
+        <div class="table-filter-bar">
+          <div class="search-input" style="min-width:260px">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="#8A9BB8">
+              <path d="M11.7 10.3l3 3-1.4 1.4-3-3a6 6 0 111.4-1.4zm-5.7 1a4 4 0 100-8 4 4 0 000 8z" />
+            </svg>
+            <input type="text" placeholder="Tìm kiếm dự án, mã request...">
+          </div>
+          <select class="filter-select">
+            <option>Tất cả trạng thái</option>
+            <option selected>Chờ ký duyệt</option>
+            <option>Đã ký</option>
+            <option>Đã từ chối</option>
+            <option>Hết hạn</option>
+          </select>
+          <select class="filter-select">
+            <option>Tháng 3/2026</option>
+            <option>Tháng 2/2026</option>
+            <option>Tháng 1/2026</option>
+          </select>
+          <button class="export-btn">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1v9M5 7l3 3 3-3M2 12v2h12v-2" />
+            </svg>
+            Xuất Excel
+          </button>
+        </div>
+
+        <!-- Cards list -->
+        <div style="padding:16px;display:flex;flex-direction:column;gap:10px;">
+
+          <!-- Card 1: Urgent -->
+          <div
+            style="border:1px solid var(--border);border-radius:10px;border-left:4px solid var(--amber);padding:16px 20px;display:flex;align-items:center;gap:16px;background:var(--card);transition:box-shadow .2s;cursor:pointer"
+            onmouseover="this.style.boxShadow='var(--shadow-md)'" onmouseout="this.style.boxShadow='none'">
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700;color:var(--text)">Xây trường học Tây Nguyên</div>
+              <div style="font-size:11.5px;color:var(--text-light);margin-top:2px">Quỹ Thiện Nguyên Việt · REQ-2026-0312
+              </div>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                <span style="font-size:10px;color:var(--text-light)">Tiến độ chữ ký:</span>
+                <div class="sig-dots">
+                  <div class="sig-dot done" style="width:22px;height:22px">✓</div>
+                  <div class="sig-dot done" style="width:22px;height:22px">✓</div>
+                  <div class="sig-dot mine" style="width:22px;height:22px">!</div>
+                </div>
+                <span style="font-size:11px;color:var(--text-light);font-family:var(--mono)">2/3 chữ ký</span>
+              </div>
+            </div>
+            <div style="text-align:center;padding:0 16px;">
+              <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text)">₫450,000,000</div>
+              <div style="font-size:10px;color:var(--text-light);margin-top:2px">Số tiền yêu cầu</div>
+            </div>
+            <div style="text-align:center;padding:0 16px;">
+              <span class="countdown urgent">⏰ Còn 18 giờ</span>
+              <div style="font-size:10px;color:var(--text-light);margin-top:4px">Hết hạn ký</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-shrink:0">
+              <button
+                style="padding:8px 16px;border-radius:7px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:600;color:var(--text-mid);cursor:pointer"
+                onclick="openDrawer('view')">Chi tiết</button>
+              <button class="action-btn" style="padding:8px 20px" onclick="openDrawer('sign')">✍ Ký duyệt</button>
+            </div>
+          </div>
+
+          <!-- Card 2 -->
+          <div
+            style="border:1px solid var(--border);border-radius:10px;border-left:4px solid var(--amber);padding:16px 20px;display:flex;align-items:center;gap:16px;background:var(--card);transition:box-shadow .2s;cursor:pointer"
+            onmouseover="this.style.boxShadow='var(--shadow-md)'" onmouseout="this.style.boxShadow='none'">
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700;color:var(--text)">Nước sạch Đồng bằng SCL</div>
+              <div style="font-size:11.5px;color:var(--text-light);margin-top:2px">Hội Chữ thập đỏ TP.HCM ·
+                REQ-2026-0309</div>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:8px">
+                <span style="font-size:10px;color:var(--text-light)">Tiến độ chữ ký:</span>
+                <div class="sig-dots">
+                  <div class="sig-dot done" style="width:22px;height:22px">✓</div>
+                  <div class="sig-dot pending" style="width:22px;height:22px">○</div>
+                  <div class="sig-dot mine" style="width:22px;height:22px">!</div>
+                </div>
+                <span style="font-size:11px;color:var(--text-light);font-family:var(--mono)">1/3 chữ ký</span>
+              </div>
+            </div>
+            <div style="text-align:center;padding:0 16px;">
+              <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text)">₫280,000,000</div>
+              <div style="font-size:10px;color:var(--text-light);margin-top:2px">Số tiền yêu cầu</div>
+            </div>
+            <div style="text-align:center;padding:0 16px;">
+              <span class="countdown normal">⏱ Còn 2 ngày</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-shrink:0">
+              <button
+                style="padding:8px 16px;border-radius:7px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:600;color:var(--text-mid);cursor:pointer"
+                onclick="openDrawer('view')">Chi tiết</button>
+              <button class="action-btn" style="padding:8px 20px" onclick="openDrawer('sign')">✍ Ký duyệt</button>
+            </div>
+          </div>
+
+          <!-- Card 3: Approved -->
+          <div
+            style="border:1px solid var(--border);border-radius:10px;border-left:4px solid var(--green);padding:16px 20px;display:flex;align-items:center;gap:16px;background:#FAFFFE;opacity:.85">
+            <div style="flex:1">
+              <div style="font-size:14px;font-weight:700;color:var(--text)">Mổ mắt miễn phí Hà Giang</div>
+              <div style="font-size:11.5px;color:var(--text-light);margin-top:2px">Quỹ Mắt Sáng Việt Nam · REQ-2026-0305
+              </div>
+            </div>
+            <div style="text-align:center;padding:0 16px;">
+              <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text)">₫200,000,000</div>
+            </div>
+            <div>
+              <span class="status-badge badge-green">✓ Đã ký duyệt</span>
+              <div style="font-size:10px;color:var(--text-light);margin-top:4px;font-family:var(--mono)">14:10 hôm nay
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-shrink:0">
+              <button
+                style="padding:8px 16px;border-radius:7px;border:1px solid var(--border);background:var(--card);font-size:12px;font-weight:600;color:var(--text-mid);cursor:pointer"
+                onclick="openDrawer('view')">Xem lại</button>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="pagination">
+          <span class="pag-info">Hiển thị 3 / 12 yêu cầu</span>
+          <div class="pag-controls">
+            <button class="pag-btn">‹</button>
+            <button class="pag-btn active">1</button>
+            <button class="pag-btn">2</button>
+            <button class="pag-btn">3</button>
+            <button class="pag-btn">›</button>
+            <select class="pag-select">
+              <option>10/trang</option>
+              <option>20/trang</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════ PAGE: KYC ════════════════ -->
+    <div class="content page" id="page-kyc">
+      <div class="page-header">
+        <h1 class="page-title">Duyệt Hồ sơ KYC</h1>
+        <p class="page-sub">Xác minh danh tính và hồ sơ pháp lý tổ chức từ thiện</p>
+      </div>
+      <div class="kyc-split card">
+        <!-- Left list -->
+        <div class="kyc-list">
+          <div class="kyc-list-header">
+            <div class="kyc-search">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="#8A9BB8">
+                <path d="M11.7 10.3l3 3-1.4 1.4-3-3a6 6 0 111.4-1.4zm-5.7 1a4 4 0 100-8 4 4 0 000 8z" />
+              </svg>
+              <input type="text" placeholder="Tìm tổ chức...">
+            </div>
+          </div>
+          <div class="kyc-item active">
+            <div class="kyc-org-avatar" style="background:linear-gradient(135deg,#0EA5E9,#0F2040)">H</div>
+            <div style="flex:1">
+              <div class="kyc-org-name">Hội Từ thiện Cần Thơ</div>
+              <div class="kyc-org-date">Nộp: 21/03/2026</div>
+              <div class="kyc-version">v1 · PENDING_REVIEW</div>
+            </div>
+            <span class="status-badge badge-amber" style="font-size:9.5px">Chờ duyệt</span>
+          </div>
+          <div class="kyc-item">
+            <div class="kyc-org-avatar" style="background:linear-gradient(135deg,#F5A623,#E8630A)">Q</div>
+            <div style="flex:1">
+              <div class="kyc-org-name">Quỹ Hy Vọng Xanh</div>
+              <div class="kyc-org-date">Nộp: 20/03/2026</div>
+              <div class="kyc-version">v2 · RESUBMITTED</div>
+            </div>
+            <span class="status-badge badge-amber" style="font-size:9.5px">Chờ duyệt</span>
+          </div>
+          <div class="kyc-item">
+            <div class="kyc-org-avatar" style="background:linear-gradient(135deg,#1DB87A,#0A7A4E)">T</div>
+            <div style="flex:1">
+              <div class="kyc-org-name">Tổ chức Thiện Tâm VN</div>
+              <div class="kyc-org-date">Nộp: 19/03/2026</div>
+              <div class="kyc-version">v1 · PENDING_REVIEW</div>
+            </div>
+            <span class="status-badge badge-amber" style="font-size:9.5px">Chờ duyệt</span>
+          </div>
+          <div class="kyc-item">
+            <div class="kyc-org-avatar" style="background:linear-gradient(135deg,#6366F1,#4338CA)">M</div>
+            <div style="flex:1">
+              <div class="kyc-org-name">Mái ấm Từ Tâm</div>
+              <div class="kyc-org-date">Nộp: 18/03/2026</div>
+              <div class="kyc-version">v1</div>
+            </div>
+            <span class="status-badge badge-green" style="font-size:9.5px">Đã duyệt</span>
+          </div>
+          <div class="kyc-item">
+            <div class="kyc-org-avatar" style="background:linear-gradient(135deg,#E84545,#9B0A0A)">S</div>
+            <div style="flex:1">
+              <div class="kyc-org-name">Sen Vàng Foundation</div>
+              <div class="kyc-org-date">Nộp: 17/03/2026</div>
+              <div class="kyc-version">v1</div>
+            </div>
+            <span class="status-badge badge-red" style="font-size:9.5px">Từ chối</span>
+          </div>
+        </div>
+        <!-- Right detail -->
+        <div class="kyc-detail">
+          <div class="org-header">
+            <div class="org-avatar-lg" style="background:linear-gradient(135deg,#0EA5E9,#0F2040)">H</div>
+            <div>
+              <div class="org-name-lg">Hội Từ thiện Cần Thơ</div>
+              <div class="org-id" style="margin-top:3px">MST: 1800123456 · Phiên bản: v1</div>
+              <div style="margin-top:6px;display:flex;gap:6px">
+                <span class="status-badge badge-amber">⏳ PENDING_REVIEW</span>
+                <span class="status-badge badge-gray">Nộp: 21/03/2026</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-label">Thông tin tổ chức</div>
+          <div class="info-grid">
+            <div class="info-item">
+              <div class="info-label">Tên pháp nhân</div>
+              <div class="info-value">Hội Từ thiện Cần Thơ</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">Mã số thuế</div>
+              <div class="info-value mono">1800123456</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">Người đại diện</div>
+              <div class="info-value">Nguyễn Văn Minh</div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">Ngày đăng ký</div>
+              <div class="info-value">15/06/2019</div>
+            </div>
+            <div class="info-item" style="grid-column:1/-1">
+              <div class="info-label">Địa chỉ</div>
+              <div class="info-value">150 Trần Hưng Đạo, Ninh Kiều, Cần Thơ</div>
+            </div>
+          </div>
+
+          <div class="section-label">Tài liệu đính kèm (IPFS)</div>
+          <div class="doc-thumb-grid">
+            <div class="doc-thumb" onclick="showToast('success','IPFS','Đang mở file trên IPFS gateway...')">
+              <div class="doc-thumb-icon">📄</div>
+              <div class="doc-thumb-name">Giấy phép hoạt động.pdf</div>
+              <div style="font-size:9px;color:var(--text-light);margin-top:2px;font-family:var(--mono)">2.4 MB</div>
+            </div>
+            <div class="doc-thumb" onclick="showToast('success','IPFS','Đang mở ảnh trên IPFS gateway...')">
+              <div class="doc-thumb-icon">🖼️</div>
+              <div class="doc-thumb-name">Giấy đăng ký pháp nhân.jpg</div>
+              <div style="font-size:9px;color:var(--text-light);margin-top:2px;font-family:var(--mono)">1.1 MB</div>
+            </div>
+            <div class="doc-thumb" onclick="showToast('success','IPFS','Đang mở file...')">
+              <div class="doc-thumb-icon">📄</div>
+              <div class="doc-thumb-name">Xác nhận đại diện PL.pdf</div>
+              <div style="font-size:9px;color:var(--text-light);margin-top:2px;font-family:var(--mono)">890 KB</div>
+            </div>
+          </div>
+          <div style="margin-bottom:4px;font-size:10.5px;color:var(--text-light)">CID: <span
+              style="font-family:var(--mono);color:var(--cyan)">Qmf4z9R...xPwL3K</span></div>
+
+          <div class="divider"></div>
+          <div style="display:flex;gap:10px;margin-top:8px">
+            <button class="btn-reject" onclick="openModal('reject-kyc')" style="flex:1;padding:10px;">✗ Từ chối
+              KYC</button>
+            <button class="btn-approve" onclick="openModal('approve-kyc')" style="flex:2;padding:10px;">✓ Phê duyệt
+              KYC</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ════════════════ PAGE: REPORT ════════════════ -->
+    <div class="content page" id="page-report">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <h1 class="page-title">Báo cáo Tuân thủ</h1>
+          <p class="page-sub">Tổng hợp dữ liệu giám sát theo kỳ báo cáo</p>
+        </div>
+        <div style="display:flex;gap:10px">
+          <select class="filter-select" style="font-size:13px">
+            <option>Quý 1/2026</option>
+            <option>Tháng 3/2026</option>
+            <option>Tháng 2/2026</option>
+          </select>
+          <button class="export-btn" onclick="showToast('success','Xuất PDF','Đang tạo file báo cáo...')">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M4 3h8l2 2v8a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1z" />
+            </svg>
+            Xuất PDF
+          </button>
+        </div>
+      </div>
+
+      <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
+        <div class="metric-card cyan">
+          <div class="metric-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="#00C2E0">
+              <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm4 9H6V9h8z" />
+            </svg></div>
+          <div class="metric-value">42</div>
+          <div class="metric-label">Tổng yêu cầu giải ngân</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="#1DB87A">
+              <path d="M16 5L8 13l-4-4 1.5-1.5L8 10l6.5-6.5z" />
+            </svg></div>
+          <div class="metric-value">38</div>
+          <div class="metric-label">Đã phê duyệt (90.5%)</div>
+        </div>
+        <div class="metric-card amber">
+          <div class="metric-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="#F5A623">
+              <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm1 5v4H9V7zm0 5v2H9v-2z" />
+            </svg></div>
+          <div class="metric-value">4</div>
+          <div class="metric-label">Từ chối / Trả lại</div>
+        </div>
+        <div class="metric-card navy">
+          <div class="metric-icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="#1A3360">
+              <path d="M10 2a8 8 0 100 16A8 8 0 0010 2zm0 3l1.5 3h3l-2.5 2 1 3L10 11.5 7 13l1-3-2.5-2h3z" />
+            </svg></div>
+          <div class="metric-value">12.4T</div>
+          <div class="metric-label">Tổng giá trị phê duyệt (VNĐ)</div>
+        </div>
+      </div>
+
+      <div class="two-col" style="margin-bottom:16px">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Giá trị giải ngân theo tháng (VNĐ)</span></div>
+          <div style="padding:20px">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div class="bar-row"><span class="bar-label">Tháng 1/2026</span>
+                <div class="bar-track">
+                  <div class="bar-fill" style="width:72%"></div>
+                </div><span class="bar-val">3.6 tỷ</span>
+              </div>
+              <div class="bar-row"><span class="bar-label">Tháng 2/2026</span>
+                <div class="bar-track">
+                  <div class="bar-fill" style="width:55%"></div>
+                </div><span class="bar-val">2.8 tỷ</span>
+              </div>
+              <div class="bar-row"><span class="bar-label">Tháng 3/2026</span>
+                <div class="bar-track">
+                  <div class="bar-fill" style="width:84%"></div>
+                </div><span class="bar-val">4.2 tỷ</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Tỷ lệ phê duyệt KYC</span></div>
+          <div style="padding:20px">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div class="mini-bar-row"><span class="mini-bar-label">Đã phê duyệt</span>
+                <div class="mini-bar-track">
+                  <div class="mini-bar-fill" style="width:76%;background:var(--green)"></div>
+                </div><span class="mini-bar-val" style="color:var(--green)">19 (76%)</span>
+              </div>
+              <div class="mini-bar-row"><span class="mini-bar-label">Đang xét duyệt</span>
+                <div class="mini-bar-track">
+                  <div class="mini-bar-fill" style="width:20%;background:var(--amber)"></div>
+                </div><span class="mini-bar-val" style="color:var(--amber)">5 (20%)</span>
+              </div>
+              <div class="mini-bar-row"><span class="mini-bar-label">Từ chối</span>
+                <div class="mini-bar-track">
+                  <div class="mini-bar-fill" style="width:4%;background:var(--red)"></div>
+                </div><span class="mini-bar-val" style="color:var(--red)">1 (4%)</span>
+              </div>
+            </div>
+            <div
+              style="margin-top:16px;padding:12px;background:rgba(29,184,122,0.06);border:1px solid rgba(29,184,122,0.15);border-radius:8px;font-size:12px;color:#138A5A">
+              ✅ Tỷ lệ phê duyệt <strong>96%</strong> đạt chỉ tiêu quý
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Summary table -->
+      <div class="card full-card">
+        <div class="card-header"><span class="card-title">Bảng tổng hợp – Quý I/2026</span></div>
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Tháng</th>
+                <th>Tổng yêu cầu</th>
+                <th>Đã ký</th>
+                <th>Từ chối</th>
+                <th>Tổng giá trị (VNĐ)</th>
+                <th>Tỷ lệ duyệt</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Tháng 1/2026</td>
+                <td style="font-family:var(--mono)">14</td>
+                <td style="font-family:var(--mono);color:var(--green)">13</td>
+                <td style="font-family:var(--mono);color:var(--red)">1</td>
+                <td style="font-family:var(--mono)">3,620,000,000</td>
+                <td><span class="status-badge badge-green">92.9%</span></td>
+                <td><span class="status-badge badge-green">Đạt</span></td>
+              </tr>
+              <tr>
+                <td>Tháng 2/2026</td>
+                <td style="font-family:var(--mono)">12</td>
+                <td style="font-family:var(--mono);color:var(--green)">11</td>
+                <td style="font-family:var(--mono);color:var(--red)">1</td>
+                <td style="font-family:var(--mono)">2,810,000,000</td>
+                <td><span class="status-badge badge-green">91.7%</span></td>
+                <td><span class="status-badge badge-green">Đạt</span></td>
+              </tr>
+              <tr>
+                <td>Tháng 3/2026</td>
+                <td style="font-family:var(--mono)">16</td>
+                <td style="font-family:var(--mono);color:var(--green)">14</td>
+                <td style="font-family:var(--mono);color:var(--red)">2</td>
+                <td style="font-family:var(--mono)">4,200,000,000</td>
+                <td><span class="status-badge badge-green">87.5%</span></td>
+                <td><span class="status-badge badge-amber">Theo dõi</span></td>
+              </tr>
+              <tr style="background:#F8FAFD;font-weight:700">
+                <td>Tổng Quý I</td>
+                <td style="font-family:var(--mono)">42</td>
+                <td style="font-family:var(--mono);color:var(--green)">38</td>
+                <td style="font-family:var(--mono);color:var(--red)">4</td>
+                <td style="font-family:var(--mono)">10,630,000,000</td>
+                <td><span class="status-badge badge-green">90.5%</span></td>
+                <td><span class="status-badge badge-green">✓ Đạt KPI</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════ PAGE: TRANSPARENCY ════════════════ -->
+    <div class="content page" id="page-transparency">
+      <div class="page-header">
+        <h1 class="page-title">Tra cứu Giao dịch</h1>
+        <p class="page-sub">Tra cứu minh bạch toàn bộ dòng tiền trên hệ thống</p>
+      </div>
+      <div class="card full-card" style="margin-bottom:16px">
+        <div class="table-filter-bar" style="gap:12px">
+          <div class="search-input" style="min-width:320px;flex:1">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="#8A9BB8">
+              <path d="M11.7 10.3l3 3-1.4 1.4-3-3a6 6 0 111.4-1.4zm-5.7 1a4 4 0 100-8 4 4 0 000 8z" />
+            </svg>
+            <input type="text" placeholder="Nhập Project ID, Wallet address hoặc TX Hash...">
+          </div>
+          <select class="filter-select">
+            <option>Tất cả loại</option>
+            <option>Deposit</option>
+            <option>Donation</option>
+            <option>Disbursement</option>
+          </select>
+          <select class="filter-select">
+            <option>Tất cả trạng thái</option>
+            <option>COMPLETED</option>
+            <option>PENDING</option>
+            <option>FAILED</option>
+          </select>
+          <button class="action-btn" style="padding:8px 20px">Tìm kiếm</button>
+        </div>
+      </div>
+
+      <div class="card full-card">
+        <div style="overflow-x:auto">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>TX Hash</th>
+                <th>Loại GD</th>
+                <th>Dự án / Mô tả</th>
+                <th>Người gửi</th>
+                <th>Số tiền</th>
+                <th>Thời gian</th>
+                <th>Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="tx-hash" onclick="showToast('info','Block Explorer','Đang mở trình duyệt blockchain...')">
+                  0x3a9f...e7d2</td>
+                <td><span class="status-badge badge-blue">Giải ngân</span></td>
+                <td>Mổ mắt miễn phí Hà Giang</td>
+                <td style="font-family:var(--mono);font-size:11px">0xAbC...12F3</td>
+                <td style="font-family:var(--mono)">₫200,000,000</td>
+                <td style="font-family:var(--mono);font-size:11.5px">22/03 14:10</td>
+                <td><span class="status-badge badge-green">COMPLETED</span></td>
+              </tr>
+              <tr>
+                <td class="tx-hash" onclick="showToast('info','Block Explorer','Đang mở...')">0xB1d2...9cAe</td>
+                <td><span class="status-badge badge-green">Quyên góp</span></td>
+                <td>Xây trường học Tây Nguyên</td>
+                <td style="font-family:var(--mono);font-size:11px">0x7eF...4A21</td>
+                <td style="font-family:var(--mono)">₫5,000,000</td>
+                <td style="font-family:var(--mono);font-size:11.5px">22/03 10:33</td>
+                <td><span class="status-badge badge-green">INDEXED</span></td>
+              </tr>
+              <tr>
+                <td class="tx-hash" onclick="showToast('info','Block Explorer','Đang mở...')">0x5F3a...e012</td>
+                <td><span class="status-badge badge-amber">Nạp tiền</span></td>
+                <td>Nạp VNĐ → Token</td>
+                <td style="font-family:var(--mono);font-size:11px">0x9bC...77D0</td>
+                <td style="font-family:var(--mono)">₫2,000,000</td>
+                <td style="font-family:var(--mono);font-size:11.5px">21/03 16:45</td>
+                <td><span class="status-badge badge-green">MINT_COMPLETED</span></td>
+              </tr>
+              <tr>
+                <td class="tx-hash" onclick="showToast('info','Block Explorer','Đang mở...')">0x2Ec4...d77F</td>
+                <td><span class="status-badge badge-blue">Giải ngân</span></td>
+                <td>Nước sạch Hà Tĩnh</td>
+                <td style="font-family:var(--mono);font-size:11px">0xAbC...12F3</td>
+                <td style="font-family:var(--mono)">₫150,000,000</td>
+                <td style="font-family:var(--mono);font-size:11.5px">21/03 16:30</td>
+                <td><span class="status-badge badge-green">COMPLETED</span></td>
+              </tr>
+              <tr>
+                <td class="tx-hash" onclick="showToast('info','Block Explorer','Đang mở...')">0x8Ac1...3bD9</td>
+                <td><span class="status-badge badge-green">Quyên góp</span></td>
+                <td>Cứu trợ lũ lụt miền Trung</td>
+                <td style="font-family:var(--mono);font-size:11px">0x4Da...E8F2</td>
+                <td style="font-family:var(--mono)">₫10,000,000</td>
+                <td style="font-family:var(--mono);font-size:11.5px">21/03 09:15</td>
+                <td><span class="status-badge badge-amber">PENDING_ONCHAIN</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <span class="pag-info">Trang 1 / 156 · Tổng 3,108 giao dịch</span>
+          <div class="pag-controls">
+            <button class="pag-btn">‹</button>
+            <button class="pag-btn active">1</button>
+            <button class="pag-btn">2</button>
+            <button class="pag-btn">3</button>
+            <button class="pag-btn">›</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end main-wrap -->
+
+  <!-- ══════════════════ DRAWER ══════════════════ -->
+  <div class="overlay" id="overlay" onclick="closeDrawer()"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-header">
+      <div>
+        <div class="drawer-title">Yêu cầu Giải ngân #REQ-2026-0312</div>
+        <div class="drawer-sub">Quỹ Thiện Nguyên Việt · Tạo lúc 20/03/2026 10:15</div>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-tabs">
+      <div class="dtab active" onclick="switchTab('info',this)">Thông tin</div>
+      <div class="dtab" onclick="switchTab('evidence',this)">Minh chứng</div>
+      <div class="dtab" onclick="switchTab('history',this)">Lịch sử dự án</div>
+      <div class="dtab" onclick="switchTab('signatures',this)">Chữ ký</div>
+    </div>
+    <div class="drawer-body">
+      <!-- Tab: Info -->
+      <div class="tab-content active" id="tab-info">
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">Số tiền yêu cầu</div>
+            <div class="info-value amount">₫450,000,000</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Trạng thái</div>
+            <div style="margin-top:4px"><span class="status-badge badge-amber">PENDING_SIGNATURE</span></div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Mục đích sử dụng</div>
+            <div class="info-value">Xây dựng 3 phòng học bán trú tại xã Đăk Tờ Re, Kon Tum</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Tổ chức thụ hưởng</div>
+            <div class="info-value">Quỹ Thiện Nguyên Việt</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Tài khoản ngân hàng</div>
+            <div class="info-value mono">****4572 · Vietcombank</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Ngân hàng thụ hưởng</div>
+            <div class="info-value">Vietcombank – CN Cần Thơ</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Hạn ký duyệt</div>
+            <div class="info-value" style="color:var(--red)">27/03/2026 08:00 ⏰</div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">Số tiền reserve (20%)</div>
+            <div class="info-value mono">₫112,500,000</div>
+          </div>
+        </div>
+        <div
+          style="padding:12px 14px;background:rgba(0,194,224,0.06);border:1px solid rgba(0,194,224,0.2);border-radius:8px;font-size:12px;color:#0090A8">
+          ℹ️ Tổng đã quyên góp: <strong>₫562,500,000</strong> · Số tiền tối đa được rút (80%):
+          <strong>₫450,000,000</strong>
+        </div>
+      </div>
+      <!-- Tab: Evidence -->
+      <div class="tab-content" id="tab-evidence">
+        <div class="section-label">Tài liệu minh chứng sử dụng tiền</div>
+        <div class="evidence-list">
+          <div class="evidence-item">
+            <div class="ev-icon pdf">PDF</div>
+            <div>
+              <div class="ev-name">Báo cáo tiến độ xây dựng Q1.pdf</div>
+              <div class="ev-size">3.2 MB · IPFS: Qmf4z9R...xP</div>
+            </div>
+            <div class="ev-actions"><button class="ev-btn view"
+                onclick="showToast('info','IPFS','Đang mở file...')">Xem</button><button class="ev-btn dl"
+                onclick="showToast('success','Tải xuống','Đang tải file...')">Tải</button></div>
+          </div>
+          <div class="evidence-item">
+            <div class="ev-icon img">IMG</div>
+            <div>
+              <div class="ev-name">Ảnh công trình 01_nền móng.jpg</div>
+              <div class="ev-size">1.8 MB · IPFS: QmR7kL...nW</div>
+            </div>
+            <div class="ev-actions"><button class="ev-btn view"
+                onclick="showToast('info','IPFS','Đang mở ảnh...')">Xem</button><button class="ev-btn dl"
+                onclick="showToast('success','Tải xuống','Đang tải ảnh...')">Tải</button></div>
+          </div>
+          <div class="evidence-item">
+            <div class="ev-icon img">IMG</div>
+            <div>
+              <div class="ev-name">Ảnh công trình 02_tường gạch.jpg</div>
+              <div class="ev-size">2.1 MB · IPFS: QmX3pM...jK</div>
+            </div>
+            <div class="ev-actions"><button class="ev-btn view"
+                onclick="showToast('info','IPFS','Đang mở ảnh...')">Xem</button><button class="ev-btn dl"
+                onclick="showToast('success','Tải xuống','Đang tải ảnh...')">Tải</button></div>
+          </div>
+          <div class="evidence-item">
+            <div class="ev-icon pdf">PDF</div>
+            <div>
+              <div class="ev-name">Hóa đơn vật liệu xây dựng.pdf</div>
+              <div class="ev-size">890 KB · IPFS: QmN2dQ...vT</div>
+            </div>
+            <div class="ev-actions"><button class="ev-btn view"
+                onclick="showToast('info','IPFS','Đang mở file...')">Xem</button><button class="ev-btn dl"
+                onclick="showToast('success','Tải xuống','Đang tải file...')">Tải</button></div>
+          </div>
+        </div>
+      </div>
+      <!-- Tab: History -->
+      <div class="tab-content" id="tab-history">
+        <div class="section-label">Timeline dự án</div>
+        <div class="proj-history-timeline">
+          <div class="ph-item">
+            <div class="ph-dot done">✓</div>
+            <div class="ph-body">
+              <div class="ph-event">Dự án được phê duyệt (ACTIVE)</div>
+              <div class="ph-time">01/01/2026 09:00</div>
+              <div class="ph-detail">Admin: Trần Văn Hùng</div>
+            </div>
+          </div>
+          <div class="ph-item">
+            <div class="ph-dot done">✓</div>
+            <div class="ph-body">
+              <div class="ph-event">Bắt đầu nhận quyên góp</div>
+              <div class="ph-time">02/01/2026</div>
+              <div class="ph-detail">Mục tiêu: ₫562,500,000</div>
+            </div>
+          </div>
+          <div class="ph-item">
+            <div class="ph-dot done">✓</div>
+            <div class="ph-body">
+              <div class="ph-event">Đạt 50% mục tiêu</div>
+              <div class="ph-time">15/02/2026</div>
+              <div class="ph-detail">₫281,250,000 từ 1,240 người</div>
+            </div>
+          </div>
+          <div class="ph-item">
+            <div class="ph-dot done">✓</div>
+            <div class="ph-body">
+              <div class="ph-event">Đạt 100% mục tiêu</div>
+              <div class="ph-time">10/03/2026</div>
+              <div class="ph-detail">₫562,500,000 từ 2,847 người</div>
+            </div>
+          </div>
+          <div class="ph-item">
+            <div class="ph-dot" style="border-color:var(--amber);color:var(--amber)">⏳</div>
+            <div class="ph-body">
+              <div class="ph-event">Yêu cầu giải ngân REQ-2026-0312</div>
+              <div class="ph-time">20/03/2026</div>
+              <div class="ph-detail">Đang chờ 2/3 chữ ký</div>
+            </div>
+          </div>
+        </div>
+        <div
+          style="margin-top:8px;padding:12px 14px;background:var(--bg);border-radius:8px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center">
+          <div>
+            <div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--green)">₫562.5M</div>
+            <div style="font-size:10px;color:var(--text-light)">Tổng quyên góp</div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--cyan)">2,847</div>
+            <div style="font-size:10px;color:var(--text-light)">Nhà hảo tâm</div>
+          </div>
+          <div>
+            <div style="font-family:var(--mono);font-size:16px;font-weight:600;color:var(--amber)">89</div>
+            <div style="font-size:10px;color:var(--text-light)">Ngày chiến dịch</div>
+          </div>
+        </div>
+      </div>
+      <!-- Tab: Signatures -->
+      <div class="tab-content" id="tab-signatures">
+        <div class="section-label">Trạng thái chữ ký (cần 2/3)</div>
+        <div class="sig-roles">
+          <div class="sig-role-item" style="border-color:rgba(29,184,122,0.3);background:rgba(29,184,122,0.04)">
+            <div class="role-avatar signed">A</div>
+            <div>
+              <div class="role-name">Admin Hệ thống</div>
+              <div class="role-status">Đã ký · 21/03/2026 lúc 09:15</div>
+            </div>
+            <div class="role-badge"><span class="status-badge badge-green">✓ Đã ký</span></div>
+          </div>
+          <div class="sig-role-item" style="border-color:rgba(29,184,122,0.3);background:rgba(29,184,122,0.04)">
+            <div class="role-avatar signed">T</div>
+            <div>
+              <div class="role-name">Đại diện Tổ chức</div>
+              <div class="role-status">Đã ký · 21/03/2026 lúc 11:40</div>
+            </div>
+            <div class="role-badge"><span class="status-badge badge-green">✓ Đã ký</span></div>
+          </div>
+          <div class="sig-role-item" style="border-color:rgba(0,194,224,0.4);background:rgba(0,194,224,0.04)">
+            <div class="role-avatar mine">G</div>
+            <div>
+              <div class="role-name">Cơ quan Giám sát</div>
+              <div class="role-status" style="color:var(--cyan)">Đang chờ chữ ký của bạn</div>
+            </div>
+            <div class="role-badge"><span class="status-badge badge-amber">⏳ Chờ ký</span></div>
+          </div>
+        </div>
+        <div
+          style="margin-top:14px;padding:12px 14px;background:rgba(245,166,35,0.06);border:1px solid rgba(245,166,35,0.2);border-radius:8px;font-size:12px;color:#8B6914">
+          ⚠️ Đã có 2/3 chữ ký. Chữ ký của bạn sẽ kích hoạt giải ngân tự động qua PayOS.
+        </div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn-reject" onclick="closeDrawer();openModal('reject')">✗ Từ chối</button>
+      <button class="btn-sign" onclick="closeDrawer();openModal('sign')">✍ Ký Duyệt</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════ MODALS ══════════════════ -->
+  <!-- Sign Modal -->
+  <div class="modal-overlay" id="modal-sign">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Xác nhận Ký duyệt Giải ngân</div>
+      </div>
+      <div class="modal-body">
+        <div style="padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px">
+          <div style="font-size:11px;color:var(--text-light);margin-bottom:6px">Yêu cầu giải ngân</div>
+          <div style="font-size:14px;font-weight:700;color:var(--text)">Xây trường học Tây Nguyên</div>
+          <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--navy);margin-top:4px">
+            ₫450,000,000</div>
+          <div style="font-size:11px;color:var(--text-light);margin-top:4px">REQ-2026-0312 · Quỹ Thiện Nguyên Việt</div>
+        </div>
+        <div class="section-label" style="margin-bottom:6px">Bước 1: Xác nhận thông tin ✓</div>
+        <div class="section-label" style="margin-bottom:8px">Bước 2: Nhập mã PIN xác thực</div>
+        <input type="password" class="modal-pin-field" placeholder="● ● ● ● ● ●" maxlength="6" id="pin-input">
+        <div style="font-size:11px;color:var(--text-light);margin-top:8px;text-align:center">Nhập PIN 6 chữ số để xác
+          nhận chữ ký điện tử</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal('modal-sign')">Hủy bỏ</button>
+        <button class="btn-confirm" onclick="confirmSign()">✓ Xác nhận ký</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reject Modal -->
+  <div class="modal-overlay" id="modal-reject">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" style="color:var(--red)">✗ Từ chối Yêu cầu Giải ngân</div>
+      </div>
+      <div class="modal-body">
+        <div style="font-size:12.5px;color:var(--text-mid);margin-bottom:12px">Vui lòng nhập lý do từ chối. Thông tin
+          này sẽ được ghi nhận vào audit log và thông báo tới tổ chức.</div>
+        <textarea
+          style="width:100%;border:2px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:var(--sans);color:var(--text);resize:vertical;min-height:90px;outline:none;transition:border-color .15s"
+          placeholder="Ví dụ: Thiếu minh chứng hóa đơn chi tiết, hình ảnh thực tế chưa đủ..."
+          onfocus="this.style.borderColor='var(--red)'"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal('modal-reject')">Hủy bỏ</button>
+        <button
+          style="flex:2;padding:10px;border-radius:8px;border:none;background:var(--red);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans)"
+          onclick="confirmReject()">✗ Xác nhận từ chối</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approve KYC Modal -->
+  <div class="modal-overlay" id="modal-approve-kyc">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Phê duyệt Hồ sơ KYC</div>
+      </div>
+      <div class="modal-body">
+        <div
+          style="padding:12px 14px;background:rgba(29,184,122,0.06);border:1px solid rgba(29,184,122,0.2);border-radius:8px;font-size:12.5px;color:#138A5A;margin-bottom:12px">
+          ✅ Tổ chức <strong>Hội Từ thiện Cần Thơ</strong> sẽ được kích hoạt và có thể bắt đầu hoạt động trên nền tảng.
+        </div>
+        <input type="password" class="modal-pin-field" placeholder="● ● ● ● ● ●" maxlength="6">
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal('modal-approve-kyc')">Hủy</button>
+        <button class="btn-confirm" onclick="confirmKYC()">✓ Phê duyệt KYC</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reject KYC Modal -->
+  <div class="modal-overlay" id="modal-reject-kyc">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" style="color:var(--red)">Từ chối Hồ sơ KYC</div>
+      </div>
+      <div class="modal-body">
+        <textarea
+          style="width:100%;border:2px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:var(--sans);color:var(--text);resize:vertical;min-height:80px;outline:none;transition:border-color .15s"
+          placeholder="Lý do từ chối hồ sơ KYC..." onfocus="this.style.borderColor='var(--red)'"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" onclick="closeModal('modal-reject-kyc')">Hủy</button>
+        <button
+          style="flex:2;padding:10px;border-radius:8px;border:none;background:var(--red);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans)"
+          onclick="closeModal('modal-reject-kyc');showToast('error','Từ chối KYC','Hồ sơ đã bị từ chối. Tổ chức sẽ được thông báo.')">Xác
+          nhận từ chối</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════ TOAST ══════════════════ -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script>
+    // Hàm điều hướng giữa các trang nội bộ và đồng bộ breadcrumb tương ứng.
+    function navigate(page, el) {
+      document.querySelectorAll('.page').forEach(pageElement => pageElement.classList.remove('active'));
+      document.querySelectorAll('.sb-item').forEach(sidebarItem => sidebarItem.classList.remove('active'));
+      document.getElementById('page-' + page).classList.add('active');
+      el.classList.add('active');
+
+      const pageLabels = {
+        dashboard: 'Tổng quan',
+        disbursement: 'Ký duyệt Giải ngân',
+        kyc: 'Duyệt Hồ sơ KYC',
+        report: 'Báo cáo Tuân thủ',
+        transparency: 'Tra cứu Giao dịch'
+      };
+
+      document.getElementById('breadcrumb-current').textContent = pageLabels[page] || page;
+      window.scrollTo(0, 0);
+    }
+
+    // Hàm mở khung drawer để xem chi tiết hồ sơ hoặc yêu cầu giải ngân.
+    function openDrawer(mode) {
+      document.getElementById('overlay').classList.add('open');
+      document.getElementById('drawer').classList.add('open');
+      document.body.style.overflow = 'hidden';
+    }
+
+    // Hàm đóng khung drawer và trả lại trạng thái cuộn trang bình thường.
+    function closeDrawer() {
+      document.getElementById('overlay').classList.remove('open');
+      document.getElementById('drawer').classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    // Hàm chuyển tab trong drawer để hiển thị đúng nhóm thông tin cần xem.
+    function switchTab(name, el) {
+      document.querySelectorAll('.tab-content').forEach(tabContent => tabContent.classList.remove('active'));
+      document.querySelectorAll('.dtab').forEach(tabButton => tabButton.classList.remove('active'));
+      document.getElementById('tab-' + name).classList.add('active');
+      el.classList.add('active');
+    }
+
+    // Hàm mở modal theo định danh để xác nhận hành động quan trọng.
+    function openModal(id) {
+      document.getElementById('modal-' + id).classList.add('open');
+    }
+
+    // Hàm đóng modal theo định danh.
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('open');
+    }
+
+    // Hàm xác nhận ký duyệt và kiểm tra đầu vào mã PIN trước khi thông báo thành công.
+    function confirmSign() {
+      const pinInput = document.getElementById('pin-input');
+
+      if (pinInput.value.length < 4) {
+        pinInput.style.borderColor = 'var(--red)';
+        showToast('error', 'Lỗi', 'Vui lòng nhập đủ mã PIN');
+        return;
+      }
+
+      closeModal('modal-sign');
+      pinInput.value = '';
+      showToast('success', 'Ký duyệt thành công', 'Chữ ký điện tử đã được ghi nhận on-chain. Giải ngân đang được xử lý.');
+    }
+
+    // Hàm xác nhận từ chối yêu cầu giải ngân và hiển thị thông báo kết quả.
+    function confirmReject() {
+      closeModal('modal-reject');
+      showToast('error', 'Đã từ chối', 'Yêu cầu giải ngân đã bị từ chối. Tổ chức sẽ nhận thông báo.');
+    }
+
+    // Hàm xác nhận phê duyệt hồ sơ KYC của tổ chức.
+    function confirmKYC() {
+      closeModal('modal-approve-kyc');
+      showToast('success', 'KYC đã phê duyệt', 'Tổ chức đã được kích hoạt thành công.');
+    }
+
+    // Hàm xử lý đăng xuất và mô phỏng điều hướng về trang đăng nhập.
+    function handleLogout() {
+      showToast('success', 'Đăng xuất thành công', 'Bạn đã kết thúc phiên làm việc. Đang chuyển về trang đăng nhập...');
+      setTimeout(() => {
+        window.location.href = 'dcp-login.html';
+      }, 900);
+    }
+
+    // Hàm tạo và hiển thị toast thông báo theo từng loại trạng thái.
+    let toastCount = 0;
+    function showToast(type, title, msg) {
+      const container = document.getElementById('toast-container');
+      const id = 'toast-' + (++toastCount);
+      const icons = { success: '✓', error: '✗', info: 'ℹ' };
+      const toastElement = document.createElement('div');
+      toastElement.className = `toast ${type === 'success' ? 'success' : type === 'error' ? 'error' : 'success'}`;
+      toastElement.id = id;
+      toastElement.innerHTML = `
+    <div class="toast-icon">${icons[type] || '●'}</div>
+    <div><div class="toast-text">${title}</div><div class="toast-sub">${msg}</div></div>
+    <div class="toast-close" onclick="removeToast('${id}')">✕</div>
+  `;
+
+      container.appendChild(toastElement);
+      requestAnimationFrame(() => requestAnimationFrame(() => toastElement.classList.add('show')));
+      setTimeout(() => removeToast(id), 4200);
+    }
+
+    // Hàm đóng và xóa toast khỏi giao diện sau khi hoàn tất hiệu ứng.
+    function removeToast(id) {
+      const toastElement = document.getElementById(id);
+      if (toastElement) {
+        toastElement.classList.remove('show');
+        setTimeout(() => toastElement.remove(), 300);
+      }
+    }
+
+    // Hàm đăng ký sự kiện để đóng modal khi người dùng bấm ra vùng nền.
+    document.querySelectorAll('.modal-overlay').forEach(modalOverlay => {
+      modalOverlay.addEventListener('click', event => {
+        if (event.target === modalOverlay) {
+          modalOverlay.classList.remove('open');
+        }
+      });
+    });
+
+    // Hàm hiển thị thông báo chào mừng sau khi tải trang hoàn tất.
+    setTimeout(() => showToast('success', 'Đăng nhập thành công', 'Chào mừng, Bộ Tài chính – Vụ Giám sát'), 600);
+  </script>
+</body>
+
+</html>
