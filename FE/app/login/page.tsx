@@ -187,7 +187,13 @@ export default function LoginPage() {
         const csrfToken = responseData?.csrfToken as string | undefined;
         const refreshSessionId = responseData?.refreshSessionId as string | undefined;
         const refreshTokenExpiresAt = responseData?.expiresAt as string | undefined;
-        const userData = responseData?.user as { fullName?: string; walletAddress?: string; role?: string } | undefined;
+        const userData = responseData?.user as {
+          id?: string;
+          fullName?: string;
+          email?: string;
+          walletAddress?: string;
+          role?: string;
+        } | undefined;
         const correlationIdValue = responseData?.correlationId as string | undefined;
 
         persistAuthSession({
@@ -196,7 +202,11 @@ export default function LoginPage() {
           csrfToken,
           refreshSessionId,
           refreshTokenExpiresAt,
-          userFullName: userData?.fullName || 'Người dùng'
+          userFullName: userData?.fullName || 'Người dùng',
+          userEmail: userData?.email || '',
+          userWalletAddress: userData?.walletAddress || '',
+          userId: userData?.id || '',
+          userRole: userData?.role || ''
         });
 
         setUserFullName(userData?.fullName || 'Người dùng');

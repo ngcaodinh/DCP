@@ -5,7 +5,8 @@ import {
   handleLogoutAll,
   handleOrganizationKycSubmission,
   handleGetPendingOrganizationKycSubmissions,
-  handleReviewOrganizationKycSubmission
+  handleReviewOrganizationKycSubmission,
+  handleGetCurrentUserProfile
 } from '../controllers/authController';
 import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
 import { createRefreshCsrfMiddleware } from '../middleware/csrfMiddleware';
@@ -33,7 +34,8 @@ export function createAuthRoutes(): Router {
     handleRefreshToken
   );
 
-  router.post('/logout-all', attachRequestMetadata(), handleLogoutAll);
+  router.get('/me', attachRequestMetadata(), authenticationMiddleware, handleGetCurrentUserProfile);
+  router.post('/logout-all', attachRequestMetadata(), authenticationMiddleware, handleLogoutAll);
   router.post(
     '/organization/kyc-submissions',
     attachRequestMetadata(),

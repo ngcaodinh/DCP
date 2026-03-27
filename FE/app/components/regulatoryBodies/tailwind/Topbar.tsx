@@ -1,12 +1,60 @@
 type TopbarProps = {
   breadcrumbTitle: string;
+  userDisplayName: string;
+  userEmail: string;
+  userWalletAddress: string;
   onOpenMobileMenu: () => void;
   onOpenNotification: () => void;
   onLogout: () => void;
 };
 
-/** Hàm component Topbar để hiển thị breadcrumb, thao tác nhanh và khối người dùng bám sát giao diện mẫu. */
-export default function Topbar({ breadcrumbTitle, onOpenMobileMenu, onOpenNotification, onLogout }: TopbarProps) {
+/** Hàm lấy chữ cái đầu từ tên người dùng để hiển thị avatar mặc định. */
+function getAvatarFallbackText(userDisplayName: string): string {
+  const normalizedDisplayName = userDisplayName.trim();
+  if (!normalizedDisplayName) {
+    return 'U';
+  }
+
+  return normalizedDisplayName.charAt(0).toUpperCase();
+}
+
+/** Hàm rút gọn địa chỉ ví theo yêu cầu chỉ hiển thị 3 ký tự đầu, phần còn lại thay bằng dấu ba chấm. */
+function getShortWalletAddress(userWalletAddress: string): string {
+  const normalizedWalletAddress = userWalletAddress.trim();
+  if (normalizedWalletAddress.length <= 15) {
+    return normalizedWalletAddress;
+  }
+
+  const walletAddressStartSegment = normalizedWalletAddress.slice(0, 15);
+  return `${walletAddressStartSegment}...`;
+}
+
+/** Hàm tổng hợp email và địa chỉ ví để hiển thị theo từng dòng tách biệt. */
+function getUserContactInfo(userEmail: string, userWalletAddress: string): { emailText: string; walletText: string } {
+  const normalizedUserEmail = userEmail.trim();
+  const normalizedWalletAddress = userWalletAddress.trim();
+  const shortWalletAddress = normalizedWalletAddress ? getShortWalletAddress(normalizedWalletAddress) : '';
+
+  // Ghi chú logic: Ưu tiên giữ email ở dòng đầu, ví (nếu có) xuống dòng riêng để dễ đọc khi Gmail dài.
+  return {
+    emailText: normalizedUserEmail,
+    walletText: shortWalletAddress
+  };
+}
+
+/** Hàm component Topbar để hiển thị breadcrumb, thao tác nhanh và thông tin người dùng đăng nhập. */
+export default function Topbar({
+  breadcrumbTitle,
+  userDisplayName,
+  userEmail,
+  userWalletAddress,
+  onOpenMobileMenu,
+  onOpenNotification,
+  onLogout
+}: TopbarProps) {
+  const avatarFallbackText = getAvatarFallbackText(userDisplayName);
+  const { emailText, walletText } = getUserContactInfo(userEmail, userWalletAddress);
+
   return (
     <header className="sticky inset-x-0 top-0 z-20 m-0 flex h-16 items-center justify-between border-b border-emerald-900/15 bg-white px-4 lg:px-7">
       <div className="flex items-center gap-2.5">
@@ -41,10 +89,11 @@ export default function Topbar({ breadcrumbTitle, onOpenMobileMenu, onOpenNotifi
         <div className="hidden h-6 w-px bg-emerald-900/15 sm:block" />
 
         <div className="hidden items-center gap-2 sm:flex">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-cyan-400 text-[10px] font-bold text-white">BTC</div>
-          <div className="leading-[1.15]">
-            <p className="text-[12px] font-semibold text-slate-900">Bộ Tài chính</p>
-            <p className="mt-0.5 text-[10.5px] text-slate-500">Vụ Giám sát &amp; Kiểm toán</p>
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-300 text-[11px] font-bold text-slate-700">{avatarFallbackText}</div>
+          <div className="min-w-0 max-w-[220px] leading-[1.15]">
+            <p className="truncate text-[12px] font-semibold text-slate-900">{userDisplayName}</p>
+            {emailText ? <p className="mt-0.5 truncate text-[10.5px] text-slate-500">{emailText}</p> : null}
+            {walletText ? <p className="mt-0.5 truncate text-[10.5px] text-slate-500">{walletText}</p> : null}
           </div>
           <button
             type="button"

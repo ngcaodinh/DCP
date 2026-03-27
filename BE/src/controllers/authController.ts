@@ -10,6 +10,7 @@ import {
   reviewOrganizationKycSubmission,
   submitOrganizationKyc
 } from '../services/organizationKycService';
+import { findUserById } from '../models/authModel';
 import { getLogger } from '../config/logger';
 
 const logger = getLogger();
@@ -80,17 +81,19 @@ function extractRefreshPayload(request: Request): { refreshSessionId: string; re
 
 
 /**
- * Hàm lấy payload đăng xuất tất cả thiết bị.
- * Mục đích: đảm bảo userId hợp lệ.
+ * Hàm lấy thông tin người dùng đã xác thực từ request.
+ * Mục đích: chuẩn hóa cách đọc authenticatedUser do middleware gắn vào.
  */
-function extractLogoutAllPayload(request: Request): { userId: string } | null {
-  const userId = request.body?.userId;
+function getAuthenticatedUser(request: Request): { userId: string; role: string } | null {
+  const authenticatedRequest = request as Request & {
+    authenticatedUser?: { userId: string; role: string };
+  };
 
-  if (typeof userId !== 'string' || userId.trim().length === 0) {
+  if (!authenticatedRequest.authenticatedUser) {
     return null;
   }
 
-  return { userId: userId.trim() };
+  return authenticatedRequest.authenticatedUser;
 }
 
 /**
@@ -292,10 +295,7 @@ export async function handleReviewOrganizationKycSubmission(request: Request, re
       reviewPayload: request.body
     });
 
-    logger.info('Organization KYC review completed.', {
-      submissionId,
-      accountUpdate: reviewResult.accountUpdate
-    });
+    logger.info('Organization KYC review completed.');
 
     response.status(200).json({
       message: 'Cập nhật trạng thái hồ sơ KYC thành công.',
@@ -316,21 +316,52 @@ export async function handleReviewOrganizationKycSubmission(request: Request, re
 
 /**
  * Hàm xử lý đăng xuất tất cả thiết bị.
- * Mục đích: thu hồi toàn bộ refresh session theo userId.
+ * Mục đích: thu hồi toàn bộ refresh session theo userId từ access token.
  */
 export async function handleLogoutAll(request: Request, response: Response): Promise<void> {
-  const payload = extractLogoutAllPayload(request);
+  const authenticatedUser = getAuthenticatedUser(request);
 
-  if (!payload) {
-    response.status(400).json({
-      message: 'Thiếu thông tin đăng xuất.'
+  if (!authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
     });
     return;
   }
 
-  await revokeAllRefreshSessionsForUser(payload.userId);
+  await revokeAllRefreshSessionsForUser(authenticatedUser.userId);
   response.status(200).json({
     message: 'Đã đăng xuất khỏi tất cả thiết bị.'
+  });
+}
+
+/**
+ * Hàm lấy hồ sơ người dùng hiện tại theo access token.
+ * Mục đích: trả về thông tin tối thiểu phục vụ guard phân quyền ở frontend.
+ */
+export async function handleGetCurrentUserProfile(request: Request, response: Response): Promise<void> {
+  const authenticatedUser = getAuthenticatedUser(request);
+
+  if (!authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  const user = await findUserById(authenticatedUser.userId);
+  if (!user) {
+    response.status(404).json({
+      message: 'Không tìm thấy thông tin người dùng.'
+    });
+    return;
+  }
+
+  response.status(200).json({
+    user: {
+      id: user.id,
+      fullName: user.fullName,
+      role: user.role
+    }
   });
 }
 
