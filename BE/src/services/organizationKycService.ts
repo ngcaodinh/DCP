@@ -278,12 +278,12 @@ export async function reviewOrganizationKycSubmission(
     throw new Error('Vui lòng nhập lý do từ chối hồ sơ KYC.');
   }
 
-  const reviewStatus = normalizedAction === 'approve' ? 'APPROVED' : 'REJECTED';
+  const reviewStatus: OrganizationKycFile['reviewStatus'] = normalizedAction === 'approve' ? 'APPROVED' : 'REJECTED';
   const reviewDateTime = new Date();
   const nextRole = normalizedAction === 'approve' ? 'organizations' : organizationUser.role;
   const nextAccountStatus = normalizedAction === 'approve' ? 'ACTIVE' : 'INACTIVE_PENDING_KYC';
 
-  const reviewedFiles = existingSubmission.files.map((fileItem) => ({
+  const reviewedFiles: OrganizationKycFile[] = existingSubmission.files.map((fileItem) => ({
     ...fileItem,
     reviewStatus,
     reviewedBy: reviewerUserId,

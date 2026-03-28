@@ -3,6 +3,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { createAuthRoutes } from './routes/authRoutes';
 import { createHealthRoutes } from './routes/healthRoutes';
+import { createDepositRoutes } from './routes/depositRoutes';
 
 const application = express();
 
@@ -30,6 +31,7 @@ function configureMiddlewares(): void {
 function registerRoutes(): void {
   application.use('/auth', createAuthRoutes());
   application.use('/health', createHealthRoutes());
+  application.use('/api/deposit', createDepositRoutes());
 }
 
 configureMiddlewares();

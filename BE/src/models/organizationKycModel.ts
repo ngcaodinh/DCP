@@ -138,9 +138,9 @@ export async function findSubmissionBySubmissionId(submissionId: string): Promis
 export async function updateOrganizationKycSubmissionReview(
   submissionId: string,
   reviewData: {
-    status: 'APPROVED' | 'REJECTED';
-    reviewedBy: string;
-    reviewedAt: Date;
+    status: OrganizationKycSubmission['status'];
+    reviewedBy: string | null;
+    reviewedAt: Date | null;
     rejectionReason: string | null;
     files: OrganizationKycFile[];
   }

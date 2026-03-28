@@ -4,6 +4,10 @@ type LogMetadata = {
   errorStack?: string;
   smartAccountAddress?: string;
   fallbackWalletAddress?: string;
+  orderCode?: string;
+  checksumSource?: string;
+  verifyMode?: string;
+  finalStatus?: string;
 };
 
 const logger = {
