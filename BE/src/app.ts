@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { createAuthRoutes } from './routes/authRoutes';
 import { createHealthRoutes } from './routes/healthRoutes';
 import { createDepositRoutes } from './routes/depositRoutes';
+import { createProjectRoutes } from './routes/projectRoutes';
 
 const application = express();
 
@@ -21,7 +22,11 @@ function configureMiddlewares(): void {
     })
   );
   application.use(helmet());
-  application.use(express.json());
+
+  // Logic này tăng giới hạn body để hỗ trợ upload file minh chứng dạng base64 từ frontend.
+  // Ghi chú: base64 làm kích thước payload tăng khoảng 33%, nên cần limit đủ lớn để tránh lỗi 413.
+  application.use(express.json({ limit: '25mb' }));
+  application.use(express.urlencoded({ extended: true, limit: '25mb' }));
 }
 
 /**
@@ -32,6 +37,7 @@ function registerRoutes(): void {
   application.use('/auth', createAuthRoutes());
   application.use('/health', createHealthRoutes());
   application.use('/api/deposit', createDepositRoutes());
+  application.use('/projects', createProjectRoutes());
 }
 
 configureMiddlewares();

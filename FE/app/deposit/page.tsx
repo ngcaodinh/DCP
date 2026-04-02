@@ -1,6 +1,6 @@
 'use client';
 
-import { type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { readAuthSession } from '../utils/authSession';
@@ -182,10 +182,10 @@ const formatCurrency = (value: number) => `${value.toLocaleString('vi-VN')} VNĐ
 const formatToken = (value: number) => `${value.toLocaleString('vi-VN')} Token`;
 
 /**
- * Hàm giao diện trang Home (Deposit).
- * Mục đích: hiển thị bố cục nạp tiền theo mẫu UI gốc.
+ * Hàm render nội dung trang Home (Deposit).
+ * Mục đích: gom toàn bộ logic client và dùng trong Suspense boundary.
  */
-export default function DepositHomePage() {
+function DepositHomePageContent() {
   const searchParams = useSearchParams();
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -1064,4 +1064,22 @@ export default function DepositHomePage() {
     </main>
   );
 }
+/**
+ * Hàm render trang Deposit với Suspense boundary.
+ * Mục đích: đáp ứng yêu cầu của Next.js khi dùng useSearchParams trong Client Component.
+ */
+export default function DepositHomePage() {
+  return (
+    <Suspense
+      fallback={(
+        <main className="min-h-screen bg-[#F8FAFB] p-6 text-sm text-gray-500">
+          Đang tải trang nạp tiền...
+        </main>
+      )}
+    >
+      <DepositHomePageContent />
+    </Suspense>
+  );
+}
+
 

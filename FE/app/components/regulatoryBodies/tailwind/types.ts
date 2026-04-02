@@ -1,4 +1,4 @@
-export type PageKey = 'dashboard' | 'disbursement' | 'kyc' | 'report' | 'transparency';
+export type PageKey = 'dashboard' | 'projectReview' | 'disbursement' | 'kyc' | 'report' | 'transparency';
 
 export type NavigationItem = {
   key: PageKey;

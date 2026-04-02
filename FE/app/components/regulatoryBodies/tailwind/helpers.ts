@@ -3,6 +3,7 @@ import type { PageKey } from './types';
 /** Hàm chuẩn hóa tiêu đề để đồng bộ breadcrumb, header và tiêu đề trang. */
 export function getPageTitle(pageKey: PageKey): string {
   if (pageKey === 'dashboard') return 'Tổng quan Giám sát';
+  if (pageKey === 'projectReview') return 'Duyệt dự án mới';
   if (pageKey === 'disbursement') return 'Ký duyệt Giải ngân';
   if (pageKey === 'kyc') return 'Duyệt Hồ sơ KYC';
   if (pageKey === 'report') return 'Báo cáo Tuân thủ';

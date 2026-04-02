@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ApiErrorResponse, fetchApi } from '@/app/utils/apiClient';
 import { readAuthSession } from '../../../utils/authSession';
 import { getPageTitle } from './helpers';
 import type { PageKey, UrgentRequestItem } from './types';
@@ -546,6 +547,301 @@ function KycPanel() {
 }
 
 
+type ProjectReviewItem = {
+  projectId: string;
+  organizationId: string;
+  name: string;
+  description: string;
+  goalAmount: number;
+  deadline: string;
+  submittedAt: string | null;
+  evidenceCids: string[];
+};
+
+/** Hàm chuẩn hóa dữ liệu dự án chờ duyệt từ API để tránh lỗi khi backend trả thiếu trường. */
+function normalizeProjectReviewItem(rawValue: unknown): ProjectReviewItem | null {
+  if (!rawValue || typeof rawValue !== 'object') {
+    return null;
+  }
+
+  const rawProject = rawValue as Record<string, unknown>;
+  if (typeof rawProject.projectId !== 'string' || typeof rawProject.name !== 'string') {
+    return null;
+  }
+
+  return {
+    projectId: rawProject.projectId,
+    organizationId: typeof rawProject.organizationId === 'string' ? rawProject.organizationId : '',
+    name: rawProject.name,
+    description: typeof rawProject.description === 'string' ? rawProject.description : 'Chưa có mô tả.',
+    goalAmount: typeof rawProject.goalAmount === 'number' ? rawProject.goalAmount : 0,
+    deadline: typeof rawProject.deadline === 'string' ? rawProject.deadline : '',
+    submittedAt: typeof rawProject.submittedAt === 'string' ? rawProject.submittedAt : null,
+    evidenceCids: Array.isArray(rawProject.evidenceCids)
+      ? rawProject.evidenceCids.filter((cidItem): cidItem is string => typeof cidItem === 'string')
+      : []
+  };
+}
+
+/** Hàm hiển thị panel Duyệt dự án mới. Mục đích: tải danh sách dự án chờ duyệt và cho phép reviewer phê duyệt hoặc từ chối ngay tại màn hình. */
+function ProjectReviewPanel() {
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [projectReviewList, setProjectReviewList] = useState<ProjectReviewItem[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+  const [isApproveConfirmModalVisible, setIsApproveConfirmModalVisible] = useState(false);
+
+  const selectedProject = projectReviewList.find(projectItem => projectItem.projectId === selectedProjectId) || null;
+
+  /** Hàm gọi API lấy danh sách dự án mới chờ duyệt cho Regulatory. */
+  const loadPendingProjectList = useCallback(async () => {
+    const authSession = readAuthSession();
+    if (!authSession.accessToken) {
+      setErrorMessage('Bạn cần đăng nhập trước khi duyệt dự án.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const response = await fetchApi<ProjectReviewItem[]>(`${backendBaseUrl}/projects/pending-approval`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+
+      const normalizedProjectList = (response.data || [])
+        .map(normalizeProjectReviewItem)
+        .filter((projectItem): projectItem is ProjectReviewItem => projectItem !== null);
+
+      setProjectReviewList(normalizedProjectList);
+      setSelectedProjectId(previousProjectId => {
+        // Ghi chú logic phức tạp: nếu item đang chọn không còn trong danh sách sau khi reload,
+        // tự động chọn item đầu tiên còn lại để panel chi tiết luôn có dữ liệu hợp lệ.
+        const hasPreviousProject = normalizedProjectList.some(projectItem => projectItem.projectId === previousProjectId);
+        if (hasPreviousProject) {
+          return previousProjectId;
+        }
+
+        return normalizedProjectList[0]?.projectId || '';
+      });
+    } catch (error) {
+      const apiError = error as ApiErrorResponse;
+      setErrorMessage(apiError.message || 'Không thể tải danh sách dự án chờ duyệt.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [backendBaseUrl]);
+
+  /** Hàm gửi hành động review dự án lên backend. Mục đích: cập nhật trạng thái APPROVE/REJECT trực tiếp từ màn duyệt dự án mới. */
+  const submitProjectReview = useCallback(async (action: 'APPROVE' | 'REJECT') => {
+    if (!selectedProject) {
+      return;
+    }
+
+    if (action === 'REJECT' && rejectReason.trim().length === 0) {
+      setErrorMessage('Vui lòng nhập lý do từ chối trước khi reject dự án.');
+      return;
+    }
+
+    const authSession = readAuthSession();
+    if (!authSession.accessToken) {
+      setErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      await fetchApi<ProjectReviewItem>(`${backendBaseUrl}/projects/review`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        body: JSON.stringify({
+          projectId: selectedProject.projectId,
+          action,
+          rejectionReason: action === 'REJECT' ? rejectReason.trim() : undefined
+        })
+      });
+
+      setRejectReason('');
+      setSuccessMessage(action === 'APPROVE' ? 'Phê duyệt dự án thành công.' : 'Từ chối dự án thành công.');
+      await loadPendingProjectList();
+    } catch (error) {
+      const apiError = error as ApiErrorResponse;
+      setErrorMessage(apiError.message || 'Không thể cập nhật kết quả duyệt dự án.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  }, [backendBaseUrl, loadPendingProjectList, rejectReason, selectedProject]);
+
+  /** Hàm mở modal xác nhận trước khi phê duyệt dự án để tránh thao tác nhầm. */
+  const openApproveConfirmModal = () => {
+    setErrorMessage('');
+    setSuccessMessage('');
+    setIsApproveConfirmModalVisible(true);
+  };
+
+  /** Hàm đóng modal xác nhận phê duyệt dự án. */
+  const closeApproveConfirmModal = () => {
+    if (isSubmittingReview) {
+      return;
+    }
+
+    setIsApproveConfirmModalVisible(false);
+  };
+
+  /** Hàm xác nhận phê duyệt dự án sau khi người dùng bấm chắc chắn. */
+  const handleConfirmApproveProjectReview = async () => {
+    setIsApproveConfirmModalVisible(false);
+    await submitProjectReview('APPROVE');
+  };
+
+  /** Hàm tải dữ liệu dự án khi mở đúng tab để tránh gọi API thừa. */
+  useEffect(() => {
+    loadPendingProjectList();
+  }, [loadPendingProjectList]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
+        <h2 className="text-lg font-bold text-slate-900">Duyệt dự án mới</h2>
+        <p className="mt-1 text-xs text-slate-500">Danh sách dự án mới gửi lên để chờ Regulatory kiểm duyệt</p>
+      </div>
+
+      {errorMessage ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">{errorMessage}</div> : null}
+      {successMessage ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{successMessage}</div> : null}
+
+      <div className="grid gap-4 overflow-hidden rounded-xl border border-emerald-900/15 bg-white p-4 lg:grid-cols-[320px_1fr]">
+        <div className="max-h-[620px] overflow-y-auto border-r border-slate-100 pr-3">
+          {isLoading ? <p className="text-xs text-slate-500">Đang tải danh sách dự án chờ duyệt...</p> : null}
+          {!isLoading && projectReviewList.length === 0 ? <p className="text-xs text-slate-500">Hiện chưa có dự án mới chờ duyệt.</p> : null}
+
+          {projectReviewList.map(projectItem => (
+            <button
+              key={projectItem.projectId}
+              type="button"
+              onClick={() => setSelectedProjectId(projectItem.projectId)}
+              className={`mb-2 w-full rounded-lg border px-3 py-2 text-left ${selectedProjectId === projectItem.projectId ? 'border-cyan-500 bg-cyan-50' : 'border-slate-200 bg-white'}`}
+            >
+              <p className="text-xs font-semibold text-slate-900">{projectItem.name}</p>
+              <p className="mt-1 line-clamp-2 text-[11px] text-slate-600">{projectItem.description}</p>
+            </button>
+          ))}
+        </div>
+
+        <div>
+          {selectedProject ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">{selectedProject.name}</h3>
+                <p className="mt-2 text-xs text-slate-700">{selectedProject.description}</p>
+
+                <div className="mt-3 grid gap-2 text-[11px] text-slate-700 sm:grid-cols-2">
+                  <p><span className="font-semibold">Mã dự án:</span> {selectedProject.projectId}</p>
+                  <p><span className="font-semibold">Mã tổ chức:</span> {selectedProject.organizationId}</p>
+                  <p><span className="font-semibold">Trạng thái:</span> {selectedProject.submittedAt ? 'Chờ phê duyệt' : 'Nháp'}</p>
+                  <p><span className="font-semibold">Mục tiêu gây quỹ:</span> {selectedProject.goalAmount.toLocaleString('vi-VN')} ₫</p>
+                  <p><span className="font-semibold">Hạn chót:</span> {selectedProject.deadline ? new Date(selectedProject.deadline).toLocaleString('vi-VN') : 'Chưa có hạn chót'}</p>
+                  <p><span className="font-semibold">Thời điểm gửi duyệt:</span> {selectedProject.submittedAt ? new Date(selectedProject.submittedAt).toLocaleString('vi-VN') : 'Chưa gửi duyệt'}</p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 p-3">
+                <p className="text-xs font-semibold text-slate-800">Danh sách CID minh chứng (IPFS)</p>
+                {selectedProject.evidenceCids.length === 0 ? (
+                  <p className="mt-2 text-xs text-slate-500">Dự án chưa có CID minh chứng.</p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {selectedProject.evidenceCids.map((cidItem, evidenceIndex) => (
+                      <div key={`${selectedProject.projectId}-${cidItem}`} className="rounded border border-slate-200 p-2">
+                        <p className="text-[11px] text-slate-700">Minh chứng #{evidenceIndex + 1}</p>
+                        <p className="mt-1 break-all font-mono text-[11px] text-cyan-700">{cidItem}</p>
+                        <a
+                          href={`https://gateway.pinata.cloud/ipfs/${cidItem}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-2 inline-flex rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100"
+                        >
+                          Mở tài liệu IPFS
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                <label className="block text-xs font-semibold text-amber-800">Lý do từ chối (bắt buộc khi từ chối)</label>
+                <textarea
+                  value={rejectReason}
+                  onChange={event => setRejectReason(event.target.value)}
+                  rows={3}
+                  className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
+                  placeholder="Nhập lý do từ chối dự án..."
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isSubmittingReview}
+                  onClick={() => submitProjectReview('REJECT')}
+                  className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  Từ chối
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmittingReview}
+                  onClick={openApproveConfirmModal}
+                  className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  Chấp nhận
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500">Chọn dự án để xem chi tiết và duyệt.</p>
+          )}
+        </div>
+      </div>
+
+      {isApproveConfirmModalVisible ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-base font-bold text-slate-900">Xác nhận phê duyệt dự án</h3>
+            <p className="mt-2 text-sm text-slate-600">Bạn có chắc chắn muốn phê duyệt dự án này không?</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeApproveConfirmModal}
+                disabled={isSubmittingReview}
+                className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmApproveProjectReview}
+                disabled={isSubmittingReview}
+                className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                Chắc chắn
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const reportMetricItemList = [
   { labelText: 'Tổng yêu cầu giải ngân', valueText: '42', toneClassName: 'text-cyan-700 bg-cyan-50 border-cyan-100' },
   { labelText: 'Đã phê duyệt (90.5%)', valueText: '38', toneClassName: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
@@ -710,6 +1006,10 @@ function TransparencyPanel() {
 /** Hàm component NonDashboardPanel để hiển thị nội dung theo tab ngoài tổng quan. */
 export default function NonDashboardPanel({ selectedPageKey, onOpenDisbursementRequest }: NonDashboardPanelProps) {
   const sectionTitle = getPageTitle(selectedPageKey);
+
+  if (selectedPageKey === 'projectReview') {
+    return <ProjectReviewPanel />;
+  }
 
   if (selectedPageKey === 'disbursement') {
     return <DisbursementPanel onOpenDisbursementRequest={onOpenDisbursementRequest} />;

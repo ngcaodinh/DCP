@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express';
 import jsonWebToken from 'jsonwebtoken';
 import { getJsonWebTokenSecret } from '../config/jsonWebToken';
+import { sendErrorResponse } from '../utils/apiResponse';
 
 type JwtClaims = {
   userId: string;
@@ -32,7 +33,7 @@ export function createAuthenticationMiddleware() {
     const bearerToken = extractBearerToken(request);
 
     if (!bearerToken) {
-      response.status(401).json({ message: 'Thiếu access token hợp lệ.' });
+      sendErrorResponse(response, 401, 'Thiếu access token hợp lệ.', 'UNAUTHENTICATED');
       return;
     }
 
@@ -45,7 +46,7 @@ export function createAuthenticationMiddleware() {
       };
       next();
     } catch (_error) {
-      response.status(401).json({ message: 'Access token không hợp lệ hoặc đã hết hạn.' });
+      sendErrorResponse(response, 401, 'Access token không hợp lệ hoặc đã hết hạn.', 'UNAUTHENTICATED');
     }
   };
 }

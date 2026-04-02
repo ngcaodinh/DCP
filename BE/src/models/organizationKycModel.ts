@@ -36,6 +36,12 @@ export type OrganizationKycSubmission = {
   reviewedBy: string | null;
   reviewedAt: Date | null;
   rejectionReason: string | null;
+  beneficiaryBankAccount: {
+    bankName: string;
+    bankAccountNumber: string;
+    accountHolderName: string;
+    branchName: string | null;
+  } | null;
   files: OrganizationKycFile[];
 };
 
@@ -68,6 +74,12 @@ const organizationKycSubmissionSchema = new Schema<OrganizationKycSubmission>({
   reviewedBy: { type: String, default: null },
   reviewedAt: { type: Date, default: null },
   rejectionReason: { type: String, default: null },
+  beneficiaryBankAccount: {
+    bankName: { type: String, required: false },
+    bankAccountNumber: { type: String, required: false },
+    accountHolderName: { type: String, required: false },
+    branchName: { type: String, default: null }
+  },
   files: { type: [organizationKycFileSchema], required: true }
 });
 

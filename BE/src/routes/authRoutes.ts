@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import {
+  handleGetCurrentUserProfile,
+  handleGetMyOrganizationKycSubmissions,
+  handleGetPendingOrganizationKycSubmissions,
   handleGoogleLogin,
-  handleRefreshToken,
   handleLogoutAll,
   handleOrganizationKycSubmission,
-  handleGetPendingOrganizationKycSubmissions,
+  handleRefreshToken,
   handleReviewOrganizationKycSubmission,
-  handleGetCurrentUserProfile
+  handleSubmitBeneficiaryBankAccount
 } from '../controllers/authController';
 import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
 import { createRefreshCsrfMiddleware } from '../middleware/csrfMiddleware';
@@ -49,6 +51,20 @@ export function createAuthRoutes(): Router {
     authenticationMiddleware,
     kycRateLimit,
     handleGetPendingOrganizationKycSubmissions
+  );
+  router.get(
+    '/organization/kyc-submissions/me',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    kycRateLimit,
+    handleGetMyOrganizationKycSubmissions
+  );
+  router.post(
+    '/organization/kyc-submissions/me/beneficiary-bank-account',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    kycRateLimit,
+    handleSubmitBeneficiaryBankAccount
   );
   router.patch(
     '/organization/kyc-submissions/:submissionId/review',

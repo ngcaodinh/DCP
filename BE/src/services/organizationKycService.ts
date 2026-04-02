@@ -6,6 +6,7 @@ import {
   createOrganizationKycSubmission,
   findPendingKycSubmissions,
   findSubmissionBySubmissionId,
+  findSubmissionsByOrganizationId,
   getLatestSubmissionVersion,
   updateOrganizationKycSubmissionReview
 } from '../models/organizationKycModel';
@@ -24,6 +25,13 @@ export type OrganizationKycSubmitPayload = {
   officialWebsite: string;
   organizationDescription: string;
   files: OrganizationKycFileInput[];
+};
+
+export type BeneficiaryBankAccountSubmissionPayload = {
+  bankName: string;
+  bankAccountNumber: string;
+  accountHolderName: string;
+  branchName?: string;
 };
 
 const maxFileSizeBytes = 10 * 1024 * 1024;
@@ -248,6 +256,78 @@ export type OrganizationKycReviewResult = {
 export async function getPendingOrganizationKycSubmissions(): Promise<OrganizationKycSubmission[]> {
   return findPendingKycSubmissions();
 }
+
+/**
+ * Hàm lấy danh sách hồ sơ KYC của tổ chức theo user đăng nhập.
+ * Mục đích: cung cấp dữ liệu thật để frontend xác định trạng thái duyệt tài khoản thụ hưởng.
+ */
+export async function getOrganizationKycSubmissionsByUserId(userId: string): Promise<OrganizationKycSubmission[]> {
+  const organizationUser = await findUserById(userId);
+  if (!organizationUser) {
+    throw new Error('Không tìm thấy thông tin tổ chức.');
+  }
+
+  return findSubmissionsByOrganizationId(organizationUser.id);
+}
+
+/**
+ * Hàm nộp thông tin tài khoản ngân hàng thụ hưởng.
+ * Mục đích: tạo hồ sơ KYC trạng thái chờ duyệt để dùng cho rule tạo dự án.
+ */
+export async function submitBeneficiaryBankAccount(
+  userId: string,
+  payload: BeneficiaryBankAccountSubmissionPayload
+): Promise<{ submissionId: string; version: number; status: string }> {
+  const organizationUser = await findUserById(userId);
+  if (!organizationUser) {
+    throw new Error('Không tìm thấy thông tin tổ chức.');
+  }
+
+  const normalizedBankName = payload.bankName?.trim() || '';
+  const normalizedBankAccountNumber = payload.bankAccountNumber?.trim() || '';
+  const normalizedAccountHolderName = payload.accountHolderName?.trim() || '';
+  const normalizedBranchName = payload.branchName?.trim() || '';
+
+  if (!normalizedBankName) {
+    throw new Error('Tên ngân hàng là bắt buộc.');
+  }
+  if (!normalizedAccountHolderName) {
+    throw new Error('Tên chủ tài khoản là bắt buộc.');
+  }
+  if (!/^[0-9]{8,20}$/.test(normalizedBankAccountNumber)) {
+    throw new Error('Số tài khoản phải là chữ số và có độ dài từ 8 đến 20 ký tự.');
+  }
+
+  const nextVersion = (await getLatestSubmissionVersion(organizationUser.id)) + 1;
+  const now = new Date();
+  const submissionId = crypto.randomUUID();
+
+  await createOrganizationKycSubmission({
+    submissionId,
+    organizationId: organizationUser.id,
+    organizationName: organizationUser.organizationName || organizationUser.fullName,
+    legalRegistrationNumber: organizationUser.legalRegistrationNumber || '',
+    officialWebsite: null,
+    organizationDescription: 'Beneficiary bank account submission',
+    version: nextVersion,
+    status: 'PENDING_REVIEW',
+    submittedBy: organizationUser.id,
+    submittedAt: now,
+    reviewedBy: null,
+    reviewedAt: null,
+    rejectionReason: null,
+    beneficiaryBankAccount: {
+      bankName: normalizedBankName,
+      bankAccountNumber: normalizedBankAccountNumber,
+      accountHolderName: normalizedAccountHolderName,
+      branchName: normalizedBranchName || null
+    },
+    files: []
+  });
+
+  return { submissionId, version: nextVersion, status: 'PENDING_REVIEW' };
+}
+
 
 /**
  * Hàm xử lý phê duyệt hoặc từ chối hồ sơ KYC.

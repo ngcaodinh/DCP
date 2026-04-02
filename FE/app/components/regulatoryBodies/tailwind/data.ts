@@ -3,6 +3,7 @@ import type { AuditLogItem, NavigationItem, TimelineItem, UrgentRequestItem } fr
 
 export const navigationItemList: NavigationItem[] = [
   { key: 'dashboard', label: 'Tổng quan', iconPath: 'M2 2h5v5H2zm7 0h5v5H9zm-7 7h5v5H2zm7 0h5v5H9z' },
+  { key: 'projectReview', label: 'Duyệt dự án mới', badge: 0, iconPath: 'M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1zm2 3h6v1.5H5zm0 3h4v1.5H5zm5.8 1.2l2 2-3.2 3.2H7.5V12.4z' },
   { key: 'disbursement', label: 'Ký duyệt Giải ngân', badge: 3, iconPath: 'M13 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V3a1 1 0 00-1-1zM8 11l-4-4 1.4-1.4L8 8.2l4.6-4.6L14 5z' },
   { key: 'kyc', label: 'Duyệt Hồ sơ KYC', badge: 5, iconPath: 'M4 1h8a1 1 0 011 1v12a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zm1 3v1h6V4zm0 3v1h6V7zm0 3v1h4v-1z' },
   { key: 'report', label: 'Báo cáo Tuân thủ', iconPath: 'M2 2h12v12H2zm2 2v3h3V4zm5 0v2h2V4zm-5 5v3h8V9zm0-2h8V6H4z' },

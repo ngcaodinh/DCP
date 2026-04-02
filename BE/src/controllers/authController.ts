@@ -6,8 +6,10 @@ import {
   revokeAllRefreshSessionsForUser
 } from '../services/authService';
 import {
+  getOrganizationKycSubmissionsByUserId,
   getPendingOrganizationKycSubmissions,
   reviewOrganizationKycSubmission,
+  submitBeneficiaryBankAccount,
   submitOrganizationKyc
 } from '../services/organizationKycService';
 import { findUserById } from '../models/authModel';
@@ -312,6 +314,60 @@ export async function handleReviewOrganizationKycSubmission(request: Request, re
     });
   }
 }
+
+/**
+ * Hàm lấy danh sách hồ sơ KYC của tổ chức đang đăng nhập.
+ * Mục đích: trả dữ liệu thật cho FE kiểm tra trạng thái approved/verified của tài khoản thụ hưởng.
+ */
+export async function handleGetMyOrganizationKycSubmissions(request: Request, response: Response): Promise<void> {
+  const authenticatedUser = getAuthenticatedUser(request);
+
+  if (!authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  try {
+    const submissionList = await getOrganizationKycSubmissionsByUserId(authenticatedUser.userId);
+    response.status(200).json({
+      submissions: submissionList
+    });
+  } catch (error) {
+    response.status(400).json({
+      message: (error as Error).message
+    });
+  }
+}
+
+/**
+ * Hàm nộp thông tin tài khoản ngân hàng thụ hưởng của tổ chức đang đăng nhập.
+ * Mục đích: tạo hồ sơ trạng thái chờ duyệt để regulatory/admin review.
+ */
+export async function handleSubmitBeneficiaryBankAccount(request: Request, response: Response): Promise<void> {
+  const authenticatedUser = getAuthenticatedUser(request);
+
+  if (!authenticatedUser) {
+    response.status(401).json({
+      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
+    });
+    return;
+  }
+
+  try {
+    const submissionResult = await submitBeneficiaryBankAccount(authenticatedUser.userId, request.body);
+    response.status(201).json({
+      message: 'Đã gửi duyệt tài khoản ngân hàng thành công.',
+      submission: submissionResult
+    });
+  } catch (error) {
+    response.status(400).json({
+      message: (error as Error).message
+    });
+  }
+}
+
 
 
 /**
