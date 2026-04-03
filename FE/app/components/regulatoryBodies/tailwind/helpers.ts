@@ -6,6 +6,7 @@ export function getPageTitle(pageKey: PageKey): string {
   if (pageKey === 'projectReview') return 'Duyệt dự án mới';
   if (pageKey === 'disbursement') return 'Ký duyệt Giải ngân';
   if (pageKey === 'kyc') return 'Duyệt Hồ sơ KYC';
+  if (pageKey === 'bankAccountApproval') return 'Duyệt tài khoản ngân hàng';
   if (pageKey === 'report') return 'Báo cáo Tuân thủ';
   return 'Tra cứu Giao dịch';
 }

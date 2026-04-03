@@ -125,6 +125,17 @@ export async function findSubmissionsByOrganizationId(
 }
 
 /**
+ * Hàm lấy hồ sơ KYC mới nhất của tổ chức.
+ * Mục đích: cung cấp thông tin profile tổ chức gần nhất để hiển thị trên tab cài đặt.
+ */
+export async function findLatestSubmissionByOrganizationId(organizationId: string): Promise<OrganizationKycSubmission | null> {
+  return OrganizationKycSubmissionModel.findOne({ organizationId })
+    .sort({ version: -1 })
+    .lean<OrganizationKycSubmission>()
+    .exec();
+}
+
+/**
  * Hàm lấy danh sách hồ sơ KYC chờ duyệt.
  * Mục đích: phục vụ màn hình review cho Regulatory/Admin.
  */

@@ -1,11 +1,13 @@
 import { Request, Response } from 'express';
 import {
+  getMyActiveSessions,
   loginWithGoogle,
   refreshAccessToken,
   logFailedGoogleLogin,
   revokeAllRefreshSessionsForUser
 } from '../services/authService';
 import {
+  getMyOrganizationProfile,
   getOrganizationKycSubmissionsByUserId,
   getPendingOrganizationKycSubmissions,
   reviewOrganizationKycSubmission,
@@ -14,6 +16,7 @@ import {
 } from '../services/organizationKycService';
 import { findUserById } from '../models/authModel';
 import { getLogger } from '../config/logger';
+import { sendErrorFromUnknown, sendErrorResponse, sendSuccessResponse } from '../utils/apiResponse';
 
 const logger = getLogger();
 
@@ -232,7 +235,7 @@ export async function handleOrganizationKycSubmission(request: Request, response
 }
 
 /**
- * Hàm lấy danh sách hồ sơ KYC chờ duyệt cho Regulatory/Admin.
+ * Hàm lấy danh sách hồ sơ KYC chờ duyệt cho Regulatory.
  * Mục đích: cung cấp dữ liệu review theo đúng trạng thái PENDING_REVIEW.
  */
 export async function handleGetPendingOrganizationKycSubmissions(request: Request, response: Response): Promise<void> {
@@ -247,9 +250,9 @@ export async function handleGetPendingOrganizationKycSubmissions(request: Reques
     return;
   }
 
-  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory') {
     response.status(403).json({
-      message: 'Bạn không có quyền xem danh sách hồ sơ KYC chờ duyệt.'
+      message: 'Bạn không có quyền xem danh sách hồ sơ KYC chờ duyệt. Chỉ cơ quan regulatory được phép.'
     });
     return;
   }
@@ -262,7 +265,7 @@ export async function handleGetPendingOrganizationKycSubmissions(request: Reques
 
 /**
  * Hàm xử lý duyệt hoặc từ chối hồ sơ KYC.
- * Mục đích: cập nhật trạng thái hồ sơ theo hành động review từ Regulatory/Admin.
+ * Mục đích: cập nhật trạng thái hồ sơ theo hành động review từ Regulatory.
  */
 export async function handleReviewOrganizationKycSubmission(request: Request, response: Response): Promise<void> {
   const authenticatedRequest = request as Request & {
@@ -276,9 +279,9 @@ export async function handleReviewOrganizationKycSubmission(request: Request, re
     return;
   }
 
-  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory') {
     response.status(403).json({
-      message: 'Bạn không có quyền duyệt hồ sơ KYC.'
+      message: 'Bạn không có quyền duyệt hồ sơ KYC. Chỉ cơ quan regulatory được phép.'
     });
     return;
   }
@@ -323,23 +326,65 @@ export async function handleGetMyOrganizationKycSubmissions(request: Request, re
   const authenticatedUser = getAuthenticatedUser(request);
 
   if (!authenticatedUser) {
-    response.status(401).json({
-      message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.'
-    });
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
     return;
   }
 
   try {
     const submissionList = await getOrganizationKycSubmissionsByUserId(authenticatedUser.userId);
-    response.status(200).json({
+    sendSuccessResponse(response, 200, 'Lấy danh sách hồ sơ KYC của tổ chức thành công.', {
       submissions: submissionList
     });
-  } catch (error) {
-    response.status(400).json({
-      message: (error as Error).message
-    });
+  } catch (error: unknown) {
+    sendErrorFromUnknown(response, error, 'Không thể tải danh sách hồ sơ KYC của tổ chức.');
   }
 }
+
+/**
+ * Hàm lấy danh sách phiên đăng nhập đang hoạt động của user hiện tại.
+ * Mục đích: trả dữ liệu thật cho tab Cài đặt → Bảo mật ở frontend.
+ */
+export async function handleGetMyActiveSessions(request: Request, response: Response): Promise<void> {
+  const authenticatedUser = getAuthenticatedUser(request);
+
+  if (!authenticatedUser) {
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  try {
+    const activeSessionList = await getMyActiveSessions(authenticatedUser.userId);
+    sendSuccessResponse(response, 200, 'Lấy danh sách phiên hoạt động thành công.', {
+      sessions: activeSessionList
+    });
+  } catch (error: unknown) {
+    sendErrorFromUnknown(response, error, 'Không thể tải danh sách phiên hoạt động.');
+  }
+}
+
+
+/**
+ * Hàm lấy profile tổ chức của user hiện tại.
+ * Mục đích: trả dữ liệu thật cho tab Cài đặt → Tổ chức ở frontend.
+ */
+export async function handleGetMyOrganizationProfile(request: Request, response: Response): Promise<void> {
+  const authenticatedUser = getAuthenticatedUser(request);
+
+  if (!authenticatedUser) {
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  try {
+    const organizationProfile = await getMyOrganizationProfile(authenticatedUser.userId);
+    sendSuccessResponse(response, 200, 'Lấy thông tin tổ chức thành công.', {
+      profile: organizationProfile
+    });
+  } catch (error: unknown) {
+    sendErrorFromUnknown(response, error, 'Không thể tải thông tin tổ chức.');
+  }
+}
+
 
 /**
  * Hàm nộp thông tin tài khoản ngân hàng thụ hưởng của tổ chức đang đăng nhập.
@@ -357,8 +402,13 @@ export async function handleSubmitBeneficiaryBankAccount(request: Request, respo
 
   try {
     const submissionResult = await submitBeneficiaryBankAccount(authenticatedUser.userId, request.body);
-    response.status(201).json({
-      message: 'Đã gửi duyệt tài khoản ngân hàng thành công.',
+    const responseStatusCode = submissionResult.isExistingPendingSubmission ? 200 : 201;
+    const responseMessage = submissionResult.isExistingPendingSubmission
+      ? 'Yêu cầu duyệt tài khoản đang ở trạng thái chờ xác minh.'
+      : 'Đã gửi duyệt tài khoản ngân hàng thành công.';
+
+    response.status(responseStatusCode).json({
+      message: responseMessage,
       submission: submissionResult
     });
   } catch (error) {

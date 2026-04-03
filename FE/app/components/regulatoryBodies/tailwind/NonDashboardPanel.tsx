@@ -842,6 +842,328 @@ function ProjectReviewPanel() {
   );
 }
 
+type BankAccountApprovalItem = {
+  submissionId: string;
+  organizationId: string;
+  organizationName: string;
+  status: string;
+  submittedAt: string;
+  beneficiaryBankAccount: {
+    bankName: string;
+    bankAccountNumber: string;
+    accountHolderName: string;
+    branchName: string | null;
+  };
+};
+
+/** Hàm che bớt số tài khoản để hiển thị trong bảng danh sách mà vẫn dễ nhận diện. */
+function maskBankAccountNumber(bankAccountNumber: string): string {
+  if (bankAccountNumber.length <= 4) {
+    return bankAccountNumber;
+  }
+
+  return `••••••${bankAccountNumber.slice(-4)}`;
+}
+
+/** Hàm ánh xạ mã trạng thái duyệt sang tiếng Việt để hiển thị nhất quán trên giao diện. */
+function getBankAccountReviewStatusText(status: string): string {
+  if (status === 'PENDING_REVIEW') return 'Chờ duyệt';
+  if (status === 'APPROVED') return 'Đã phê duyệt';
+  if (status === 'REJECTED') return 'Đã từ chối';
+  return 'Không xác định';
+}
+
+
+/** Hàm hiển thị panel duyệt tài khoản ngân hàng chờ duyệt cho cơ quan giám sát. */
+function BankAccountApprovalPanel() {
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [isApproveConfirmModalVisible, setIsApproveConfirmModalVisible] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [bankAccountApprovalList, setBankAccountApprovalList] = useState<BankAccountApprovalItem[]>([]);
+  const [selectedSubmissionId, setSelectedSubmissionId] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
+
+  const selectedBankAccountApproval = bankAccountApprovalList.find(item => item.submissionId === selectedSubmissionId) || null;
+
+  /** Hàm tải danh sách tài khoản ngân hàng đang chờ duyệt từ backend. */
+  const loadPendingBankAccountApprovalList = useCallback(async () => {
+    const authSession = readAuthSession();
+    if (!authSession.accessToken) {
+      setErrorMessage('Bạn cần đăng nhập tài khoản cơ quan giám sát để duyệt tài khoản ngân hàng.');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/auth/organization/kyc-submissions/pending`, {
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+      const responseData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(responseData?.message || 'Không thể tải danh sách tài khoản ngân hàng chờ duyệt.');
+      }
+
+      const normalizedBankAccountApprovalList = Array.isArray(responseData?.submissions)
+        ? (responseData.submissions as unknown[])
+          .filter((submissionItem): submissionItem is Record<string, unknown> => {
+            return Boolean(submissionItem && typeof submissionItem === 'object' && submissionItem.beneficiaryBankAccount);
+          })
+          .map((submissionItem) => {
+            const bankAccount = submissionItem.beneficiaryBankAccount as Record<string, unknown>;
+            return {
+              submissionId: typeof submissionItem.submissionId === 'string' ? submissionItem.submissionId : '',
+              organizationId: typeof submissionItem.organizationId === 'string' ? submissionItem.organizationId : '',
+              organizationName: typeof submissionItem.organizationName === 'string' ? submissionItem.organizationName : 'Chưa cập nhật',
+              status: typeof submissionItem.status === 'string' ? submissionItem.status : 'PENDING_REVIEW',
+              submittedAt: typeof submissionItem.submittedAt === 'string' ? submissionItem.submittedAt : '',
+              beneficiaryBankAccount: {
+                bankName: typeof bankAccount.bankName === 'string' ? bankAccount.bankName : 'Chưa cập nhật',
+                bankAccountNumber: typeof bankAccount.bankAccountNumber === 'string' ? bankAccount.bankAccountNumber : 'Chưa cập nhật',
+                accountHolderName: typeof bankAccount.accountHolderName === 'string' ? bankAccount.accountHolderName : 'Chưa cập nhật',
+                branchName: typeof bankAccount.branchName === 'string' ? bankAccount.branchName : null
+              }
+            };
+          })
+          .filter(item => item.submissionId.length > 0)
+        : [];
+
+      setBankAccountApprovalList(normalizedBankAccountApprovalList);
+      setSelectedSubmissionId(previousSubmissionId => {
+        const hasPreviousItem = normalizedBankAccountApprovalList.some(item => item.submissionId === previousSubmissionId);
+        if (hasPreviousItem) {
+          return previousSubmissionId;
+        }
+
+        return normalizedBankAccountApprovalList[0]?.submissionId || '';
+      });
+    } catch (_error) {
+      setErrorMessage('Không thể tải danh sách tài khoản ngân hàng chờ duyệt. Vui lòng thử lại.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [backendBaseUrl]);
+
+  /** Hàm ánh xạ lỗi theo mã HTTP sang thông báo tiếng Việt thân thiện với người dùng. */
+  const getReviewErrorMessageByStatusCode = useCallback((statusCode: number): string => {
+    if (statusCode === 401) return 'Lỗi xác thực hoặc phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+    if (statusCode === 403) return 'Bạn không có quyền thực hiện thao tác này. Chỉ cơ quan regulatory được phép.';
+    if (statusCode >= 500) return 'Hệ thống đang bận hoặc gặp sự cố. Vui lòng thử lại sau.';
+    return 'Không thể cập nhật kết quả duyệt tài khoản ngân hàng.';
+  }, []);
+
+  /** Hàm gửi kết quả duyệt hoặc từ chối tài khoản ngân hàng lên backend. */
+  const submitBankAccountReview = useCallback(async (action: 'approve' | 'reject') => {
+    if (!selectedBankAccountApproval) {
+      return;
+    }
+
+    const normalizedRejectReason = rejectReason.trim();
+
+    if (action === 'reject' && normalizedRejectReason.length === 0) {
+      setErrorMessage('Vui lòng nhập lý do từ chối trước khi xác nhận.');
+      return;
+    }
+
+    if (action === 'reject' && normalizedRejectReason.length > 500) {
+      setErrorMessage('Lý do từ chối không được vượt quá 500 ký tự.');
+      return;
+    }
+
+    const authSession = readAuthSession();
+    if (!authSession.accessToken) {
+      setErrorMessage('Lỗi xác thực hoặc phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      const reviewResponse = await fetch(`${backendBaseUrl}/auth/organization/kyc-submissions/${selectedBankAccountApproval.submissionId}/review`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authSession.accessToken}`
+        },
+        body: JSON.stringify({
+          action,
+          rejectionReason: action === 'reject' ? normalizedRejectReason : undefined
+        })
+      });
+
+      const reviewResponseData = await reviewResponse.json();
+      if (!reviewResponse.ok) {
+        const fallbackErrorMessage = getReviewErrorMessageByStatusCode(reviewResponse.status);
+        throw new Error(reviewResponseData?.message || fallbackErrorMessage);
+      }
+
+      setRejectReason('');
+      setIsApproveConfirmModalVisible(false);
+      setSuccessMessage(action === 'approve' ? 'Phê duyệt tài khoản ngân hàng thành công.' : 'Từ chối tài khoản ngân hàng thành công.');
+      await loadPendingBankAccountApprovalList();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Hệ thống đang bận hoặc gặp sự cố. Vui lòng thử lại sau.');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  }, [backendBaseUrl, getReviewErrorMessageByStatusCode, loadPendingBankAccountApprovalList, rejectReason, selectedBankAccountApproval]);
+
+  /** Hàm mở hộp thoại xác nhận trước khi phê duyệt để tránh thao tác nhầm. */
+  const openApproveConfirmModal = (): void => {
+    if (isSubmittingReview) {
+      return;
+    }
+
+    setErrorMessage('');
+    setSuccessMessage('');
+    setIsApproveConfirmModalVisible(true);
+  };
+
+  /** Hàm đóng hộp thoại xác nhận phê duyệt. */
+  const closeApproveConfirmModal = (): void => {
+    if (isSubmittingReview) {
+      return;
+    }
+
+    setIsApproveConfirmModalVisible(false);
+  };
+
+  /** Hàm tải dữ liệu khi người dùng mở tab duyệt tài khoản ngân hàng. */
+  useEffect(() => {
+    loadPendingBankAccountApprovalList();
+  }, [loadPendingBankAccountApprovalList]);
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
+        <h2 className="text-lg font-bold text-slate-900">Duyệt tài khoản ngân hàng</h2>
+        <p className="mt-1 text-xs text-slate-500">Danh sách tài khoản ngân hàng thụ hưởng đang chờ cơ quan giám sát phê duyệt.</p>
+      </div>
+      {errorMessage ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">{errorMessage}</div> : null}
+      {successMessage ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{successMessage}</div> : null}
+
+      <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
+        <div className="border-b border-emerald-900/15 px-5 py-3 text-sm font-bold text-slate-900">Danh sách chờ duyệt</div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left">
+            <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
+              <tr>
+                <th className="px-5 py-2.5 font-semibold">Tên tổ chức</th>
+                <th className="px-5 py-2.5 font-semibold">Chủ tài khoản</th>
+                <th className="px-5 py-2.5 font-semibold">Số tài khoản</th>
+                <th className="px-5 py-2.5 font-semibold">Ngân hàng / Chi nhánh</th>
+                <th className="px-5 py-2.5 font-semibold">Trạng thái xác minh</th>
+                <th className="px-5 py-2.5 font-semibold">Thời gian tạo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? <tr><td colSpan={6} className="px-5 py-3 text-xs text-slate-500">Đang tải danh sách tài khoản ngân hàng chờ duyệt...</td></tr> : null}
+              {!isLoading && bankAccountApprovalList.length === 0 ? <tr><td colSpan={6} className="px-5 py-3 text-xs text-slate-500">Hiện chưa có tài khoản ngân hàng nào đang chờ duyệt.</td></tr> : null}
+              {bankAccountApprovalList.map(item => (
+                <tr key={item.submissionId} className={`border-t border-slate-100 text-sm hover:bg-slate-50 ${selectedSubmissionId === item.submissionId ? 'bg-cyan-50' : ''}`}>
+                  <td className="px-5 py-3 text-xs font-semibold text-slate-900"><button type="button" onClick={() => setSelectedSubmissionId(item.submissionId)} className="text-left hover:text-cyan-700">{item.organizationName}</button></td>
+                  <td className="px-5 py-3 text-xs text-slate-700">{item.beneficiaryBankAccount.accountHolderName}</td>
+                  <td className="px-5 py-3 font-mono text-xs text-slate-700">{maskBankAccountNumber(item.beneficiaryBankAccount.bankAccountNumber)}</td>
+                  <td className="px-5 py-3 text-xs text-slate-700">{item.beneficiaryBankAccount.bankName}{item.beneficiaryBankAccount.branchName ? ` / ${item.beneficiaryBankAccount.branchName}` : ''}</td>
+                  <td className="px-5 py-3 text-xs"><span className="inline-flex rounded-md bg-amber-100 px-2 py-1 font-semibold text-amber-700">{getBankAccountReviewStatusText(item.status)}</span></td>
+                  <td className="px-5 py-3 text-xs text-slate-600">{item.submittedAt ? new Date(item.submittedAt).toLocaleString('vi-VN') : 'Chưa cập nhật'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-emerald-900/15 bg-white p-4">
+        {selectedBankAccountApproval ? (
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-slate-900">Chi tiết tài khoản ngân hàng cần duyệt</h3>
+            <div className="grid gap-2 text-xs text-slate-700 sm:grid-cols-2">
+              <p><span className="font-semibold">Mã hồ sơ:</span> {selectedBankAccountApproval.submissionId}</p>
+              <p><span className="font-semibold">Mã tổ chức:</span> {selectedBankAccountApproval.organizationId}</p>
+              <p><span className="font-semibold">Tên tổ chức:</span> {selectedBankAccountApproval.organizationName}</p>
+              <p><span className="font-semibold">Tên chủ tài khoản:</span> {selectedBankAccountApproval.beneficiaryBankAccount.accountHolderName}</p>
+              <p><span className="font-semibold">Số tài khoản:</span> {selectedBankAccountApproval.beneficiaryBankAccount.bankAccountNumber}</p>
+              <p><span className="font-semibold">Ngân hàng:</span> {selectedBankAccountApproval.beneficiaryBankAccount.bankName}</p>
+              <p><span className="font-semibold">Chi nhánh:</span> {selectedBankAccountApproval.beneficiaryBankAccount.branchName || 'Chưa cập nhật'}</p>
+              <p><span className="font-semibold">Trạng thái xác minh:</span> {getBankAccountReviewStatusText(selectedBankAccountApproval.status)}</p>
+              <p className="sm:col-span-2"><span className="font-semibold">Thời gian tạo:</span> {selectedBankAccountApproval.submittedAt ? new Date(selectedBankAccountApproval.submittedAt).toLocaleString('vi-VN') : 'Chưa cập nhật'}</p>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <label className="block text-xs font-semibold text-amber-800">Lý do từ chối (bắt buộc khi từ chối)</label>
+              <textarea
+                value={rejectReason}
+                onChange={event => setRejectReason(event.target.value)}
+                rows={3}
+                maxLength={500}
+                className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
+                placeholder="Nhập lý do từ chối tài khoản ngân hàng..."
+              />
+              <p className="text-[11px] text-amber-700">{`${rejectReason.trim().length}/500 ký tự`}</p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={isSubmittingReview}
+                onClick={() => submitBankAccountReview('reject')}
+                className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {isSubmittingReview ? 'Đang xử lý...' : 'Từ chối'}
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingReview}
+                onClick={openApproveConfirmModal}
+                className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {isSubmittingReview ? 'Đang xử lý...' : 'Phê duyệt'}
+              </button>
+            </div>
+          </div>
+        ) : <p className="text-xs text-slate-500">Chọn một tài khoản ngân hàng trong danh sách để xem chi tiết và duyệt.</p>}
+      </div>
+
+      {isApproveConfirmModalVisible && selectedBankAccountApproval ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-lg">
+            <h4 className="text-sm font-bold text-slate-900">Xác nhận phê duyệt tài khoản ngân hàng</h4>
+            <p className="mt-2 text-xs text-slate-600">
+              Bạn có chắc chắn muốn phê duyệt tài khoản của tổ chức <span className="font-semibold">{selectedBankAccountApproval.organizationName}</span>?
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={isSubmittingReview}
+                onClick={closeApproveConfirmModal}
+                className="rounded border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={isSubmittingReview}
+                onClick={() => submitBankAccountReview('approve')}
+                className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+              >
+                {isSubmittingReview ? 'Đang xử lý...' : 'Xác nhận phê duyệt'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const reportMetricItemList = [
   { labelText: 'Tổng yêu cầu giải ngân', valueText: '42', toneClassName: 'text-cyan-700 bg-cyan-50 border-cyan-100' },
   { labelText: 'Đã phê duyệt (90.5%)', valueText: '38', toneClassName: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
@@ -1009,6 +1331,10 @@ export default function NonDashboardPanel({ selectedPageKey, onOpenDisbursementR
 
   if (selectedPageKey === 'projectReview') {
     return <ProjectReviewPanel />;
+  }
+
+  if (selectedPageKey === 'bankAccountApproval') {
+    return <BankAccountApprovalPanel />;
   }
 
   if (selectedPageKey === 'disbursement') {

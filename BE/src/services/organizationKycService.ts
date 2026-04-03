@@ -4,6 +4,7 @@ import {
   OrganizationKycFile,
   OrganizationKycSubmission,
   createOrganizationKycSubmission,
+  findLatestSubmissionByOrganizationId,
   findPendingKycSubmissions,
   findSubmissionBySubmissionId,
   findSubmissionsByOrganizationId,
@@ -271,13 +272,48 @@ export async function getOrganizationKycSubmissionsByUserId(userId: string): Pro
 }
 
 /**
- * Hàm nộp thông tin tài khoản ngân hàng thụ hưởng.
- * Mục đích: tạo hồ sơ KYC trạng thái chờ duyệt để dùng cho rule tạo dự án.
+ * Hàm lấy profile tổ chức của user hiện tại.
+ * Mục đích: trả dữ liệu thật cho tab cài đặt tổ chức, ưu tiên hồ sơ KYC mới nhất.
  */
+export async function getMyOrganizationProfile(userId: string): Promise<OrganizationProfileView | null> {
+  const organizationUser = await findUserById(userId);
+  if (!organizationUser) {
+    throw new Error('Không tìm thấy thông tin tổ chức.');
+  }
+
+  const latestSubmission = await findLatestSubmissionByOrganizationId(organizationUser.id);
+  if (!latestSubmission) {
+    return null;
+  }
+
+  return {
+    organizationName: latestSubmission.organizationName,
+    legalRegistrationNumber: latestSubmission.legalRegistrationNumber,
+    officialWebsite: latestSubmission.officialWebsite || null,
+    organizationDescription: latestSubmission.organizationDescription || null
+  };
+}
+
+
+export type OrganizationProfileView = {
+  organizationName: string;
+  legalRegistrationNumber: string;
+  officialWebsite: string | null;
+  organizationDescription: string | null;
+};
+
+export type BeneficiaryBankAccountSubmissionResult = {
+  submissionId: string;
+  version: number;
+  status: string;
+  isExistingPendingSubmission: boolean;
+};
+
+/** Hàm nộp thông tin tài khoản ngân hàng thụ hưởng. Mục đích: tạo hồ sơ KYC chờ duyệt theo cơ chế idempotent để tránh tạo trùng request. */
 export async function submitBeneficiaryBankAccount(
   userId: string,
   payload: BeneficiaryBankAccountSubmissionPayload
-): Promise<{ submissionId: string; version: number; status: string }> {
+): Promise<BeneficiaryBankAccountSubmissionResult> {
   const organizationUser = await findUserById(userId);
   if (!organizationUser) {
     throw new Error('Không tìm thấy thông tin tổ chức.');
@@ -296,6 +332,19 @@ export async function submitBeneficiaryBankAccount(
   }
   if (!/^[0-9]{8,20}$/.test(normalizedBankAccountNumber)) {
     throw new Error('Số tài khoản phải là chữ số và có độ dài từ 8 đến 20 ký tự.');
+  }
+
+  const existingSubmissionList = await findSubmissionsByOrganizationId(organizationUser.id);
+  const latestPendingSubmission = existingSubmissionList.find(submissionItem => submissionItem.status === 'PENDING_REVIEW');
+
+  if (latestPendingSubmission) {
+    // Logic idempotent: khi đã có request chờ duyệt thì trả lại bản ghi hiện có, không tạo thêm bản ghi mới.
+    return {
+      submissionId: latestPendingSubmission.submissionId,
+      version: latestPendingSubmission.version,
+      status: latestPendingSubmission.status,
+      isExistingPendingSubmission: true
+    };
   }
 
   const nextVersion = (await getLatestSubmissionVersion(organizationUser.id)) + 1;
@@ -325,7 +374,7 @@ export async function submitBeneficiaryBankAccount(
     files: []
   });
 
-  return { submissionId, version: nextVersion, status: 'PENDING_REVIEW' };
+  return { submissionId, version: nextVersion, status: 'PENDING_REVIEW', isExistingPendingSubmission: false };
 }
 
 

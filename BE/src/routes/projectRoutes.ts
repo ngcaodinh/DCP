@@ -18,10 +18,13 @@ import { createRoleAuthorizationMiddleware } from '../middleware/roleAuthorizati
 export function createProjectRoutes(): Router {
   const router = Router();
   const authenticationMiddleware = createAuthenticationMiddleware();
-  const createProjectRateLimit = createRateLimitMiddleware(10, 60 * 1000);
-  const submitProjectRateLimit = createRateLimitMiddleware(20, 60 * 1000);
-  const updateProjectRateLimit = createRateLimitMiddleware(20, 60 * 1000);
-  const reviewProjectRateLimit = createRateLimitMiddleware(30, 60 * 1000);
+  const getProjectsRateLimit = createRateLimitMiddleware(60, 60 * 1000, { bucketName: 'projects:get-list' });
+  const createProjectRateLimit = createRateLimitMiddleware(10, 60 * 1000, { bucketName: 'projects:create' });
+  const createEligibilityRateLimit = createRateLimitMiddleware(30, 60 * 1000, { bucketName: 'projects:create-eligibility' });
+  const uploadEvidencesRateLimit = createRateLimitMiddleware(20, 60 * 1000, { bucketName: 'projects:upload-evidences' });
+  const submitProjectRateLimit = createRateLimitMiddleware(20, 60 * 1000, { bucketName: 'projects:submit' });
+  const updateProjectRateLimit = createRateLimitMiddleware(20, 60 * 1000, { bucketName: 'projects:update' });
+  const reviewProjectRateLimit = createRateLimitMiddleware(30, 60 * 1000, { bucketName: 'projects:review' });
   const organizationAuthorizationMiddleware = createRoleAuthorizationMiddleware(['organizations']);
   const reviewerAuthorizationMiddleware = createRoleAuthorizationMiddleware(['admin', 'regulatory']);
 
@@ -30,7 +33,7 @@ export function createProjectRoutes(): Router {
     attachRequestMetadata(),
     authenticationMiddleware,
     organizationAuthorizationMiddleware,
-    createProjectRateLimit,
+    getProjectsRateLimit,
     handleGetOrganizationProjects
   );
 
@@ -48,7 +51,7 @@ export function createProjectRoutes(): Router {
     attachRequestMetadata(),
     authenticationMiddleware,
     organizationAuthorizationMiddleware,
-    createProjectRateLimit,
+    createEligibilityRateLimit,
     handleGetCreateProjectEligibility
   );
 
@@ -57,7 +60,7 @@ export function createProjectRoutes(): Router {
     attachRequestMetadata(),
     authenticationMiddleware,
     organizationAuthorizationMiddleware,
-    createProjectRateLimit,
+    uploadEvidencesRateLimit,
     handleUploadProjectEvidences
   );
 

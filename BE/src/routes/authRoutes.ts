@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import {
   handleGetCurrentUserProfile,
+  handleGetMyActiveSessions,
   handleGetMyOrganizationKycSubmissions,
+  handleGetMyOrganizationProfile,
   handleGetPendingOrganizationKycSubmissions,
   handleGoogleLogin,
   handleLogoutAll,
@@ -22,9 +24,13 @@ import { createAuthenticationMiddleware } from '../middleware/authenticationMidd
 export function createAuthRoutes(): Router {
   const router = Router();
 
-  const refreshRateLimit = createRateLimitMiddleware(10, 60 * 1000);
-  const loginRateLimit = createRateLimitMiddleware(5, 60 * 1000);
-  const kycRateLimit = createRateLimitMiddleware(5, 60 * 1000);
+  const refreshRateLimit = createRateLimitMiddleware(10, 60 * 1000, { bucketName: 'auth:refresh' });
+  const loginRateLimit = createRateLimitMiddleware(5, 60 * 1000, { bucketName: 'auth:google-login' });
+  const organizationKycSubmissionRateLimit = createRateLimitMiddleware(5, 60 * 1000, { bucketName: 'auth:organization-kyc-submission' });
+  const organizationKycGetMyRateLimit = createRateLimitMiddleware(30, 60 * 1000, { bucketName: 'auth:organization-kyc-get-my' });
+  const organizationKycPendingRateLimit = createRateLimitMiddleware(20, 60 * 1000, { bucketName: 'auth:organization-kyc-pending' });
+  const beneficiaryBankAccountSubmitRateLimit = createRateLimitMiddleware(10, 60 * 1000, { bucketName: 'auth:beneficiary-bank-account-submit' });
+  const organizationKycReviewRateLimit = createRateLimitMiddleware(20, 60 * 1000, { bucketName: 'auth:organization-kyc-review' });
   const authenticationMiddleware = createAuthenticationMiddleware();
 
   router.post('/google-login', attachRequestMetadata(), loginRateLimit, handleGoogleLogin);
@@ -37,40 +43,42 @@ export function createAuthRoutes(): Router {
   );
 
   router.get('/me', attachRequestMetadata(), authenticationMiddleware, handleGetCurrentUserProfile);
+  router.get('/organization/profile/me', attachRequestMetadata(), authenticationMiddleware, handleGetMyOrganizationProfile);
+  router.get('/sessions/me', attachRequestMetadata(), authenticationMiddleware, handleGetMyActiveSessions);
   router.post('/logout-all', attachRequestMetadata(), authenticationMiddleware, handleLogoutAll);
   router.post(
     '/organization/kyc-submissions',
     attachRequestMetadata(),
     authenticationMiddleware,
-    kycRateLimit,
+    organizationKycSubmissionRateLimit,
     handleOrganizationKycSubmission
   );
   router.get(
     '/organization/kyc-submissions/pending',
     attachRequestMetadata(),
     authenticationMiddleware,
-    kycRateLimit,
+    organizationKycPendingRateLimit,
     handleGetPendingOrganizationKycSubmissions
   );
   router.get(
     '/organization/kyc-submissions/me',
     attachRequestMetadata(),
     authenticationMiddleware,
-    kycRateLimit,
+    organizationKycGetMyRateLimit,
     handleGetMyOrganizationKycSubmissions
   );
   router.post(
     '/organization/kyc-submissions/me/beneficiary-bank-account',
     attachRequestMetadata(),
     authenticationMiddleware,
-    kycRateLimit,
+    beneficiaryBankAccountSubmitRateLimit,
     handleSubmitBeneficiaryBankAccount
   );
   router.patch(
     '/organization/kyc-submissions/:submissionId/review',
     attachRequestMetadata(),
     authenticationMiddleware,
-    kycRateLimit,
+    organizationKycReviewRateLimit,
     handleReviewOrganizationKycSubmission
   );
 

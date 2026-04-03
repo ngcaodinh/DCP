@@ -9,6 +9,7 @@ export type ApiErrorResponse = {
   errorCode: string;
   details?: ApiErrorDetail[];
   correlationId?: string | null;
+  statusCode?: number;
 };
 
 export type ApiSuccessResponse<T> = {
@@ -66,10 +67,16 @@ export async function fetchApi<T>(input: RequestInfo | URL, init?: RequestInit):
     };
 
     if (responseBody && typeof responseBody === 'object') {
-      throw responseBody as ApiErrorResponse;
+      throw {
+        ...(responseBody as ApiErrorResponse),
+        statusCode: response.status
+      } as ApiErrorResponse;
     }
 
-    throw defaultErrorResponse;
+    throw {
+      ...defaultErrorResponse,
+      statusCode: response.status
+    } as ApiErrorResponse;
   }
 
   if (!responseBody || typeof responseBody !== 'object') {

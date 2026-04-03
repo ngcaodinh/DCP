@@ -167,6 +167,18 @@ export async function updateRefreshSession(session: RefreshSession): Promise<Ref
 }
 
 /**
+ * Hàm lấy danh sách phiên refresh token còn hiệu lực theo userId.
+ * Mục đích: cung cấp dữ liệu phiên đăng nhập thật cho màn hình bảo mật.
+ */
+export async function getActiveRefreshSessionsByUserId(userId: string): Promise<RefreshSession[]> {
+  const currentTime = new Date();
+  return RefreshSessionModel.find({ userId, expiresAt: { $gt: currentTime } })
+    .sort({ updatedAt: -1 })
+    .lean<RefreshSession[]>()
+    .exec();
+}
+
+/**
  * Hàm thu hồi toàn bộ phiên refresh token theo userId.
  * Mục đích: đăng xuất toàn bộ thiết bị của người dùng.
  */

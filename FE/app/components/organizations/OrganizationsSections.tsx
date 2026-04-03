@@ -1,7 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProgressBar, SectionCard, StatusBadge } from './OrganizationUiParts';
 import { dashboardTimelineItems, statisticItems, transparencyTransactionRows } from './mockData';
-import { ApiErrorDetail, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
+import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { readAuthSession } from '@/app/utils/authSession';
 import { ProjectSummary } from './types';
 
@@ -231,6 +231,67 @@ function formatDateTimeVietnamese(dateValue: string | null): string {
   return parsedDate.toLocaleString('vi-VN');
 }
 
+type ActiveSessionItem = {
+  sessionId: string;
+  deviceLabel: string;
+  ipAddress: string;
+  loggedInAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+};
+
+type OrganizationProfileItem = {
+  organizationName: string;
+  legalRegistrationNumber: string;
+  officialWebsite: string | null;
+  organizationDescription: string | null;
+};
+
+/** Hàm định dạng thời điểm phiên cho tab bảo mật. Mục đích: hiển thị thời gian dễ đọc theo chuẩn tiếng Việt. */
+function formatSecurityDateTime(dateValue: string): string {
+  const parsedDate = new Date(dateValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return 'Không hợp lệ';
+  }
+
+  return parsedDate.toLocaleString('vi-VN');
+}
+
+/** Hàm chuẩn hóa thông báo lỗi khi tải phiên đăng nhập. Mục đích: hiển thị lỗi thân thiện và đúng ngữ cảnh bảo mật. */
+function resolveSecuritySessionErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return 'Không thể tải dữ liệu phiên đăng nhập. Vui lòng thử lại.';
+  }
+
+  const typedError = error as ApiErrorResponse;
+  if (typedError.statusCode === 401 || typedError.errorCode === 'UNAUTHENTICATED') {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  }
+
+  if (typedError.statusCode === 429 || typedError.errorCode === 'RATE_LIMIT_EXCEEDED') {
+    return 'Bạn thao tác quá nhanh. Vui lòng thử lại sau.';
+  }
+
+  return typedError.message || 'Không thể tải dữ liệu phiên đăng nhập. Vui lòng thử lại.';
+}
+
+/** Hàm chuẩn hóa thông báo lỗi khi tải profile tổ chức. Mục đích: hiển thị lỗi thân thiện và đúng ngữ cảnh tab tổ chức. */
+function resolveOrganizationProfileErrorMessage(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return 'Không thể tải thông tin tổ chức. Vui lòng thử lại.';
+  }
+
+  const typedError = error as ApiErrorResponse;
+  if (typedError.statusCode === 401 || typedError.errorCode === 'UNAUTHENTICATED') {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  }
+
+  if (typedError.statusCode === 429 || typedError.errorCode === 'RATE_LIMIT_EXCEEDED') {
+    return 'Bạn thao tác quá nhanh. Vui lòng thử lại sau.';
+  }
+
+  return typedError.message || 'Không thể tải thông tin tổ chức. Vui lòng thử lại.';
+}
 
 /** Hàm validate form tạo dự án phía client. Mục đích: phản hồi lỗi sớm trước khi gửi request lên server. */
 function validateCreateProjectFormData(formData: CreateProjectFormData, selectedEvidenceFiles: File[]): CreateProjectFormErrors {
@@ -360,6 +421,24 @@ function mapApiDetailsToUpdateFormErrors(details: ApiErrorDetail[]): UpdateProje
   return formErrors;
 }
 
+/** Hàm chuẩn hóa thông báo lỗi API. Mục đích: hiển thị đúng lỗi theo status code thay vì luôn rơi vào thông báo rate limit sai ngữ cảnh. */
+function resolveApiErrorMessage(error: unknown, fallbackErrorMessage: string): string {
+  if (!error || typeof error !== 'object') {
+    return fallbackErrorMessage;
+  }
+
+  const typedError = error as ApiErrorResponse;
+  if (typedError.statusCode === 429 || typedError.errorCode === 'RATE_LIMIT_EXCEEDED') {
+    return 'Bạn thao tác quá nhanh. Vui lòng thử lại sau.';
+  }
+
+  if (typedError.statusCode === 401 || typedError.errorCode === 'UNAUTHENTICATED') {
+    return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+  }
+
+  return typedError.message || fallbackErrorMessage;
+}
+
 /** Hàm render section Dashboard. Mục đích: hiển thị cảnh báo, thống kê, biểu đồ mô phỏng và timeline. */
 export function DashboardSection({ onLinkBankAccount, hasApprovedBeneficiaryBankAccount }: DashboardSectionProps) {
   return (
@@ -481,11 +560,7 @@ export function ProjectsSection({
       onProjectSubmitted(project.projectId, response.data);
     } catch (error: unknown) {
       const fallbackErrorMessage = 'Không thể submit dự án. Vui lòng thử lại sau.';
-      if (error && typeof error === 'object' && 'message' in error) {
-        setSubmitProjectErrorMessage((error as { message?: string }).message || fallbackErrorMessage);
-      } else {
-        setSubmitProjectErrorMessage(fallbackErrorMessage);
-      }
+      setSubmitProjectErrorMessage(resolveApiErrorMessage(error, fallbackErrorMessage));
     } finally {
       setSubmittingProjectId(null);
     }
@@ -663,13 +738,13 @@ export function ProjectsSection({
     } catch (error: unknown) {
       const fallbackErrorMessage = 'Không thể cập nhật dự án. Vui lòng thử lại sau.';
       if (error && typeof error === 'object' && 'details' in error) {
-        const typedError = error as { message?: string; details?: ApiErrorDetail[] };
+        const typedError = error as { details?: ApiErrorDetail[] };
         if (Array.isArray(typedError.details) && typedError.details.length > 0) {
           setUpdateFormErrors(currentErrors => ({ ...currentErrors, ...mapApiDetailsToUpdateFormErrors(typedError.details || []) }));
         }
-        setUpdateProjectErrorMessage(typedError.message || fallbackErrorMessage);
+        setUpdateProjectErrorMessage(resolveApiErrorMessage(error, fallbackErrorMessage));
       } else if (error && typeof error === 'object' && 'message' in error) {
-        setUpdateProjectErrorMessage((error as { message?: string }).message || fallbackErrorMessage);
+        setUpdateProjectErrorMessage(resolveApiErrorMessage(error, fallbackErrorMessage));
       } else {
         setUpdateProjectErrorMessage(fallbackErrorMessage);
       }
@@ -1020,6 +1095,9 @@ function validateBeneficiaryBankAccountForm(formData: BeneficiaryBankAccountForm
 
 type BankSettingsPanelProps = {
   isBankSetupHighlighted: boolean;
+  isOrganizationKycLoading: boolean;
+  organizationKycErrorMessage: string | null;
+  onRetryLoadOrganizationKycSubmissions: () => Promise<void> | void;
   latestOrganizationKycSubmission: SettingsSectionProps['organizationKycSubmissionList'][number] | null;
   bankFormData: BeneficiaryBankAccountFormData;
   bankFormErrors: BeneficiaryBankAccountFormErrors;
@@ -1037,6 +1115,9 @@ type BankSettingsPanelProps = {
 /** Hàm render panel Ngân hàng. Mục đích: hiển thị trạng thái thật và cho phép gửi hồ sơ ngân hàng thụ hưởng. */
 function BankSettingsPanel({
   isBankSetupHighlighted,
+  isOrganizationKycLoading,
+  organizationKycErrorMessage,
+  onRetryLoadOrganizationKycSubmissions,
   latestOrganizationKycSubmission,
   bankFormData,
   bankFormErrors,
@@ -1051,9 +1132,31 @@ function BankSettingsPanel({
   onBankSubmissionSuccess
 }: BankSettingsPanelProps) {
   const bankStatus = latestOrganizationKycSubmission?.status || null;
-  const hasApprovedBeneficiaryBankAccount = bankStatus === 'APPROVED';
-  const statusLabel = bankStatus === 'APPROVED' ? '✓ Đã xác minh' : bankStatus === 'REJECTED' ? '❌ Bị từ chối' : bankStatus === 'SUBMISSION_ERROR' ? '⚠️ Lỗi nộp hồ sơ' : bankStatus === 'PENDING_REVIEW' ? '⏳ Chờ xác minh' : '⚠️ Chưa liên kết';
+  const [isBankFormHiddenAfterSuccessfulSubmit, setIsBankFormHiddenAfterSuccessfulSubmit] = useState(false);
+  const shouldShowBankForm = bankStatus === null && !isBankFormHiddenAfterSuccessfulSubmit;
+  const statusLabel = bankStatus === 'APPROVED'
+    ? '✓ Đã phê duyệt'
+    : bankStatus === 'REJECTED'
+      ? '❌ Bị từ chối'
+      : bankStatus === 'SUBMISSION_ERROR'
+        ? '⚠️ Nộp hồ sơ lỗi'
+        : bankStatus === 'PENDING_REVIEW'
+          ? '⏳ Đang chờ duyệt'
+          : '⚠️ Chưa liên kết';
   const statusStyle = bankStatus === 'APPROVED' ? 'bg-[#DCFCE7] text-[#166534]' : bankStatus === 'REJECTED' ? 'bg-[#FEE2E2] text-[#991B1B]' : bankStatus === 'SUBMISSION_ERROR' ? 'bg-[#FEE2E2] text-[#991B1B]' : bankStatus === 'PENDING_REVIEW' ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-[#FEE2E2] text-[#991B1B]';
+  const submittedAtLabel = latestOrganizationKycSubmission?.submittedAt
+    ? new Date(latestOrganizationKycSubmission.submittedAt).toLocaleString('vi-VN')
+    : null;
+
+  /** Hàm đồng bộ trạng thái ẩn form theo dữ liệu KYC mới nhất. Mục đích: đảm bảo UI luôn bám dữ liệu backend sau khi tải lại. */
+  useEffect(() => {
+    if (bankStatus !== null) {
+      setIsBankFormHiddenAfterSuccessfulSubmit(true);
+      return;
+    }
+
+    setIsBankFormHiddenAfterSuccessfulSubmit(false);
+  }, [bankStatus]);
 
   /** Hàm cập nhật field form ngân hàng. Mục đích: đổi state input và xóa lỗi field tương ứng khi người dùng sửa. */
   const handleBankFieldChange = (fieldName: keyof BeneficiaryBankAccountFormData, value: string) => {
@@ -1065,6 +1168,10 @@ function BankSettingsPanel({
 
   /** Hàm submit form ngân hàng. Mục đích: gọi API thật để tạo hồ sơ PENDING_REVIEW và reload dữ liệu trạng thái. */
   const handleSubmitBeneficiaryBankAccount = async () => {
+    if (isSubmittingBankForm || isOrganizationKycLoading) {
+      return;
+    }
+
     onBankSubmitErrorMessageChange(null);
     onBankSubmitSuccessMessageChange(null);
     const nextFormErrors = validateBeneficiaryBankAccountForm(bankFormData);
@@ -1091,15 +1198,24 @@ function BankSettingsPanel({
           branchName: bankFormData.branchName.trim()
         })
       });
-      await Promise.resolve(onBankSubmissionSuccess());
+
       onBankSubmitSuccessMessageChange('Đã gửi duyệt tài khoản thành công. Hồ sơ đang chờ xác minh.');
-    } catch (error) {
+      setIsBankFormHiddenAfterSuccessfulSubmit(true);
+
+      // Logic này reset form sau khi submit thành công để tránh giữ lại dữ liệu cũ khi người dùng quay lại trạng thái cần nhập lại.
+      onBankFormDataChange({
+        bankName: '',
+        bankAccountNumber: '',
+        accountHolderName: '',
+        branchName: ''
+      });
+      onBankFormErrorsChange({});
+
+      // Sau khi submit thành công, luôn tải lại dữ liệu KYC từ backend để UI đồng bộ đúng trạng thái thật.
+      await Promise.resolve(onBankSubmissionSuccess());
+    } catch (error: unknown) {
       const fallbackErrorMessage = 'Không thể gửi duyệt tài khoản ngân hàng. Vui lòng thử lại sau.';
-      if (error && typeof error === 'object' && 'message' in error) {
-        onBankSubmitErrorMessageChange((error as { message?: string }).message || fallbackErrorMessage);
-      } else {
-        onBankSubmitErrorMessageChange(fallbackErrorMessage);
-      }
+      onBankSubmitErrorMessageChange(resolveApiErrorMessage(error, fallbackErrorMessage));
     } finally {
       onSubmittingBankFormChange(false);
     }
@@ -1113,8 +1229,8 @@ function BankSettingsPanel({
       <div className="rounded-[10px] border border-[#E6F7F4] bg-gradient-to-r from-[#F2FBFA] to-[#F0F9FF] p-3">
         <p className="font-semibold">🏦 Trạng thái tài khoản thụ hưởng</p>
         <p className="mt-1 text-xs text-[#6B7280]">
-          {latestOrganizationKycSubmission
-            ? `Lần nộp gần nhất: ${new Date(latestOrganizationKycSubmission.submittedAt).toLocaleString('vi-VN')}`
+          {submittedAtLabel
+            ? `Lần nộp gần nhất: ${submittedAtLabel}`
             : 'Tổ chức chưa nộp hồ sơ ngân hàng/KYC.'}
         </p>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -1126,7 +1242,27 @@ function BankSettingsPanel({
         ) : null}
       </div>
 
-      {!hasApprovedBeneficiaryBankAccount ? (
+      {isOrganizationKycLoading ? <p className="mt-3 text-sm text-[#6B7280]">Đang tải trạng thái duyệt tài khoản...</p> : null}
+
+      {organizationKycErrorMessage ? (
+        <div className="mt-3 rounded border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm">
+          <p className="text-[#991B1B]">{organizationKycErrorMessage}</p>
+          <button
+            type="button"
+            onClick={() => {
+              void Promise.resolve(onRetryLoadOrganizationKycSubmissions());
+            }}
+            className="mt-2 rounded border border-[#FCA5A5] px-3 py-1 text-xs font-semibold text-[#991B1B]"
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : null}
+
+      {bankSubmitSuccessMessage ? <p className="mt-3 text-xs text-[#166534]">{bankSubmitSuccessMessage}</p> : null}
+      {bankSubmitErrorMessage ? <p className="mt-3 text-xs text-[#DC2626]">{bankSubmitErrorMessage}</p> : null}
+
+      {shouldShowBankForm && !isOrganizationKycLoading ? (
         <div className="mt-3 grid gap-3 text-sm">
           <select
             className="rounded border border-[#D1D5DB] px-3 py-2"
@@ -1163,13 +1299,10 @@ function BankSettingsPanel({
             onChange={event => handleBankFieldChange('branchName', event.target.value)}
           />
 
-          {bankSubmitErrorMessage ? <p className="text-xs text-[#DC2626]">{bankSubmitErrorMessage}</p> : null}
-          {bankSubmitSuccessMessage ? <p className="text-xs text-[#166534]">{bankSubmitSuccessMessage}</p> : null}
-
           <button
             type="button"
             onClick={handleSubmitBeneficiaryBankAccount}
-            disabled={isSubmittingBankForm}
+            disabled={isSubmittingBankForm || isOrganizationKycLoading}
             className="rounded bg-[#0E7C6B] px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSubmittingBankForm ? 'Đang gửi duyệt...' : 'Gửi duyệt tài khoản'}
@@ -1183,6 +1316,9 @@ function BankSettingsPanel({
 /** Hàm render section Settings. Mục đích: hiển thị điều hướng cài đặt và cho phép nộp thông tin ngân hàng thụ hưởng thật. */
 type SettingsSectionProps = {
   isBankSetupHighlighted: boolean;
+  isOrganizationKycLoading: boolean;
+  organizationKycErrorMessage: string | null;
+  onRetryLoadOrganizationKycSubmissions: () => Promise<void> | void;
   onBankSubmissionSuccess: () => Promise<void> | void;
   organizationKycSubmissionList: Array<{
     submissionId: string;
@@ -1211,7 +1347,23 @@ type BeneficiaryBankAccountFormData = {
 
 type BeneficiaryBankAccountFormErrors = Partial<Record<keyof BeneficiaryBankAccountFormData, string>>;
 
-export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmissionList, onBankSubmissionSuccess }: SettingsSectionProps) {
+type SecuritySessionsResponseData = {
+  sessions?: ActiveSessionItem[];
+};
+
+type OrganizationProfileResponseData = {
+  profile?: OrganizationProfileItem | null;
+};
+
+
+export function SettingsSection({
+  isBankSetupHighlighted,
+  isOrganizationKycLoading,
+  organizationKycErrorMessage,
+  onRetryLoadOrganizationKycSubmissions,
+  organizationKycSubmissionList = [],
+  onBankSubmissionSuccess
+}: SettingsSectionProps) {
   const [activeSettingsTab, setActiveSettingsTab] = useState<'organization' | 'bank' | 'security'>('organization');
   const [bankFormData, setBankFormData] = useState<BeneficiaryBankAccountFormData>({
     bankName: '',
@@ -1223,6 +1375,66 @@ export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmiss
   const [bankSubmitErrorMessage, setBankSubmitErrorMessage] = useState<string | null>(null);
   const [bankSubmitSuccessMessage, setBankSubmitSuccessMessage] = useState<string | null>(null);
   const [isSubmittingBankForm, setIsSubmittingBankForm] = useState(false);
+  const [activeSessionList, setActiveSessionList] = useState<ActiveSessionItem[]>([]);
+  const [isSecuritySessionsLoading, setIsSecuritySessionsLoading] = useState(false);
+  const [securitySessionsErrorMessage, setSecuritySessionsErrorMessage] = useState<string | null>(null);
+  const [organizationProfileData, setOrganizationProfileData] = useState<OrganizationProfileItem | null>(null);
+  const [isOrganizationProfileLoading, setIsOrganizationProfileLoading] = useState(false);
+  const [organizationProfileErrorMessage, setOrganizationProfileErrorMessage] = useState<string | null>(null);
+
+  /** Hàm tải danh sách phiên đăng nhập cho tab bảo mật. Mục đích: lấy dữ liệu thật từ backend và đồng bộ state UI. */
+  const loadSecuritySessions = async () => {
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setSecuritySessionsErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      setActiveSessionList([]);
+      return;
+    }
+
+    setIsSecuritySessionsLoading(true);
+    setSecuritySessionsErrorMessage(null);
+
+    try {
+      const response = await fetchApi<SecuritySessionsResponseData>(buildApiUrl('/auth/sessions/me'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+      const nextActiveSessionList = Array.isArray(response.data.sessions) ? response.data.sessions : [];
+      setActiveSessionList(nextActiveSessionList);
+    } catch (error: unknown) {
+      setSecuritySessionsErrorMessage(resolveSecuritySessionErrorMessage(error));
+      setActiveSessionList([]);
+    } finally {
+      setIsSecuritySessionsLoading(false);
+    }
+  };
+
+  /** Hàm tải profile tổ chức cho tab cài đặt. Mục đích: lấy dữ liệu thật của tổ chức hiện tại từ backend. */
+  const loadOrganizationProfile = async () => {
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setOrganizationProfileErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      setOrganizationProfileData(null);
+      return;
+    }
+
+    setIsOrganizationProfileLoading(true);
+    setOrganizationProfileErrorMessage(null);
+
+    try {
+      const response = await fetchApi<OrganizationProfileResponseData>(buildApiUrl('/auth/organization/profile/me'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+
+      setOrganizationProfileData(response.data.profile || null);
+    } catch (error: unknown) {
+      setOrganizationProfileErrorMessage(resolveOrganizationProfileErrorMessage(error));
+      setOrganizationProfileData(null);
+    } finally {
+      setIsOrganizationProfileLoading(false);
+    }
+  };
 
   /** Hàm chọn tab cài đặt. Mục đích: cập nhật nội dung panel theo mục người dùng chọn. */
   const handleSelectSettingsTab = (tab: 'organization' | 'bank' | 'security') => {
@@ -1231,12 +1443,13 @@ export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmiss
 
   /** Hàm lấy hồ sơ KYC mới nhất. Mục đích: dùng bản ghi mới nhất để hiển thị trạng thái tài khoản thụ hưởng chính xác. */
   const latestOrganizationKycSubmission = useMemo(() => {
-    if (!organizationKycSubmissionList.length) {
+    const safeOrganizationKycSubmissionList = Array.isArray(organizationKycSubmissionList) ? organizationKycSubmissionList : [];
+    if (!safeOrganizationKycSubmissionList.length) {
       return null;
     }
 
     // Logic này sắp xếp theo thời gian nộp giảm dần để luôn chọn đúng bản ghi mới nhất.
-    const submissionListByLatest = [...organizationKycSubmissionList].sort((leftSubmission, rightSubmission) => {
+    const submissionListByLatest = [...safeOrganizationKycSubmissionList].sort((leftSubmission, rightSubmission) => {
       return new Date(rightSubmission.submittedAt).getTime() - new Date(leftSubmission.submittedAt).getTime();
     });
 
@@ -1247,6 +1460,24 @@ export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmiss
   const isBankTabActive = activeSettingsTab === 'bank';
   const isSecurityTabActive = activeSettingsTab === 'security';
 
+  /** Hàm tự động tải profile tổ chức khi người dùng mở tab Tổ chức. Mục đích: đảm bảo luôn hiển thị dữ liệu thật mới nhất. */
+  useEffect(() => {
+    if (!isOrganizationTabActive) {
+      return;
+    }
+
+    void loadOrganizationProfile();
+  }, [isOrganizationTabActive]);
+
+  /** Hàm tự động tải phiên bảo mật khi người dùng mở tab Security. Mục đích: đảm bảo dữ liệu luôn là dữ liệu thật mới nhất từ backend. */
+  useEffect(() => {
+    if (!isSecurityTabActive) {
+      return;
+    }
+
+    void loadSecuritySessions();
+  }, [isSecurityTabActive]);
+
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[220px_1fr]">
       <div className="rounded-[14px] border border-[#E5E7EB] bg-white p-2 text-sm">
@@ -1256,11 +1487,79 @@ export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmiss
       </div>
 
       <div className="space-y-4">
-        {isOrganizationTabActive ? <SectionCard title="Thiết lập tổ chức"><div className="grid gap-3 text-sm"><input className="rounded border border-[#D1D5DB] px-3 py-2" value="Quỹ Hy Vọng Xanh" readOnly /><textarea className="min-h-[86px] rounded border border-[#D1D5DB] px-3 py-2" value="Tổ chức phi lợi nhuận hỗ trợ giáo dục và y tế cho cộng đồng khó khăn." readOnly /></div></SectionCard> : null}
+        {isOrganizationTabActive ? (
+          <SectionCard title="Thiết lập tổ chức">
+            <div className="space-y-3 text-sm">
+              {isOrganizationProfileLoading ? <p className="text-sm text-[#6B7280]">Đang tải dữ liệu tổ chức...</p> : null}
+
+              {!isOrganizationProfileLoading && organizationProfileErrorMessage ? (
+                <div className="rounded border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm">
+                  <p className="text-[#991B1B]">{organizationProfileErrorMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadOrganizationProfile();
+                    }}
+                    className="mt-2 rounded border border-[#FCA5A5] px-3 py-1 text-xs font-semibold text-[#991B1B]"
+                  >
+                    Thử lại
+                  </button>
+                </div>
+              ) : null}
+
+              {!isOrganizationProfileLoading && !organizationProfileErrorMessage && !organizationProfileData ? (
+                <p className="text-sm text-[#6B7280]">Chưa có thông tin tổ chức.</p>
+              ) : null}
+
+              {!isOrganizationProfileLoading && !organizationProfileErrorMessage && organizationProfileData ? (
+                <div className="grid gap-3 text-sm">
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Tên tổ chức</p>
+                    <input
+                      className="w-full rounded border border-[#D1D5DB] px-3 py-2"
+                      value={organizationProfileData.organizationName}
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Mã đăng ký pháp lý</p>
+                    <input
+                      className="w-full rounded border border-[#D1D5DB] px-3 py-2"
+                      value={organizationProfileData.legalRegistrationNumber}
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Website chính thức</p>
+                    <input
+                      className="w-full rounded border border-[#D1D5DB] px-3 py-2"
+                      value={organizationProfileData.officialWebsite || 'Chưa cập nhật'}
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#6B7280]">Mô tả tổ chức</p>
+                    <textarea
+                      className="min-h-[100px] w-full rounded border border-[#D1D5DB] px-3 py-2"
+                      value={organizationProfileData.organizationDescription || 'Chưa cập nhật'}
+                      readOnly
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </SectionCard>
+        ) : null}
 
         {isBankTabActive ? (
           <BankSettingsPanel
             isBankSetupHighlighted={isBankSetupHighlighted}
+            isOrganizationKycLoading={isOrganizationKycLoading}
+            organizationKycErrorMessage={organizationKycErrorMessage}
+            onRetryLoadOrganizationKycSubmissions={onRetryLoadOrganizationKycSubmissions}
             latestOrganizationKycSubmission={latestOrganizationKycSubmission}
             bankFormData={bankFormData}
             bankFormErrors={bankFormErrors}
@@ -1276,7 +1575,45 @@ export function SettingsSection({ isBankSetupHighlighted, organizationKycSubmiss
           />
         ) : null}
 
-        {isSecurityTabActive ? <SectionCard title="Thiết lập bảo mật"><div className="space-y-3 text-sm"><div className="rounded border border-[#E5E7EB] p-3"><p className="font-medium">Thiết bị đã đăng nhập</p><p className="mt-1 text-xs text-[#6B7280]">Web · Chrome on Windows</p><p className="mt-1 text-xs text-[#9CA3AF]">Lần cuối: 09:12 20/05/2025</p></div><div className="rounded border border-[#E5E7EB] p-3"><p className="font-medium">Phiên hoạt động</p><p className="mt-1 text-xs text-[#6B7280]">Đăng nhập lúc 08:55 20/05/2025</p><p className="mt-1 text-xs text-[#9CA3AF]">IP: 171.232.24.18</p></div></div></SectionCard> : null}
+        {isSecurityTabActive ? (
+          <SectionCard title="Thiết lập bảo mật">
+            <div className="space-y-3 text-sm">
+              {isSecuritySessionsLoading ? <p className="text-sm text-[#6B7280]">Đang tải phiên hoạt động...</p> : null}
+
+              {!isSecuritySessionsLoading && securitySessionsErrorMessage ? (
+                <div className="rounded border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm">
+                  <p className="text-[#991B1B]">{securitySessionsErrorMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void loadSecuritySessions();
+                    }}
+                    className="mt-2 rounded border border-[#FCA5A5] px-3 py-1 text-xs font-semibold text-[#991B1B]"
+                  >
+                    Thử lại
+                  </button>
+                </div>
+              ) : null}
+
+              {!isSecuritySessionsLoading && !securitySessionsErrorMessage && !activeSessionList.length ? (
+                <p className="text-sm text-[#6B7280]">Chưa có phiên hoạt động.</p>
+              ) : null}
+
+              {!isSecuritySessionsLoading && !securitySessionsErrorMessage && activeSessionList.length ? (
+                <div className="space-y-3">
+                  {activeSessionList.map(activeSessionItem => (
+                    <div key={activeSessionItem.sessionId} className="rounded border border-[#E5E7EB] p-3">
+                      <p className="font-medium">{activeSessionItem.deviceLabel}</p>
+                      <p className="mt-1 text-xs text-[#6B7280]">Lần cuối: {formatSecurityDateTime(activeSessionItem.lastActiveAt)}</p>
+                      <p className="mt-1 text-xs text-[#6B7280]">Đăng nhập lúc: {formatSecurityDateTime(activeSessionItem.loggedInAt)}</p>
+                      <p className="mt-1 text-xs text-[#9CA3AF]">IP: {activeSessionItem.ipAddress || 'Không xác định'}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </SectionCard>
+        ) : null}
       </div>
     </div>
   );
@@ -1445,17 +1782,13 @@ export function CreateProjectModal({ onClose, onProjectCreated }: CreateProjectM
       const fallbackErrorMessage = 'Không thể tạo dự án. Vui lòng thử lại sau.';
       if (error && typeof error === 'object') {
         const typedError = error as {
-          message?: string;
           details?: ApiErrorDetail[];
           errorCode?: string;
         };
 
         // Logic ưu tiên map theo errorCode để hiển thị đúng thông điệp nghiệp vụ từ backend.
         if (typedError.errorCode === 'BENEFICIARY_BANK_ACCOUNT_NOT_APPROVED') {
-          setSubmitErrorMessage(
-            typedError.message ||
-            'Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt để thiết lập ngân hàng.'
-          );
+          setSubmitErrorMessage('Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt để thiết lập ngân hàng.');
           return;
         }
 
@@ -1463,7 +1796,7 @@ export function CreateProjectModal({ onClose, onProjectCreated }: CreateProjectM
           setFormErrors(mapApiDetailsToFormErrors(typedError.details));
         }
 
-        setSubmitErrorMessage(typedError.message || fallbackErrorMessage);
+        setSubmitErrorMessage(resolveApiErrorMessage(error, fallbackErrorMessage));
       } else {
         setSubmitErrorMessage(fallbackErrorMessage);
       }

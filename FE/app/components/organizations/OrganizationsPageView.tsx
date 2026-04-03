@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { TopbarIconButton } from './OrganizationUiParts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { financeNavigationItems, primaryNavigationItems, systemNavigationItems } from './mockData';
 import {
   CreateProjectModal,
@@ -12,8 +12,9 @@ import {
   SettingsSection,
   TransparencySection
 } from './OrganizationsSections';
-import { fetchApi, buildApiUrl } from '@/app/utils/apiClient';
-import { readAuthSession } from '@/app/utils/authSession';
+import { ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
+import { clearAuthSession, readAuthSession } from '@/app/utils/authSession';
+import Topbar from '../regulatoryBodies/tailwind/Topbar';
 import { NavigationItem, OrganizationPageKey, ProjectSummary } from './types';
 
 type CreateProjectEligibilityResponse = {
@@ -45,6 +46,21 @@ type SidebarItemProps = {
   onTriggerAction: (action: 'createProject' | 'toggleNotification') => void;
 };
 
+/** Hàm kiểm tra có tài khoản thụ hưởng đã duyệt hay chưa. Mục đích: chặn UI tạo dự án khi chưa đủ điều kiện ngân hàng theo dữ liệu thật từ KYC. */
+function hasApprovedBeneficiaryBankAccount(submissionList: OrganizationKycSubmissionSummary[]): boolean {
+  return submissionList.some(submissionItem => submissionItem.status === 'APPROVED');
+}
+
+/** Hàm chuẩn hóa message lỗi API. Mục đích: hiển thị thông báo ổn định khi response lỗi hoặc thiếu cấu trúc mong muốn. */
+function resolveApiErrorMessage(error: unknown, fallbackErrorMessage: string): string {
+  if (!error || typeof error !== 'object') {
+    return fallbackErrorMessage;
+  }
+
+  const typedError = error as ApiErrorResponse;
+  return typedError.message || fallbackErrorMessage;
+}
+
 /** Hàm render item sidebar. Mục đích: tái sử dụng giao diện điều hướng bên trái. */
 function SidebarItem({ item, activePage, onSelectPage, onTriggerAction }: SidebarItemProps) {
   const isActive = item.page === activePage;
@@ -75,6 +91,8 @@ function SidebarItem({ item, activePage, onSelectPage, onTriggerAction }: Sideba
 
 /** Hàm render trang Organizations chi tiết. Mục đích: bám sát layout HTML gốc theo các section chính. */
 export default function OrganizationsPageView() {
+  const router = useRouter();
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
   const [activePage, setActivePage] = useState<OrganizationPageKey>('dashboard');
   const [activeDisbursementTab, setActiveDisbursementTab] = useState<'eligible' | 'pending' | 'history'>('eligible');
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -87,6 +105,13 @@ export default function OrganizationsPageView() {
   const [isCreateProjectAllowed, setIsCreateProjectAllowed] = useState(true);
   const [createProjectBlockReason, setCreateProjectBlockReason] = useState<string | null>(null);
   const [organizationKycSubmissionList, setOrganizationKycSubmissionList] = useState<OrganizationKycSubmissionSummary[]>([]);
+  const [isOrganizationKycLoading, setIsOrganizationKycLoading] = useState(false);
+  const [organizationKycErrorMessage, setOrganizationKycErrorMessage] = useState<string | null>(null);
+  const [isAccessChecking, setIsAccessChecking] = useState(true);
+  const [isLogoutProcessing, setIsLogoutProcessing] = useState(false);
+  const [userDisplayName, setUserDisplayName] = useState('Người dùng');
+  const [userEmail, setUserEmail] = useState('');
+  const [userWalletAddress, setUserWalletAddress] = useState('');
   const latestEligibilityRequestRef = useRef(0);
 
   /** Hàm tính tiêu đề topbar. Mục đích: đồng bộ tiêu đề theo menu đang active. */
@@ -122,20 +147,24 @@ export default function OrganizationsPageView() {
         headers: { Authorization: `Bearer ${authSession.accessToken}` }
       });
 
+      // Logic này dùng cả điều kiện backend và trạng thái KYC local để tránh hiển thị sai nút tạo dự án khi dữ liệu chưa đồng bộ hoàn toàn.
+      const hasApprovedBankAccount = hasApprovedBeneficiaryBankAccount(organizationKycSubmissionList);
+      const isEligibleToCreateProject = response.data.isEligibleToCreateProject && hasApprovedBankAccount;
+
       // Chỉ cập nhật state từ request mới nhất để tránh race condition khi có nhiều request chạy song song.
       if (requestOrderNumber === latestEligibilityRequestRef.current) {
-        setIsCreateProjectAllowed(response.data.isEligibleToCreateProject);
-        setCreateProjectBlockReason(response.data.blockReason);
+        setIsCreateProjectAllowed(isEligibleToCreateProject);
+        setCreateProjectBlockReason(
+          isEligibleToCreateProject
+            ? null
+            : response.data.blockReason || 'Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt ngân hàng.'
+        );
       }
-      return response.data.isEligibleToCreateProject;
+      return isEligibleToCreateProject;
     } catch (error: unknown) {
       const fallbackBlockReason = 'Không thể kiểm tra điều kiện tạo dự án. Vui lòng thử lại sau.';
       if (requestOrderNumber === latestEligibilityRequestRef.current) {
-        if (error && typeof error === 'object' && 'message' in error) {
-          setCreateProjectBlockReason((error as { message?: string }).message || fallbackBlockReason);
-        } else {
-          setCreateProjectBlockReason(fallbackBlockReason);
-        }
+        setCreateProjectBlockReason(resolveApiErrorMessage(error, fallbackBlockReason));
         setIsCreateProjectAllowed(false);
       }
       return false;
@@ -147,20 +176,44 @@ export default function OrganizationsPageView() {
     const authSession = readAuthSession();
     if (!authSession?.accessToken) {
       setOrganizationKycSubmissionList([]);
+      setOrganizationKycErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      setIsOrganizationKycLoading(false);
+      setIsCreateProjectAllowed(false);
+      setCreateProjectBlockReason('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
       return;
     }
 
+    setIsOrganizationKycLoading(true);
+    setOrganizationKycErrorMessage(null);
+
     try {
-      const response = await fetchApi<{ submissions: OrganizationKycSubmissionSummary[] }>(
+      const response = await fetchApi<{ submissions?: OrganizationKycSubmissionSummary[] }>(
         buildApiUrl('/auth/organization/kyc-submissions/me'),
         {
           method: 'GET',
           headers: { Authorization: `Bearer ${authSession.accessToken}` }
         }
       );
-      setOrganizationKycSubmissionList(response.data.submissions || []);
-    } catch {
+
+      // Logic này luôn ép về mảng an toàn để tránh runtime crash khi backend tạm thời không trả field submissions.
+      const nextSubmissionList = Array.isArray(response.data?.submissions) ? response.data.submissions : [];
+      setOrganizationKycSubmissionList(nextSubmissionList);
+
+      const hasApprovedBankAccount = hasApprovedBeneficiaryBankAccount(nextSubmissionList);
+      setIsCreateProjectAllowed(hasApprovedBankAccount);
+      setCreateProjectBlockReason(
+        hasApprovedBankAccount
+          ? null
+          : 'Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt ngân hàng.'
+      );
+    } catch (error: unknown) {
+      const fallbackErrorMessage = 'Không thể tải trạng thái duyệt tài khoản. Vui lòng thử lại sau.';
+      setOrganizationKycErrorMessage(resolveApiErrorMessage(error, fallbackErrorMessage));
       setOrganizationKycSubmissionList([]);
+      setIsCreateProjectAllowed(false);
+      setCreateProjectBlockReason('Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt ngân hàng.');
+    } finally {
+      setIsOrganizationKycLoading(false);
     }
   };
 
@@ -281,7 +334,92 @@ export default function OrganizationsPageView() {
     setIsBankSetupHighlighted(true);
   };
 
-  /** Hàm đánh dấu toàn bộ thông báo đã đọc. Mục đích: cập nhật trạng thái chấm đỏ ở chuông và dropdown. */
+
+  /** Hàm kiểm tra quyền truy cập Organizations tại frontend kết hợp xác thực server để tránh bypass. */
+  const verifyOrganizationAccess = useCallback(async () => {
+    const sessionPayload = readAuthSession();
+    if (!sessionPayload.accessToken) {
+      clearAuthSession();
+      router.replace('/login');
+      return;
+    }
+
+    setUserDisplayName(sessionPayload.userFullName || 'Người dùng');
+    setUserEmail(sessionPayload.userEmail || '');
+    setUserWalletAddress(sessionPayload.userWalletAddress || '');
+
+    // Ghi chú logic phức tạp: chặn sớm từ dữ liệu local để giảm flash UI,
+    // sau đó vẫn gọi server /auth/me để chống giả mạo role ở client.
+    const isOrganizationRoleFromLocal =
+      sessionPayload.userRole === 'organization' || sessionPayload.userRole === 'organizations';
+    if (sessionPayload.userRole && !isOrganizationRoleFromLocal) {
+      clearAuthSession();
+      router.replace('/');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${backendBaseUrl}/auth/me`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${sessionPayload.accessToken}`
+        }
+      });
+
+      if (!response.ok) {
+        clearAuthSession();
+        router.replace('/login');
+        return;
+      }
+
+      const responseData = await response.json();
+      const userRole = responseData?.user?.role as string | undefined;
+      const isOrganizationRoleFromServer = userRole === 'organization' || userRole === 'organizations';
+      if (!isOrganizationRoleFromServer) {
+        clearAuthSession();
+        router.replace('/');
+        return;
+      }
+    } catch (_error) {
+      clearAuthSession();
+      router.replace('/login');
+      return;
+    } finally {
+      setIsAccessChecking(false);
+    }
+  }, [backendBaseUrl, router]);
+
+  /** Hàm gọi API logout, xóa phiên cục bộ và điều hướng về login an toàn. */
+  const handleLogout = useCallback(async () => {
+    if (isLogoutProcessing) {
+      return;
+    }
+
+    setIsLogoutProcessing(true);
+    const sessionPayload = readAuthSession();
+
+    try {
+      if (sessionPayload.accessToken) {
+        await fetch(`${backendBaseUrl}/auth/logout-all`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${sessionPayload.accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({})
+        });
+      }
+    } catch (_error) {
+      // Ghi chú logic phức tạp: vẫn tiếp tục clear session local để chắc chắn đóng phiên client.
+    } finally {
+      clearAuthSession();
+      window.sessionStorage.clear();
+      router.replace('/login');
+      router.refresh();
+      setIsLogoutProcessing(false);
+    }
+  }, [backendBaseUrl, isLogoutProcessing, router]);
+  /** Hàm đánh dấu toàn bộ thông báo đã đọc. Mục đích: cập nhật trạng thái thông báo về đã đọc. */
   const handleMarkAllNotificationsAsRead = () => {
     setHasUnreadNotification(false);
   };
@@ -290,6 +428,22 @@ export default function OrganizationsPageView() {
   const handleCloseNotificationDropdown = () => {
     setIsNotificationOpen(false);
   };
+
+  /** Hàm mở thông báo từ topbar. Mục đích: đồng bộ thao tác chuông thông báo giữa topbar và sidebar. */
+  const handleOpenTopbarNotification = () => {
+    setIsNotificationOpen(currentState => !currentState);
+  };
+
+  /** Hàm mở menu mobile. Mục đích: giữ tương thích API của Topbar trong khi sidebar hiện tại là desktop cố định. */
+  const handleOpenMobileMenu = () => {
+    // Ghi chú logic phức tạp: layout organizations hiện chưa có drawer mobile,
+    // nên tạm thời giữ hàm rỗng để không phá vỡ props contract của Topbar.
+  };
+
+  /** Hàm chạy guard phân quyền khi component mount. */
+  useEffect(() => {
+    void verifyOrganizationAccess();
+  }, [verifyOrganizationAccess]);
 
   useEffect(() => {
     if (activePage !== 'settings') {
@@ -304,8 +458,12 @@ export default function OrganizationsPageView() {
   }, [hasUnreadNotification]);
 
   useEffect(() => {
+    if (isAccessChecking) {
+      return;
+    }
+
     void Promise.all([loadProjectsFromApi(), loadCreateProjectEligibility(), loadOrganizationKycSubmissions()]);
-  }, []);
+  }, [isAccessChecking]);
 
   useEffect(() => {
     if (activePage !== 'projects') {
@@ -315,6 +473,14 @@ export default function OrganizationsPageView() {
     // Khi người dùng vào tab dự án, luôn re-check eligibility để đồng bộ trạng thái chặn/mở nút tạo dự án ngay lập tức.
     void loadCreateProjectEligibility();
   }, [activePage]);
+
+  if (isAccessChecking) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#F8FAFB] text-[#0D1117]">
+        <p className="text-sm font-medium text-[#4B5563]">Đang kiểm tra quyền truy cập...</p>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-[#F8FAFB] text-[#0D1117]">
@@ -381,30 +547,29 @@ export default function OrganizationsPageView() {
           <div className="m-4 mt-auto">
             <button
               type="button"
-              className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15"
+              onClick={() => {
+                void handleLogout();
+              }}
+              disabled={isLogoutProcessing}
+              className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Đăng xuất
+              {isLogoutProcessing ? 'Đang đăng xuất...' : 'Đăng xuất'}
             </button>
           </div>
         </aside>
 
         <section className="ml-[248px] flex min-h-screen flex-1 flex-col">
-          <header className="sticky top-0 z-10 flex h-[60px] items-center justify-between border-b border-[#E5E7EB] bg-white px-7">
-            <h1 className="text-lg font-semibold">{pageTitle}</h1>
-
-            <div className="flex items-center gap-3.5">
-              <TopbarIconButton label="🔔" hasDot={hasUnreadNotification} />
-              <TopbarIconButton label="❓" />
-
-              <button
-                type="button"
-                className="flex items-center gap-2 rounded-full border border-[#E5E7EB] bg-white py-1 pl-1 pr-2"
-              >
-                <span className="flex h-[30px] w-[30px] items-center justify-center rounded-full bg-gradient-to-br from-[#34D399] to-[#22C55E] text-xs font-bold text-[#064E3B]">QH</span>
-                <span className="text-xs font-medium text-[#374151]">Tổ chức</span>
-              </button>
-            </div>
-          </header>
+          <Topbar
+            breadcrumbTitle={pageTitle}
+            userDisplayName={userDisplayName}
+            userEmail={userEmail}
+            userWalletAddress={userWalletAddress}
+            onOpenMobileMenu={handleOpenMobileMenu}
+            onOpenNotification={handleOpenTopbarNotification}
+            onLogout={() => {
+              void handleLogout();
+            }}
+          />
 
           <div className="p-7">
             {activePage === 'dashboard' ? (
@@ -440,6 +605,9 @@ export default function OrganizationsPageView() {
               <SettingsSection
                 isBankSetupHighlighted={isBankSetupHighlighted}
                 organizationKycSubmissionList={organizationKycSubmissionList}
+                isOrganizationKycLoading={isOrganizationKycLoading}
+                organizationKycErrorMessage={organizationKycErrorMessage}
+                onRetryLoadOrganizationKycSubmissions={loadOrganizationKycSubmissions}
                 onBankSubmissionSuccess={handleBankSubmissionSuccess}
               />
             ) : null}

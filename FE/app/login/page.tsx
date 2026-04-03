@@ -214,8 +214,14 @@ export default function LoginPage() {
         setCorrelationId(correlationIdValue || '');
         setIsSuccessVisible(true);
 
-        // Ghi chú logic phức tạp: điều hướng theo role để Regulatory vào đúng màn hình nghiệp vụ ngay sau đăng nhập.
-        const redirectPath = userData?.role === 'regulatory' ? '/regulatory-bodies' : '/';
+        // Ghi chú logic phức tạp: điều hướng theo role để mỗi nhóm người dùng vào đúng màn hình nghiệp vụ ngay sau đăng nhập.
+        const userRole = userData?.role;
+        const redirectPath =
+          userRole === 'regulatory'
+            ? '/regulatory-bodies'
+            : userRole === 'organization' || userRole === 'organizations'
+              ? '/organizations'
+              : '/';
         router.push(redirectPath);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';

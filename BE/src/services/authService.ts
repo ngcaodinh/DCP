@@ -15,6 +15,7 @@ import {
   findRefreshSessionById,
   findUserByEmail,
   findUserById,
+  getActiveRefreshSessionsByUserId,
   revokeRefreshSession,
   revokeRefreshSessionsByUserId,
   updateRefreshSession,
@@ -472,4 +473,59 @@ export async function refreshAccessToken(
     expiresAt: existingSession.expiresAt
   };
 }
+
+export type ActiveSessionView = {
+  sessionId: string;
+  deviceLabel: string;
+  ipAddress: string;
+  loggedInAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+};
+
+/** Hàm rút gọn user-agent thành nhãn thiết bị dễ đọc. Mục đích: hiển thị thân thiện trên giao diện bảo mật. */
+function buildDeviceLabelFromUserAgent(userAgent: string): string {
+  if (!userAgent || userAgent === 'unknown') {
+    return 'Thiết bị không xác định';
+  }
+
+  const normalizedUserAgent = userAgent.toLowerCase();
+
+  if (normalizedUserAgent.includes('iphone')) {
+    return 'Mobile · iPhone';
+  }
+
+  if (normalizedUserAgent.includes('android')) {
+    return 'Mobile · Android';
+  }
+
+  if (normalizedUserAgent.includes('windows')) {
+    return 'Web · Windows';
+  }
+
+  if (normalizedUserAgent.includes('mac os') || normalizedUserAgent.includes('macintosh')) {
+    return 'Web · macOS';
+  }
+
+  if (normalizedUserAgent.includes('linux')) {
+    return 'Web · Linux';
+  }
+
+  return 'Thiết bị khác';
+}
+
+/** Hàm lấy danh sách phiên đăng nhập đang hoạt động của user. Mục đích: trả dữ liệu thật cho tab cài đặt bảo mật. */
+export async function getMyActiveSessions(userId: string): Promise<ActiveSessionView[]> {
+  const refreshSessionList = await getActiveRefreshSessionsByUserId(userId);
+
+  return refreshSessionList.map(refreshSession => ({
+    sessionId: refreshSession.id,
+    deviceLabel: buildDeviceLabelFromUserAgent(refreshSession.userAgent),
+    ipAddress: refreshSession.ipAddress,
+    loggedInAt: refreshSession.createdAt.toISOString(),
+    lastActiveAt: refreshSession.updatedAt.toISOString(),
+    expiresAt: refreshSession.expiresAt.toISOString()
+  }));
+}
+
 
