@@ -1,25 +1,29 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
 
-type Project = {
-  id: number;
-  icon: string;
-  background: string;
-  status: string;
-  qfScore: string;
-  organization: string;
-  title: string;
+type HomeSupportProject = {
+  projectId: string;
+  name: string;
   description: string;
-  raisedLabel: string;
-  goalLabel: string;
-  progress: number;
-  donors: string;
-  daysLeft: string;
-  transactions: string;
-  delay?: number;
+  goalAmount: number;
+  status: string;
+  updatedAt: string;
+  createdAt: string;
 };
+
+type HomeSupportProjectDetail = {
+  projectId: string;
+  name: string;
+  description: string;
+  goalAmount: number;
+  status: string;
+  updatedAt: string;
+  evidenceCids: string[];
+};
+
 
 type RankingItem = {
   rank: string;
@@ -48,60 +52,14 @@ type StatItem = {
   delay?: number;
 };
 
-const projects: Project[] = [
-  {
-    id: 1,
-    icon: '🏫',
-    background: 'linear-gradient(135deg,#E6F7F4,#B2EEE4)',
-    status: '● ACTIVE',
-    qfScore: 'QF 9.2',
-    organization: '✅ Ánh Sáng Việt Nam',
-    title: 'Xây dựng phòng học cho 120 em học sinh vùng cao Hà Giang',
-    description:
-      'Dự án nhằm cung cấp cơ sở vật chất học tập cho trẻ em dân tộc thiểu số tại xã Đồng Văn, huyện Đồng Văn, Hà Giang.',
-    raisedLabel: '458M₫',
-    goalLabel: '630M₫ · 73%',
-    progress: 73,
-    donors: '👥 248 donors',
-    daysLeft: '📅 12 ngày',
-    transactions: '⛓ 1,247 tx'
-  },
-  {
-    id: 2,
-    icon: '🏥',
-    background: 'linear-gradient(135deg,#FEF3C7,#FDE68A)',
-    status: '● ACTIVE',
-    qfScore: 'QF 8.7',
-    organization: '✅ Trái Tim Xanh Foundation',
-    title: 'Hỗ trợ phẫu thuật tim miễn phí cho 50 trẻ em nghèo',
-    description:
-      'Chương trình kết hợp với bệnh viện Nhi Đồng 1 để thực hiện phẫu thuật tim bẩm sinh miễn phí cho các bé dưới 10 tuổi.',
-    raisedLabel: '890M₫',
-    goalLabel: '1.2T₫ · 74%',
-    progress: 74,
-    donors: '👥 512 donors',
-    daysLeft: '📅 8 ngày',
-    transactions: '⛓ 2,831 tx',
-    delay: 0.1
-  },
-  {
-    id: 3,
-    icon: '🌊',
-    background: 'linear-gradient(135deg,#EDE9FE,#C4B5FD)',
-    status: '● ACTIVE',
-    qfScore: 'QF 8.1',
-    organization: '✅ Cứu Trợ Miền Trung',
-    title: 'Tái thiết nhà ở cho 80 hộ dân bị lũ lụt tại Quảng Bình',
-    description:
-      'Hỗ trợ xây dựng lại nhà kiên cố cho các hộ nghèo mất nhà hoàn toàn sau đợt lũ lịch sử tháng 10/2024.',
-    raisedLabel: '320M₫',
-    goalLabel: '800M₫ · 40%',
-    progress: 40,
-    donors: '👥 187 donors',
-    daysLeft: '📅 25 ngày',
-    transactions: '⛓ 634 tx',
-    delay: 0.2
-  }
+const projectCardIconList = ['🏫', '🏥', '🌊', '👶', '💧', '🌱'];
+const projectCardBackgroundList = [
+  'linear-gradient(135deg,#E6F7F4,#B2EEE4)',
+  'linear-gradient(135deg,#FEF3C7,#FDE68A)',
+  'linear-gradient(135deg,#EDE9FE,#C4B5FD)',
+  'linear-gradient(135deg,#FEE2E2,#FCA5A5)',
+  'linear-gradient(135deg,#DBEAFE,#93C5FD)',
+  'linear-gradient(135deg,#DCFCE7,#86EFAC)'
 ];
 
 const stats: StatItem[] = [
@@ -237,6 +195,69 @@ const formatStatValue = (value: number, suffix: string) => {
   return `${value}${suffix}`;
 };
 
+/** Hàm định dạng số tiền theo chuẩn tiền Việt. Mục đích: hiển thị mục tiêu gây quỹ rõ ràng cho người dùng. */
+const formatCurrencyVnd = (amountValue: number): string => {
+  return new Intl.NumberFormat('vi-VN').format(amountValue);
+};
+
+/** Hàm định dạng thời gian cập nhật. Mục đích: hiển thị mốc cập nhật gần nhất của dự án ở section homepage. */
+const formatUpdatedTime = (updatedAtIso: string): string => {
+  const parsedUpdatedAt = new Date(updatedAtIso);
+
+  if (Number.isNaN(parsedUpdatedAt.getTime())) {
+    return 'Không xác định';
+  }
+
+  return parsedUpdatedAt.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+/** Hàm hiển thị nhãn trạng thái dự án thân thiện. Mục đích: chuẩn hóa trạng thái kỹ thuật thành tiếng Việt dễ hiểu. */
+const getPublicProjectStatusLabel = (statusValue: string): string => {
+  if (statusValue === 'ACTIVE') {
+    return 'Đang hoạt động';
+  }
+
+  if (statusValue === 'PENDING_APPROVAL') {
+    return 'Chờ duyệt';
+  }
+
+  return statusValue;
+};
+
+/** Hàm kiểm tra CID IPFS cơ bản. Mục đích: chỉ cho phép render link với CID hợp lệ để tránh URL rác. */
+const isValidIpfsCid = (cidValue: string): boolean => {
+  const normalizedCidValue = cidValue.trim();
+  const cidVersionZeroRegex = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
+  const cidVersionOneRegex = /^b[a-z2-7]{20,}$/;
+  return cidVersionZeroRegex.test(normalizedCidValue) || cidVersionOneRegex.test(normalizedCidValue);
+};
+
+/** Hàm tạo URL gateway IPFS an toàn. Mục đích: chỉ trả link khi CID hợp lệ, ngược lại trả chuỗi rỗng. */
+const buildIpfsGatewayUrl = (cidValue: string): string => {
+  if (!isValidIpfsCid(cidValue)) {
+    return '';
+  }
+
+  return `https://gateway.pinata.cloud/ipfs/${cidValue}`;
+};
+
+
+/** Hàm lấy icon và nền card theo vị trí. Mục đích: giữ giao diện đồng nhất khi dữ liệu dự án đến từ API thật. */
+const getProjectVisualByIndex = (indexNumber: number): { icon: string; background: string } => {
+  const normalizedIndexNumber = Math.abs(indexNumber);
+  const icon = projectCardIconList[normalizedIndexNumber % projectCardIconList.length] || '📌';
+  const background =
+    projectCardBackgroundList[normalizedIndexNumber % projectCardBackgroundList.length] ||
+    'linear-gradient(135deg,#E5E7EB,#D1D5DB)';
+
+  return { icon, background };
+};
+
 /**
  * Hàm tính toán đường biểu đồ để vẽ SVG.
  * Mục đích: đồng bộ đường line và vùng fill giống file mẫu.
@@ -275,6 +296,14 @@ export default function HomePage() {
     stats: false,
     ranking: false
   });
+  const [supportProjectList, setSupportProjectList] = useState<HomeSupportProject[]>([]);
+  const [isSupportProjectsLoading, setIsSupportProjectsLoading] = useState(true);
+  const [supportProjectsErrorMessage, setSupportProjectsErrorMessage] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
+  const [isProjectDetailModalVisible, setIsProjectDetailModalVisible] = useState(false);
+  const [isProjectDetailLoading, setIsProjectDetailLoading] = useState(false);
+  const [projectDetailErrorMessage, setProjectDetailErrorMessage] = useState('');
+  const [selectedProjectDetail, setSelectedProjectDetail] = useState<HomeSupportProjectDetail | null>(null);
   const [statValues, setStatValues] = useState(() => stats.map(() => 0));
   const [transactions, setTransactions] = useState<TransactionItem[]>(initialTransactions);
   const [authenticatedUserName, setAuthenticatedUserName] = useState('');
@@ -282,6 +311,7 @@ export default function HomePage() {
   const userMenuContainerRef = useRef<HTMLDivElement | null>(null);
   const userMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const logoutMenuItemRef = useRef<HTMLButtonElement | null>(null);
+  const projectDetailCacheRef = useRef<Map<string, HomeSupportProjectDetail | null>>(new Map());
   const userMenuId = 'headerUserMenu';
   const { linePath, areaPath, points } = useChartPath();
 
@@ -402,6 +432,35 @@ export default function HomePage() {
    * Hàm bật/tắt menu người dùng trên header.
    * Mục đích: hiển thị menu dropdown chứa hành động đăng xuất.
    */
+
+  useEffect(() => {
+    /** Hàm lấy danh sách dự án cần hỗ trợ từ backend. Mục đích: hiển thị dữ liệu thật tại section dự án của trang Home. */
+    const fetchSupportProjectList = async () => {
+      setIsSupportProjectsLoading(true);
+      setSupportProjectsErrorMessage('');
+
+      try {
+        const supportProjectsResponse = await fetchApi<HomeSupportProject[]>(buildApiUrl('/projects/public-support?limit=6'), {
+          method: 'GET',
+          cache: 'no-store'
+        });
+
+        setSupportProjectList(supportProjectsResponse.data);
+      } catch (error) {
+        const fallbackErrorMessage = 'Không thể tải danh sách dự án cần hỗ trợ. Vui lòng thử lại sau.';
+        const normalizedErrorMessage = error instanceof Error ? error.message : fallbackErrorMessage;
+
+        // Ghi chú logic phức tạp: log chi tiết lỗi để hỗ trợ debug production nhưng vẫn hiển thị thông điệp thân thiện cho người dùng.
+        console.error('Fetch support projects failed.', error);
+        setSupportProjectsErrorMessage(normalizedErrorMessage || fallbackErrorMessage);
+        setSupportProjectList([]);
+      } finally {
+        setIsSupportProjectsLoading(false);
+      }
+    };
+
+    fetchSupportProjectList();
+  }, []);
   const handleToggleUserMenu = () => {
     setIsUserMenuVisible(currentState => !currentState);
   };
@@ -427,6 +486,56 @@ export default function HomePage() {
     clearAuthSession();
     setAuthenticatedUserName('');
     setIsUserMenuVisible(false);
+  };
+
+  /** Hàm đóng modal chi tiết dự án. Mục đích: reset trạng thái mở modal theo mọi cách đóng (nút, overlay, Escape). */
+  const closeProjectDetailModal = () => {
+    setIsProjectDetailModalVisible(false);
+    setIsProjectDetailLoading(false);
+    setProjectDetailErrorMessage('');
+    setSelectedProjectId('');
+  };
+
+  /** Hàm mở modal và lấy chi tiết dự án. Mục đích: chỉ gọi API khi người dùng bấm nút “Chi tiết”. */
+  const handleOpenProjectDetailModal = async (projectId: string) => {
+    const normalizedProjectId = projectId.trim();
+    if (!normalizedProjectId) {
+      return;
+    }
+
+    setSelectedProjectId(normalizedProjectId);
+    setIsProjectDetailModalVisible(true);
+    setIsProjectDetailLoading(true);
+    setProjectDetailErrorMessage('');
+    setSelectedProjectDetail(null);
+
+    if (projectDetailCacheRef.current.has(normalizedProjectId)) {
+      const cachedProjectDetail = projectDetailCacheRef.current.get(normalizedProjectId) || null;
+      setSelectedProjectDetail(cachedProjectDetail);
+      setIsProjectDetailLoading(false);
+      return;
+    }
+
+    try {
+      const projectDetailResponse = await fetchApi<HomeSupportProjectDetail | null>(
+        buildApiUrl(`/projects/public-support/${normalizedProjectId}`),
+        {
+          method: 'GET',
+          cache: 'no-store'
+        }
+      );
+
+      projectDetailCacheRef.current.set(normalizedProjectId, projectDetailResponse.data);
+      setSelectedProjectDetail(projectDetailResponse.data);
+    } catch (error) {
+      const fallbackErrorMessage = 'Không thể tải chi tiết dự án. Vui lòng thử lại sau.';
+      const normalizedErrorMessage = error instanceof Error ? error.message : fallbackErrorMessage;
+      console.error('Fetch support project detail failed.', error);
+      setProjectDetailErrorMessage(normalizedErrorMessage || fallbackErrorMessage);
+      setSelectedProjectDetail(null);
+    } finally {
+      setIsProjectDetailLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -473,6 +582,22 @@ export default function HomePage() {
       logoutMenuItemRef.current?.focus();
     }
   }, [isUserMenuVisible]);
+
+  useEffect(() => {
+    /** Hàm xử lý phím Escape cho modal chi tiết. Mục đích: đóng modal nhanh bằng bàn phím theo UX chuẩn. */
+    const handleEscapeForProjectDetailModal = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !isProjectDetailModalVisible) {
+        return;
+      }
+
+      closeProjectDetailModal();
+    };
+
+    window.addEventListener('keydown', handleEscapeForProjectDetailModal);
+    return () => {
+      window.removeEventListener('keydown', handleEscapeForProjectDetailModal);
+    };
+  }, [isProjectDetailModalVisible]);
 
   return (
     <main className="home-root">
@@ -718,50 +843,77 @@ export default function HomePage() {
           </div>
         </div>
         <div className="projects-grid">
-          {projects.map(project => (
-            <div
-              className={`pcard ${visibleCards.projects ? 'visible' : ''}`}
-              key={project.id}
-              style={{ transitionDelay: `${project.delay ?? 0}s` }}
-              data-observe
-              data-group="projects"
-            >
-              <div className="pcard-img">
-                <div className="pcard-img-bg" style={{ background: project.background }}>
-                  {project.icon}
-                </div>
-                <div className="pcard-status status-active">{project.status}</div>
-                <div className="qf-badge">{project.qfScore}</div>
-              </div>
+          {isSupportProjectsLoading && (
+            <div className="pcard visible" data-observe data-group="projects">
               <div className="pcard-body">
-                <div className="pcard-org">{project.organization}</div>
-                <div className="pcard-title">{project.title}</div>
-                <div className="pcard-desc">{project.description}</div>
-                <div className="progress-wrap">
-                  <div className="progress-label">
-                    <span className="progress-value">{project.raisedLabel}</span>
-                    <span>{`/ ${project.goalLabel}`}</span>
-                  </div>
-                  <div className="progress-bar">
-                    <div className="progress-fill" style={{ width: `${project.progress}%` }} />
-                  </div>
-                </div>
-                <div className="pcard-meta">
-                  <span>{project.donors}</span>
-                  <span>{project.daysLeft}</span>
-                  <span>{project.transactions}</span>
-                </div>
-                <div className="pcard-actions">
-                  <button className="btn-donate" type="button">
-                    💛 Quyên góp ngay
-                  </button>
-                  <button className="btn-detail" type="button">
-                    Chi tiết
-                  </button>
-                </div>
+                <div className="pcard-title">Đang tải dữ liệu dự án...</div>
+                <div className="pcard-desc">Hệ thống đang lấy dữ liệu thật từ server.</div>
               </div>
             </div>
-          ))}
+          )}
+
+          {!isSupportProjectsLoading && supportProjectsErrorMessage && (
+            <div className="pcard visible" data-observe data-group="projects">
+              <div className="pcard-body">
+                <div className="pcard-title">Không thể tải danh sách dự án</div>
+                <div className="pcard-desc">{supportProjectsErrorMessage}</div>
+              </div>
+            </div>
+          )}
+
+          {!isSupportProjectsLoading && !supportProjectsErrorMessage && supportProjectList.length === 0 && (
+            <div className="pcard visible" data-observe data-group="projects">
+              <div className="pcard-body">
+                <div className="pcard-title">Chưa có dự án cần hỗ trợ</div>
+                <div className="pcard-desc">Hiện tại chưa có dự án đang hoạt động để hiển thị.</div>
+              </div>
+            </div>
+          )}
+
+          {!isSupportProjectsLoading &&
+            !supportProjectsErrorMessage &&
+            supportProjectList.map((project, projectIndex) => {
+              const projectVisual = getProjectVisualByIndex(projectIndex);
+              return (
+                <div
+                  className="pcard visible"
+                  key={project.projectId}
+                  style={{ transitionDelay: `${projectIndex * 0.1}s` }}
+                  data-observe
+                  data-group="projects"
+                >
+                  <div className="pcard-img">
+                    <div className="pcard-img-bg" style={{ background: projectVisual.background }}>
+                      {projectVisual.icon}
+                    </div>
+                    <div className="pcard-status status-active">● {getPublicProjectStatusLabel(project.status)}</div>
+                  </div>
+                  <div className="pcard-body">
+                    <div className="pcard-org">✅ Dự án đã xác minh</div>
+                    <div className="pcard-title">{project.name}</div>
+                    <div className="pcard-desc">{project.description}</div>
+                    <div className="progress-wrap">
+                      <div className="progress-label">
+                        <span className="progress-value">Mục tiêu {formatCurrencyVnd(project.goalAmount)}₫</span>
+                        <span>Cập nhật {formatUpdatedTime(project.updatedAt)}</span>
+                      </div>
+                    </div>
+                    <div className="pcard-meta">
+                      <span>Trạng thái: {getPublicProjectStatusLabel(project.status)}</span>
+                      <span>Cập nhật: {formatUpdatedTime(project.updatedAt)}</span>
+                    </div>
+                    <div className="pcard-actions">
+                      <button className="btn-donate" type="button">
+                        💛 Quyên góp ngay
+                      </button>
+                      <button className="btn-detail" type="button" onClick={() => void handleOpenProjectDetailModal(project.projectId)}>
+                        Chi tiết
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
         </div>
         <div className="projects-footer">
           <a href="#" className="btn-ghost btn-ghost-large">
@@ -769,6 +921,146 @@ export default function HomePage() {
           </a>
         </div>
       </section>
+
+      {isProjectDetailModalVisible && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 p-3 backdrop-blur-[2px] md:p-5"
+          role="presentation"
+          onClick={closeProjectDetailModal}
+        >
+          <div
+            className="flex max-h-[calc(100vh-1.5rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[#d1e7e2] bg-white shadow-[0_28px_70px_rgba(14,124,107,0.2)] md:max-h-[calc(100vh-2.5rem)]"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-detail-modal-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between border-b border-[#e6f3f0] px-4 py-3 md:px-5 md:py-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-[#0e7c6b]">Thông tin công khai</p>
+                <h3 id="project-detail-modal-title" className="mt-1 text-lg font-bold text-[#0d1117] md:text-xl">
+                  Chi tiết dự án
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#d7ebe7] text-base font-semibold text-[#0e7c6b] transition hover:bg-[#f1faf8]"
+                onClick={closeProjectDetailModal}
+                aria-label="Đóng hộp thoại chi tiết dự án"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 md:px-5 md:py-4">
+              {isProjectDetailLoading && (
+                <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-5 text-center" aria-live="polite">
+                  <div className="project-detail-modal-spinner mx-auto" aria-hidden="true" />
+                  <p className="mt-3 text-sm font-medium text-[#4b5563]">Đang tải chi tiết dự án...</p>
+                </div>
+              )}
+
+              {!isProjectDetailLoading && projectDetailErrorMessage && (
+                <div className="rounded-xl border border-[#fecaca] bg-[#fff1f2] p-4" role="alert">
+                  <p className="text-sm font-medium text-[#b91c1c]">{projectDetailErrorMessage}</p>
+                </div>
+              )}
+
+              {!isProjectDetailLoading && !projectDetailErrorMessage && !selectedProjectDetail && (
+                <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-4">
+                  <p className="text-sm text-[#4b5563]">Không tìm thấy dữ liệu chi tiết cho dự án {selectedProjectId}.</p>
+                </div>
+              )}
+
+              {!isProjectDetailLoading && !projectDetailErrorMessage && selectedProjectDetail && (
+                <div className="grid gap-3 lg:grid-cols-[1.5fr_1fr] lg:gap-4">
+                  <section className="rounded-xl border border-[#e3efec] bg-[#fbfefd] p-3 md:p-4">
+                    <h4 className="mb-3 text-sm font-semibold text-[#0e7c6b]">Thông tin chính</h4>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="rounded-lg bg-white p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Tên dự án</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">{selectedProjectDetail.name}</p>
+                      </div>
+                      <div className="rounded-lg bg-white p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Trạng thái</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">{getPublicProjectStatusLabel(selectedProjectDetail.status)}</p>
+                      </div>
+                      <div className="rounded-lg bg-white p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Mục tiêu</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">{formatCurrencyVnd(selectedProjectDetail.goalAmount)}₫</p>
+                      </div>
+                      <div className="rounded-lg bg-white p-2.5">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Cập nhật</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">{formatUpdatedTime(selectedProjectDetail.updatedAt)}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-3">
+                      <h5 className="text-sm font-semibold text-[#0e7c6b]">Mô tả dự án</h5>
+                      <p className="mt-1.5 text-sm leading-5 text-[#374151] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5] overflow-hidden">
+                        {selectedProjectDetail.description}
+                      </p>
+                    </div>
+                  </section>
+
+                  <section className="rounded-xl border border-[#e3efec] bg-[#fbfefd] p-3 md:p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="text-sm font-semibold text-[#0e7c6b]">Bằng chứng IPFS</h4>
+                      <span className="rounded-full bg-[#e6f7f4] px-2 py-0.5 text-xs font-semibold text-[#0e7c6b]">
+                        {selectedProjectDetail.evidenceCids.length}
+                      </span>
+                    </div>
+                    {selectedProjectDetail.evidenceCids.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-[#d1d5db] bg-white p-3 text-sm text-[#6b7280]">Chưa có bằng chứng IPFS.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {selectedProjectDetail.evidenceCids.slice(0, 4).map(evidenceCid => {
+                          const ipfsGatewayUrl = buildIpfsGatewayUrl(evidenceCid);
+
+                          // Ghi chú logic phức tạp: chỉ render link khi CID hợp lệ, CID không hợp lệ sẽ hiển thị dạng cảnh báo để không phá layout.
+                          if (!ipfsGatewayUrl) {
+                            return (
+                              <li key={`invalid-${evidenceCid}`} className="rounded-lg border border-[#fecaca] bg-[#fff1f2] p-2.5 text-xs text-[#b91c1c]">
+                                CID không hợp lệ: {evidenceCid}
+                              </li>
+                            );
+                          }
+
+                          return (
+                            <li key={evidenceCid} className="rounded-lg border border-[#dbe4f0] bg-white p-2.5">
+                              <a
+                                href={ipfsGatewayUrl}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="block truncate text-xs font-medium text-[#1d4ed8] hover:underline"
+                              >
+                                {evidenceCid}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    {selectedProjectDetail.evidenceCids.length > 4 && (
+                      <p className="mt-2 text-xs text-[#6b7280]">+{selectedProjectDetail.evidenceCids.length - 4} CID khác.</p>
+                    )}
+                  </section>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-[#e6f3f0] px-4 py-3 md:px-5 md:py-3.5">
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 text-sm font-semibold text-white transition hover:bg-[#0b6759]"
+                onClick={closeProjectDetailModal}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       <section className="transparency" id="transparency">
         <div className="trans-header">

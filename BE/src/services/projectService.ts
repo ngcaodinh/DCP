@@ -11,9 +11,12 @@ import {
   findProjectByOrganizationAndName,
   findProjectsByOrganizationIdFromRepository,
   findProjectsByStatusFromRepository,
+  findPublicSupportProjectDetailFromRepository,
+  findPublicSupportProjectsFromRepository,
   updateProject
 } from '../repositories/projectRepository';
 import { ApplicationError } from '../utils/applicationError';
+import { createInMemoryCache } from '../utils/inMemoryCache';
 
 export type CreateProjectPayload = {
   name: string;
@@ -63,6 +66,26 @@ export type CreateProjectEligibilityResult = {
   blockReason: string | null;
 };
 
+export type PublicSupportProjectResult = {
+  projectId: string;
+  name: string;
+  description: string;
+  goalAmount: number;
+  status: ProjectStatus;
+  updatedAt: Date;
+  createdAt: Date;
+};
+
+export type PublicSupportProjectDetailResult = {
+  projectId: string;
+  name: string;
+  description: string;
+  goalAmount: number;
+  status: ProjectStatus;
+  updatedAt: Date;
+  evidenceCids: string[];
+};
+
 const logger = getLogger();
 const pinataPinFileEndpoint = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
 const pinataUnpinFileEndpoint = 'https://api.pinata.cloud/pinning/unpin';
@@ -76,6 +99,25 @@ const projectEvidenceAllowedMimeTypeSet = new Set([
   'image/jpeg',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 ]);
+
+const publicSupportProjectsCache = createInMemoryCache<PublicSupportProjectResult[]>();
+
+/** Hàm lấy TTL cache cho public-support. Mục đích: đọc env và đảm bảo TTL luôn trong khoảng 30-60 giây. */
+function getPublicSupportCacheTimeToLiveSeconds(): number {
+  const defaultTimeToLiveSeconds = 45;
+  const configuredTimeToLive = Number(process.env.PUBLIC_SUPPORT_CACHE_TTL_SECONDS || defaultTimeToLiveSeconds);
+
+  if (!Number.isFinite(configuredTimeToLive)) {
+    return defaultTimeToLiveSeconds;
+  }
+
+  return Math.max(30, Math.min(60, Math.floor(configuredTimeToLive)));
+}
+
+/** Hàm tạo cache key cho danh sách public-support. Mục đích: tránh trả sai dữ liệu khi query param khác nhau. */
+function createPublicSupportCacheKey(limitCount: number): string {
+  return `public-support:limit=${limitCount}`;
+}
 
 /** Hàm làm sạch chuỗi đầu vào. Mục đích: giảm rủi ro chèn script vào dữ liệu text. */
 function sanitizeTextInput(inputText: string): string {
@@ -385,6 +427,68 @@ export async function getProjectsForOrganization(organizationUserId: string): Pr
   const organizationUser = await ensureOrganizationUser(organizationUserId);
   const projectRecords = await findProjectsByOrganizationIdFromRepository(organizationUser.id);
   return projectRecords.map(mapProjectRecordToResult);
+}
+
+/** Hàm lấy danh sách dự án active public cho trang chủ. Mục đích: cung cấp dữ liệu thật từ MongoDB cho section “Dự án đang cần hỗ trợ”. */
+export async function getPublicSupportProjects(limitCount = 6): Promise<PublicSupportProjectResult[]> {
+  const sanitizedLimitCount = Number.isFinite(limitCount) ? Math.max(1, Math.min(12, Math.floor(limitCount))) : 6;
+  const cacheKey = createPublicSupportCacheKey(sanitizedLimitCount);
+
+  try {
+    const cachedProjects = publicSupportProjectsCache.get(cacheKey);
+    if (cachedProjects) {
+      logger.info('public-support cache_hit', { cacheKey });
+      return cachedProjects;
+    }
+
+    logger.info('public-support cache_miss', { cacheKey });
+  } catch (error) {
+    // Ghi chú logic phức tạp: cache lỗi không được làm endpoint fail, nên chỉ log cảnh báo và đi tiếp DB path.
+    logger.warn('public-support cache_get_error', { cacheKey, errorMessage: (error as Error).message });
+  }
+
+  const projectRecords = await findPublicSupportProjectsFromRepository(sanitizedLimitCount);
+  const mappedProjects = projectRecords.map(projectRecord => ({
+    projectId: projectRecord.projectId,
+    name: projectRecord.name,
+    description: projectRecord.description,
+    goalAmount: projectRecord.goalAmount,
+    status: projectRecord.status,
+    updatedAt: projectRecord.updatedAt,
+    createdAt: projectRecord.createdAt
+  }));
+
+  try {
+    publicSupportProjectsCache.set(cacheKey, mappedProjects, getPublicSupportCacheTimeToLiveSeconds());
+    logger.info('public-support cache_set', { cacheKey });
+  } catch (error) {
+    logger.warn('public-support cache_set_error', { cacheKey, errorMessage: (error as Error).message });
+  }
+
+  return mappedProjects;
+}
+
+/** Hàm lấy chi tiết dự án public theo projectId. Mục đích: trả dữ liệu cho modal “Chi tiết” ở trang chủ. */
+export async function getPublicSupportProjectDetail(projectId: string): Promise<PublicSupportProjectDetailResult | null> {
+  const sanitizedProjectId = sanitizeTextInput(projectId);
+  if (!sanitizedProjectId) {
+    throw new ApplicationError('ProjectId không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
+
+  const projectRecord = await findPublicSupportProjectDetailFromRepository(sanitizedProjectId);
+  if (!projectRecord) {
+    return null;
+  }
+
+  return {
+    projectId: projectRecord.projectId,
+    name: projectRecord.name,
+    description: projectRecord.description,
+    goalAmount: projectRecord.goalAmount,
+    status: projectRecord.status,
+    updatedAt: projectRecord.updatedAt,
+    evidenceCids: projectRecord.evidenceCids
+  };
 }
 
 /** Hàm lấy danh sách dự án chờ duyệt cho reviewer. Mục đích: cung cấp dữ liệu thật cho màn hình “Duyệt dự án mới”. */

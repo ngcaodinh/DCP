@@ -6,6 +6,8 @@ import {
   getCreateProjectEligibilityForOrganization,
   getPendingApprovalProjectsForReviewer,
   getProjectsForOrganization,
+  getPublicSupportProjectDetail,
+  getPublicSupportProjects,
   reviewProjectByReviewer,
   submitProjectForApproval,
   updateProjectForOrganization,
@@ -73,6 +75,38 @@ export async function handleGetCreateProjectEligibility(request: AuthenticatedRe
   } catch (error) {
     logger.error('Lấy trạng thái điều kiện tạo dự án thất bại.', { errorMessage: (error as Error).message });
     sendErrorFromUnknown(response, error, 'Không thể kiểm tra điều kiện tạo dự án.');
+  }
+}
+
+/** Hàm xử lý request lấy danh sách dự án public cần hỗ trợ. Mục đích: trả dữ liệu thật cho trang Home mà không cần đăng nhập. */
+export async function handleGetPublicSupportProjects(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const parsedLimitCount = Number(request.query.limit);
+
+  try {
+    const publicProjects = await getPublicSupportProjects(parsedLimitCount);
+    sendSuccessResponse(response, 200, 'Lấy danh sách dự án cần hỗ trợ thành công.', publicProjects);
+  } catch (error) {
+    logger.error('Lấy danh sách dự án cần hỗ trợ thất bại.', { errorMessage: (error as Error).message });
+    sendErrorFromUnknown(response, error, 'Không thể lấy danh sách dự án cần hỗ trợ.');
+  }
+}
+
+/** Hàm xử lý request lấy chi tiết dự án public theo projectId. Mục đích: trả dữ liệu thật cho modal chi tiết ở Home. */
+export async function handleGetPublicSupportProjectDetail(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const { projectId } = request.params;
+
+  try {
+    const projectDetail = await getPublicSupportProjectDetail(projectId);
+
+    if (!projectDetail) {
+      sendSuccessResponse(response, 200, 'Không tìm thấy chi tiết dự án cần hỗ trợ.', null);
+      return;
+    }
+
+    sendSuccessResponse(response, 200, 'Lấy chi tiết dự án cần hỗ trợ thành công.', projectDetail);
+  } catch (error) {
+    logger.error('Lấy chi tiết dự án cần hỗ trợ thất bại.', { errorMessage: (error as Error).message });
+    sendErrorFromUnknown(response, error, 'Không thể lấy chi tiết dự án cần hỗ trợ.');
   }
 }
 

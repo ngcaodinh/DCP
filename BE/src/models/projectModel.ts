@@ -71,6 +71,29 @@ export async function findProjectsByStatus(status: ProjectStatus): Promise<Proje
   return ProjectMongoModel.find({ status }).sort({ submittedAt: -1, createdAt: -1 }).lean<ProjectRecord[]>().exec();
 }
 
+/** Hàm lấy danh sách dự án active công khai. Mục đích: trả dữ liệu thật cho section “Dự án đang cần hỗ trợ” tại trang chủ. */
+export async function findPublicSupportProjects(limitCount: number): Promise<ProjectRecord[]> {
+  return ProjectMongoModel.find({
+    status: 'ACTIVE',
+    deadline: { $gte: new Date() }
+  })
+    .sort({ updatedAt: -1 })
+    .limit(limitCount)
+    .lean<ProjectRecord[]>()
+    .exec();
+}
+
+/** Hàm lấy chi tiết dự án active công khai theo projectId. Mục đích: phục vụ modal chi tiết ở trang chủ. */
+export async function findPublicSupportProjectByProjectId(projectId: string): Promise<ProjectRecord | null> {
+  return ProjectMongoModel.findOne({
+    projectId,
+    status: 'ACTIVE',
+    deadline: { $gte: new Date() }
+  })
+    .lean<ProjectRecord>()
+    .exec();
+}
+
 /** Hàm cập nhật dự án theo projectId. Mục đích: cập nhật trạng thái vòng đời và metadata review. */
 export async function updateProjectByProjectId(
   projectId: string,

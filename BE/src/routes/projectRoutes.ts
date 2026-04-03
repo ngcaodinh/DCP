@@ -4,6 +4,8 @@ import {
   handleGetCreateProjectEligibility,
   handleGetOrganizationProjects,
   handleGetPendingApprovalProjects,
+  handleGetPublicSupportProjectDetail,
+  handleGetPublicSupportProjects,
   handleReviewProject,
   handleSubmitProject,
   handleUpdateProject,
@@ -28,6 +30,9 @@ export function createProjectRoutes(): Router {
   const organizationAuthorizationMiddleware = createRoleAuthorizationMiddleware(['organizations']);
   const reviewerAuthorizationMiddleware = createRoleAuthorizationMiddleware(['admin', 'regulatory']);
 
+
+  router.get('/public-support/:projectId', attachRequestMetadata(), getProjectsRateLimit, handleGetPublicSupportProjectDetail);
+  router.get('/public-support', attachRequestMetadata(), getProjectsRateLimit, handleGetPublicSupportProjects);
   router.get(
     '/',
     attachRequestMetadata(),
