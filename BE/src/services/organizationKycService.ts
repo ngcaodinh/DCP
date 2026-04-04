@@ -196,6 +196,7 @@ export async function submitOrganizationKyc(
       reviewedBy: null,
       reviewedAt: null,
       rejectionReason: null,
+      beneficiaryBankAccount: null,
       files: uploadedFiles
     });
 
@@ -224,6 +225,7 @@ export async function submitOrganizationKyc(
       reviewedBy: null,
       reviewedAt: null,
       rejectionReason: error instanceof Error ? error.message : 'Lỗi lưu metadata sau khi upload Pinata.',
+      beneficiaryBankAccount: null,
       files: uploadedFiles
     });
 

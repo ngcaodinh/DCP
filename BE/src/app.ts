@@ -5,6 +5,7 @@ import { createAuthRoutes } from './routes/authRoutes';
 import { createHealthRoutes } from './routes/healthRoutes';
 import { createDepositRoutes } from './routes/depositRoutes';
 import { createProjectRoutes } from './routes/projectRoutes';
+import { createDonationRoutes } from './routes/donationRoutes';
 
 const application = express();
 
@@ -38,6 +39,7 @@ function registerRoutes(): void {
   application.use('/health', createHealthRoutes());
   application.use('/api/deposit', createDepositRoutes());
   application.use('/projects', createProjectRoutes());
+  application.use('/donations', createDonationRoutes());
 }
 
 configureMiddlewares();

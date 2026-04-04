@@ -345,7 +345,7 @@ async function ensureOrganizationHasApprovedBeneficiaryBankAccount(organizationI
     throw new ApplicationError(
       'Bạn cần liên kết và được duyệt tài khoản ngân hàng thụ hưởng trước khi tạo dự án. Vui lòng vào Cài đặt để thiết lập ngân hàng.',
       403,
-      'BENEFICIARY_BANK_ACCOUNT_NOT_APPROVED'
+      'FORBIDDEN'
     );
   }
 }
@@ -437,14 +437,14 @@ export async function getPublicSupportProjects(limitCount = 6): Promise<PublicSu
   try {
     const cachedProjects = publicSupportProjectsCache.get(cacheKey);
     if (cachedProjects) {
-      logger.info('public-support cache_hit', { cacheKey });
+      logger.info(`public-support cache_hit: ${cacheKey}`);
       return cachedProjects;
     }
 
-    logger.info('public-support cache_miss', { cacheKey });
+    logger.info(`public-support cache_miss: ${cacheKey}`);
   } catch (error) {
     // Ghi chú logic phức tạp: cache lỗi không được làm endpoint fail, nên chỉ log cảnh báo và đi tiếp DB path.
-    logger.warn('public-support cache_get_error', { cacheKey, errorMessage: (error as Error).message });
+    logger.warn(`public-support cache_get_error: ${cacheKey}`, { errorMessage: (error as Error).message });
   }
 
   const projectRecords = await findPublicSupportProjectsFromRepository(sanitizedLimitCount);
@@ -460,9 +460,9 @@ export async function getPublicSupportProjects(limitCount = 6): Promise<PublicSu
 
   try {
     publicSupportProjectsCache.set(cacheKey, mappedProjects, getPublicSupportCacheTimeToLiveSeconds());
-    logger.info('public-support cache_set', { cacheKey });
+    logger.info(`public-support cache_set: ${cacheKey}`);
   } catch (error) {
-    logger.warn('public-support cache_set_error', { cacheKey, errorMessage: (error as Error).message });
+    logger.warn(`public-support cache_set_error: ${cacheKey}`, { errorMessage: (error as Error).message });
   }
 
   return mappedProjects;

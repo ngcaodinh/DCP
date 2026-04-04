@@ -912,10 +912,16 @@ function BankAccountApprovalPanel() {
       const normalizedBankAccountApprovalList = Array.isArray(responseData?.submissions)
         ? (responseData.submissions as unknown[])
           .filter((submissionItem): submissionItem is Record<string, unknown> => {
-            return Boolean(submissionItem && typeof submissionItem === 'object' && submissionItem.beneficiaryBankAccount);
+            if (!submissionItem || typeof submissionItem !== 'object') {
+              return false;
+            }
+
+            // Ghi chú logic phức tạp: cần kiểm tra key tồn tại bằng toán tử in trước khi truy cập để tránh lỗi type ở chế độ strict.
+            return 'beneficiaryBankAccount' in submissionItem;
           })
           .map((submissionItem) => {
-            const bankAccount = submissionItem.beneficiaryBankAccount as Record<string, unknown>;
+            const rawBankAccount = submissionItem.beneficiaryBankAccount;
+            const bankAccount = rawBankAccount && typeof rawBankAccount === 'object' ? (rawBankAccount as Record<string, unknown>) : {};
             return {
               submissionId: typeof submissionItem.submissionId === 'string' ? submissionItem.submissionId : '',
               organizationId: typeof submissionItem.organizationId === 'string' ? submissionItem.organizationId : '',
