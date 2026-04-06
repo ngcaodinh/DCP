@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import { ethers } from 'ethers';
 import { getLogger } from '../config/logger';
 import { findUserById } from '../models/authModel';
 import { findSubmissionsByOrganizationId } from '../models/organizationKycModel';
@@ -101,6 +101,15 @@ const projectEvidenceAllowedMimeTypeSet = new Set([
 ]);
 
 const publicSupportProjectsCache = createInMemoryCache<PublicSupportProjectResult[]>();
+const donationRankingContractAbi = [
+  'function createProject(uint256 projectId) external',
+  'function setProjectStatus(uint256 projectId, uint8 newStatus) external',
+  'function getProjectSnapshot(uint256 projectId) external view returns (bool exists, uint8 projectStatus, uint256 totalDonationAmount, uint256 donorCount, uint256 donationTransactionCount)',
+  'function hasRole(bytes32 role, address account) external view returns (bool)',
+  'function projectManagerRole() external view returns (bytes32)',
+  'function grantProjectManagerRole(address account) external',
+  'error ProjectNotFound()'
+];
 
 /** Hàm lấy TTL cache cho public-support. Mục đích: đọc env và đảm bảo TTL luôn trong khoảng 30-60 giây. */
 function getPublicSupportCacheTimeToLiveSeconds(): number {
@@ -151,6 +160,130 @@ function getPinataJsonWebToken(): string {
   }
 
   return pinataJsonWebToken;
+}
+
+/** Hàm lấy contract và signer để đồng bộ project lên blockchain. Mục đích: tái sử dụng cấu hình RPC/PK/contract cho các thao tác create và đổi trạng thái dự án on-chain. */
+function getDonationRankingContractForProjectSync() {
+  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
+  const donationRankingContractAddress = process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() || process.env.DONATION_RANKING_ADDRESS?.trim() || '';
+  const projectManagerPrivateKey = process.env.PROJECT_MANAGER_PRIVATE_KEY?.trim() || process.env.DONATION_RELAYER_PRIVATE_KEY?.trim() || '';
+  const adminPrivateKey = process.env.DONATION_ADMIN_PRIVATE_KEY?.trim() || process.env.DEPLOYER_PRIVATE_KEY?.trim() || '';
+  const expectedChainId = Number(process.env.BLOCKCHAIN_CHAIN_ID || 0);
+
+  if (!blockchainRpcUrl || !donationRankingContractAddress || !projectManagerPrivateKey) {
+    throw new ApplicationError(
+      'Thiếu cấu hình đồng bộ project on-chain. Cần BLOCKCHAIN_RPC_URL, DONATION_RANKING_CONTRACT_ADDRESS (hoặc DONATION_RANKING_ADDRESS), PROJECT_MANAGER_PRIVATE_KEY (hoặc DONATION_RELAYER_PRIVATE_KEY).',
+      500,
+      'INTERNAL_ERROR'
+    );
+  }
+
+  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const walletSigner = new ethers.Wallet(projectManagerPrivateKey, provider);
+  const donationRankingContract = new ethers.Contract(donationRankingContractAddress, donationRankingContractAbi, walletSigner);
+
+  const adminSigner = adminPrivateKey ? new ethers.Wallet(adminPrivateKey, provider) : null;
+  const donationRankingAdminContract = adminSigner
+    ? new ethers.Contract(donationRankingContractAddress, donationRankingContractAbi, adminSigner)
+    : null;
+
+  return {
+    provider,
+    walletSigner,
+    donationRankingContract,
+    donationRankingAdminContract,
+    donationRankingContractAddress,
+    expectedChainId
+  };
+}
+
+/** Hàm kiểm tra và tự cấp quyền project manager cho signer vận hành. Mục đích: đảm bảo mỗi lần tạo project đều tự phục hồi quyền nếu relayer bị thiếu role. */
+async function ensureProjectManagerRolePermission(
+  donationRankingContract: ethers.Contract,
+  donationRankingAdminContract: ethers.Contract | null,
+  walletAddress: string
+): Promise<void> {
+  const projectManagerRoleHash = await donationRankingContract.projectManagerRole();
+  const hasProjectManagerPermission = await donationRankingContract.hasRole(projectManagerRoleHash, walletAddress);
+  if (hasProjectManagerPermission) {
+    return;
+  }
+
+  if (!donationRankingAdminContract) {
+    throw new ApplicationError(
+      `Ví vận hành ${walletAddress} chưa có PROJECT_MANAGER_ROLE và thiếu DONATION_ADMIN_PRIVATE_KEY để tự cấp quyền.`,
+      500,
+      'INTERNAL_ERROR'
+    );
+  }
+
+  const grantRoleTransaction = await donationRankingAdminContract.grantProjectManagerRole(walletAddress);
+  await grantRoleTransaction.wait();
+  logger.info(`Auto-granted PROJECT_MANAGER_ROLE for relayer wallet. walletAddress=${walletAddress} txHash=${grantRoleTransaction.hash}`);
+
+  // Ghi chú logic phức tạp: cần verify lại role sau khi grant để tránh trạng thái mined nhưng không cấp quyền thành công.
+  const hasProjectManagerPermissionAfterGrant = await donationRankingContract.hasRole(projectManagerRoleHash, walletAddress);
+  if (!hasProjectManagerPermissionAfterGrant) {
+    throw new ApplicationError(
+      `Tự động cấp PROJECT_MANAGER_ROLE thất bại cho ví vận hành ${walletAddress}.`,
+      500,
+      'INTERNAL_ERROR'
+    );
+  }
+}
+
+/** Hàm đồng bộ tạo project lên blockchain. Mục đích: đảm bảo project tồn tại on-chain ngay khi vừa tạo off-chain để tránh donate bị ProjectNotFound. */
+async function createProjectOnBlockchain(projectId: string): Promise<void> {
+  const normalizedProjectId = projectId.trim();
+  if (!/^[0-9]+$/.test(normalizedProjectId)) {
+    throw new ApplicationError('Mã dự án phải là số để đồng bộ lên blockchain.', 400, 'VALIDATION_ERROR');
+  }
+
+  const { provider, walletSigner, donationRankingContract, donationRankingAdminContract, expectedChainId } = getDonationRankingContractForProjectSync();
+  const network = await provider.getNetwork();
+  if (expectedChainId > 0 && Number(network.chainId) !== expectedChainId) {
+    throw new ApplicationError('Sai network blockchain của dịch vụ đồng bộ dự án.', 400, 'CHAIN_MISMATCH');
+  }
+
+  await ensureProjectManagerRolePermission(donationRankingContract, donationRankingAdminContract, walletSigner.address);
+
+  try {
+    const createProjectTransaction = await donationRankingContract.createProject(BigInt(normalizedProjectId));
+    await createProjectTransaction.wait();
+    logger.info(`Project synced to blockchain successfully. projectId=${normalizedProjectId} txHash=${createProjectTransaction.hash}`);
+  } catch (error) {
+    logger.error(`Create project on blockchain failed. projectId=${normalizedProjectId} errorMessage=${(error as Error)?.message || 'Unknown error'}`);
+    throw new ApplicationError('Không thể đồng bộ dự án lên blockchain. Vui lòng thử lại sau.', 502, 'INTERNAL_ERROR');
+  }
+}
+
+/** Hàm đồng bộ trạng thái project ACTIVE lên blockchain. Mục đích: mở trạng thái nhận donate on-chain ngay khi reviewer approve dự án. */
+async function activateProjectOnBlockchain(projectId: string): Promise<void> {
+  const normalizedProjectId = projectId.trim();
+  if (!/^[0-9]+$/.test(normalizedProjectId)) {
+    throw new ApplicationError('Mã dự án phải là số để cập nhật trạng thái on-chain.', 400, 'VALIDATION_ERROR');
+  }
+
+  const activeProjectStatus = 1;
+  const { provider, walletSigner, donationRankingContract, donationRankingAdminContract, expectedChainId } = getDonationRankingContractForProjectSync();
+  const network = await provider.getNetwork();
+  if (expectedChainId > 0 && Number(network.chainId) !== expectedChainId) {
+    throw new ApplicationError('Sai network blockchain của dịch vụ đồng bộ trạng thái dự án.', 400, 'CHAIN_MISMATCH');
+  }
+
+  await ensureProjectManagerRolePermission(donationRankingContract, donationRankingAdminContract, walletSigner.address);
+
+  try {
+    const updateStatusTransaction = await donationRankingContract.setProjectStatus(BigInt(normalizedProjectId), activeProjectStatus);
+    await updateStatusTransaction.wait();
+    logger.info(`Project status activated on blockchain successfully. projectId=${normalizedProjectId} txHash=${updateStatusTransaction.hash}`);
+  } catch {
+    // Ghi chú logic phức tạp: nếu project chưa được tạo on-chain do dữ liệu legacy, tự động tạo trước rồi mới set ACTIVE để tự phục hồi đồng bộ.
+    await createProjectOnBlockchain(normalizedProjectId);
+    const retryUpdateStatusTransaction = await donationRankingContract.setProjectStatus(BigInt(normalizedProjectId), activeProjectStatus);
+    await retryUpdateStatusTransaction.wait();
+    logger.info(`Project status activated on blockchain after self-healing sync. projectId=${normalizedProjectId} txHash=${retryUpdateStatusTransaction.hash}`);
+  }
 }
 
 /** Hàm validate payload upload file minh chứng. Mục đích: chặn dữ liệu sai chuẩn trước khi upload Pinata. */
@@ -350,6 +483,15 @@ async function ensureOrganizationHasApprovedBeneficiaryBankAccount(organizationI
   }
 }
 
+/** Hàm tạo mã projectId dạng số. Mục đích: đảm bảo tương thích uint256 khi đồng bộ blockchain. */
+function generateNumericProjectId(): string {
+  const createdTimestamp = Date.now();
+  const randomSuffix = Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, '0');
+  return `${createdTimestamp}${randomSuffix}`;
+}
+
 /** Hàm xử lý nghiệp vụ tạo dự án mới. Mục đích: kiểm tra quyền, chặn trùng tên và lưu DRAFT có evidence. */
 export async function createProjectForOrganization(organizationUserId: string, payload: CreateProjectPayload): Promise<CreateProjectResult> {
   validateCreateProjectPayload(payload);
@@ -368,7 +510,7 @@ export async function createProjectForOrganization(organizationUserId: string, p
   const now = new Date();
   const parsedDeadline = new Date(payload.deadline);
   const projectPayload: CreateProjectDataAccessPayload = {
-    projectId: crypto.randomUUID(),
+    projectId: generateNumericProjectId(),
     organizationId: organizationUser.id,
     name: sanitizedName,
     description: sanitizedDescription,
@@ -385,6 +527,7 @@ export async function createProjectForOrganization(organizationUserId: string, p
   };
 
   const createdProject = await createProject(projectPayload);
+  await createProjectOnBlockchain(createdProject.projectId);
   logger.info('Project created successfully.', { correlationId: organizationUser.correlationId });
   return mapProjectRecordToResult(createdProject);
 }
@@ -602,8 +745,9 @@ export async function reviewProjectByReviewer(
   }
 
   const now = new Date();
+  const nextStatus = action === 'APPROVE' ? 'ACTIVE' : 'REJECTED';
   const updatedProject = await updateProject(projectId, {
-    status: action === 'APPROVE' ? 'ACTIVE' : 'REJECTED',
+    status: nextStatus,
     reviewedAt: now,
     reviewedBy: reviewerUser.id,
     rejectionReason: action === 'REJECT' ? sanitizeTextInput(rejectionReason || '') : null,
@@ -612,6 +756,22 @@ export async function reviewProjectByReviewer(
 
   if (!updatedProject) {
     throw new ApplicationError('Không thể cập nhật kết quả review dự án.', 500, 'INTERNAL_ERROR');
+  }
+
+  if (action === 'APPROVE') {
+    try {
+      await activateProjectOnBlockchain(projectId);
+    } catch (error) {
+      // Ghi chú logic phức tạp: rollback trạng thái về PENDING_APPROVAL để tránh lệch dữ liệu khi approve on-chain thất bại.
+      await updateProject(projectId, {
+        status: 'PENDING_APPROVAL',
+        reviewedAt: null,
+        reviewedBy: null,
+        rejectionReason: null,
+        updatedAt: new Date()
+      });
+      throw error;
+    }
   }
 
   return mapProjectRecordToResult(updatedProject);

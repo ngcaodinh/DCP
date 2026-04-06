@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
-import { donateByWallet } from './donations/donationWeb3Client';
+
 
 type HomeSupportProject = {
   projectId: string;
@@ -252,25 +252,32 @@ const isCampaignEligibleForDonation = (campaignItem: HomeDonationCampaignDetail)
   return campaignItem.status === 'ACTIVE' && isCampaignBeforeDeadline(campaignItem.deadline);
 };
 
-/** Hàm map lỗi donation sang thông điệp dễ hiểu. Mục đích: hiển thị lỗi thân thiện trong modal Home. */
+/** Hàm chuẩn hóa projectId cho relay. Mục đích: hỗ trợ cả mã thuần số và mã có chứa số như PRJ-1001. */
+const resolveRelayProjectId = (projectId: string): string => {
+  const normalizedProjectId = projectId.trim();
+  if (/^[0-9]+$/.test(normalizedProjectId)) {
+    return normalizedProjectId;
+  }
+
+  const numericPartMatch = normalizedProjectId.match(/([0-9]+)/);
+  if (numericPartMatch?.[1]) {
+    return numericPartMatch[1];
+  }
+
+  return '';
+};
+
+/** Hàm map lỗi donation sang thông điệp dễ hiểu. Mục đích: phân loại lỗi đúng ngữ cảnh cho luồng relay backend. */
 const mapDonationErrorMessage = (error: unknown): string => {
   const apiError = error as { statusCode?: number; message?: string; errorCode?: string };
-  const fallbackMessage = (error as Error)?.message || '';
-
-  if (apiError?.statusCode === 401) {
-    return 'Bạn chưa đăng nhập. Vui lòng đăng nhập để quyên góp.';
+  if (apiError?.statusCode === 401) return 'Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại để quyên góp.';
+  if (apiError?.errorCode === 'CHAIN_MISMATCH') return 'Hệ thống relay đang ở sai mạng blockchain. Vui lòng thử lại sau.';
+  if (apiError?.errorCode === 'TRANSACTION_TIMEOUT') return 'Giao dịch đang pending quá lâu. Vui lòng đợi thêm hoặc thử lại sau.';
+  if (apiError?.errorCode === 'TRANSACTION_REVERTED') return 'Giao dịch bị từ chối trên blockchain. Vui lòng kiểm tra lại số dư token.';
+  if (apiError?.errorCode === 'VALIDATION_ERROR') {
+    return apiError.message || 'Dữ liệu quyên góp không hợp lệ. Vui lòng kiểm tra lại thông tin.';
   }
-
-  // Ghi chú logic phức tạp: backend có thể trả lỗi mặc định chung, nên ưu tiên đổi sang thông điệp rõ ngữ cảnh cho người dùng.
-  if (
-    apiError?.message === 'Không thể xử lý yêu cầu. Vui lòng thử lại.' ||
-    apiError?.errorCode === 'UNKNOWN_ERROR' ||
-    fallbackMessage === 'Không thể xử lý yêu cầu. Vui lòng thử lại.'
-  ) {
-    return 'Không thể tải dữ liệu quyên góp lúc này. Vui lòng kiểm tra đăng nhập hoặc thử lại sau.';
-  }
-
-  return apiError?.message || fallbackMessage || 'Giao dịch thất bại. Vui lòng thử lại.';
+  return apiError?.message || (error as Error)?.message || 'Không thể gửi giao dịch quyên góp lúc này. Vui lòng thử lại sau.';
 };
 /** Hàm hiển thị nhãn trạng thái dự án thân thiện. Mục đích: chuẩn hóa trạng thái kỹ thuật thành tiếng Việt dễ hiểu. */
 const getPublicProjectStatusLabel = (statusValue: string): string => {
@@ -368,6 +375,8 @@ export default function HomePage() {
   const [donationSuccessMessage, setDonationSuccessMessage] = useState('');
   const [isDonationDataLoading, setIsDonationDataLoading] = useState(false);
   const [isDonationSubmitting, setIsDonationSubmitting] = useState(false);
+  const [isDonationConfirmModalVisible, setIsDonationConfirmModalVisible] = useState(false);
+  const [pendingDonationAmount, setPendingDonationAmount] = useState<number | null>(null);
   const [userTokenBalance, setUserTokenBalance] = useState(0);
   const [isLoginRequiredDialogVisible, setIsLoginRequiredDialogVisible] = useState(false);
   const [statValues, setStatValues] = useState(() => stats.map(() => 0));
@@ -590,17 +599,22 @@ export default function HomePage() {
     return campaignResponse.data;
   }, []);
 
-  /** Hàm ghi nhận giao dịch donate. Mục đích: đồng bộ transaction hash on-chain về backend để cập nhật dữ liệu công khai. */
-  const recordDonationTransaction = useCallback(async (projectId: string, transactionHash: string) => {
+  /** Hàm gửi donation qua relay backend. Mục đích: gửi giao dịch on-chain mà không cần MetaMask trên frontend. */
+  const submitDonationViaRelay = useCallback(async (projectId: string, amount: number) => {
     const authSession = readAuthSession();
     if (!authSession.accessToken) {
       throw { statusCode: 401, message: 'Bạn chưa đăng nhập. Vui lòng đăng nhập để quyên góp.' };
     }
 
-    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/record'), {
+    const relayProjectId = resolveRelayProjectId(projectId);
+    if (!relayProjectId) {
+      throw { statusCode: 400, errorCode: 'VALIDATION_ERROR', message: 'Mã dự án không hợp lệ để gửi giao dịch.' };
+    }
+
+    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/submit'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${authSession.accessToken}` },
-      body: JSON.stringify({ projectId, transactionHash, isAnonymous: false })
+      body: JSON.stringify({ projectId: relayProjectId, amount, isAnonymous: false })
     });
   }, []);
 
@@ -642,6 +656,8 @@ export default function HomePage() {
   /** Hàm đóng modal quyên góp Home. Mục đích: reset toàn bộ input và trạng thái giao dịch của luồng donate tại chỗ. */
   const closeDonationModal = () => {
     setIsDonationModalVisible(false);
+    setIsDonationConfirmModalVisible(false);
+    setPendingDonationAmount(null);
     setSelectedDonationProjectId('');
     setSelectedDonationCampaignDetail(null);
     setDonationAmountInput('');
@@ -842,37 +858,59 @@ export default function HomePage() {
     };
   }, [isDonationModalVisible, isDonationSubmitting]);
 
-  /** Hàm xác nhận và gửi giao dịch quyên góp. Mục đích: validate dữ liệu, xác nhận 2 bước và đồng bộ UI sau khi thành công. */
-  const handleSubmitDonation = async () => {
+  /** Hàm kiểm tra dữ liệu donation trước khi mở xác nhận. Mục đích: gom validate để tái sử dụng cho nhiều bước submit. */
+  const validateDonationInput = (): number | null => {
     const normalizedAmount = Number(donationAmountInput);
     if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
       setDonationErrorMessage('Vui lòng nhập số token lớn hơn 0.');
-      return;
+      return null;
     }
 
     if (!selectedDonationCampaignDetail?.projectId) {
       setDonationErrorMessage('Không tìm thấy thông tin dự án để quyên góp.');
-      return;
+      return null;
     }
 
     if (!isCampaignEligibleForDonation(selectedDonationCampaignDetail)) {
       setDonationErrorMessage('Dự án hiện không đủ điều kiện nhận quyên góp.');
-      return;
+      return null;
     }
 
     if (normalizedAmount > userTokenBalance) {
       setDonationErrorMessage('Số token quyên góp vượt quá số dư hiện có của bạn.');
+      return null;
+    }
+
+    return normalizedAmount;
+  };
+
+  /** Hàm mở modal xác nhận donation. Mục đích: đảm bảo người dùng chỉ xác nhận đúng 1 lần trước khi gửi giao dịch. */
+  const handleOpenDonationConfirmModal = () => {
+    const validatedAmount = validateDonationInput();
+    if (validatedAmount === null) {
       return;
     }
 
-    // Ghi chú logic phức tạp: bắt buộc xác nhận 2 bước để giảm thao tác nhầm trước khi gửi giao dịch on-chain.
-    const firstConfirmation = window.confirm(`Bạn muốn quyên góp ${normalizedAmount.toLocaleString('vi-VN')} token cho dự án này?`);
-    if (!firstConfirmation) {
+    setPendingDonationAmount(validatedAmount);
+    setIsDonationConfirmModalVisible(true);
+  };
+
+  /** Hàm đóng modal xác nhận donation. Mục đích: xóa trạng thái xác nhận tạm để tránh gửi nhầm dữ liệu cũ. */
+  const handleCloseDonationConfirmModal = () => {
+    setIsDonationConfirmModalVisible(false);
+    setPendingDonationAmount(null);
+  };
+
+  /** Hàm gửi giao dịch donation sau khi xác nhận. Mục đích: submit đúng một lần qua relay backend và đồng bộ dữ liệu sau giao dịch. */
+  const handleConfirmDonationSubmit = async () => {
+    // Ghi chú logic phức tạp: chặn double-submit tuyệt đối khi người dùng bấm xác nhận liên tiếp.
+    if (isDonationSubmitting) {
       return;
     }
 
-    const secondConfirmation = window.confirm(`Xác nhận lần 2: gửi ${normalizedAmount.toLocaleString('vi-VN')} token ngay bây giờ?`);
-    if (!secondConfirmation) {
+    if (!selectedDonationCampaignDetail?.projectId || pendingDonationAmount === null) {
+      setDonationErrorMessage('Không tìm thấy thông tin dự án để quyên góp.');
+      handleCloseDonationConfirmModal();
       return;
     }
 
@@ -881,8 +919,10 @@ export default function HomePage() {
     setIsDonationSubmitting(true);
 
     try {
-      const transactionHash = await donateByWallet(selectedDonationCampaignDetail.projectId, normalizedAmount, false);
-      await recordDonationTransaction(selectedDonationCampaignDetail.projectId, transactionHash);
+      handleCloseDonationConfirmModal();
+
+      const submitResponse = await submitDonationViaRelay(selectedDonationCampaignDetail.projectId, pendingDonationAmount);
+      const transactionHash = String(submitResponse.data.transactionHash || '');
 
       const refreshedCampaignDetailPromise = loadDonationCampaignDetail(selectedDonationCampaignDetail.projectId);
       const refreshedBalancePromise = loadUserTokenBalance();
@@ -894,7 +934,7 @@ export default function HomePage() {
         setSelectedDonationCampaignDetail(refreshedCampaignDetail);
       }
 
-      setDonationSuccessMessage('Quyên góp thành công. Cảm ơn bạn đã đồng hành!');
+      setDonationSuccessMessage(`Quyên góp thành công. TxHash: ${transactionHash}`);
       window.setTimeout(() => {
         closeDonationModal();
       }, 500);
@@ -1352,12 +1392,64 @@ export default function HomePage() {
               <button
                 type="button"
                 className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 text-sm font-semibold text-white transition hover:bg-[#0b6759] disabled:cursor-not-allowed disabled:opacity-50"
-                onClick={() => void handleSubmitDonation()}
+                onClick={handleOpenDonationConfirmModal}
                 disabled={isDonationSubmitting || isDonationDataLoading || !selectedDonationCampaignDetail}
               >
-                {isDonationSubmitting ? 'Đang xử lý...' : 'Quyên góp'}
+                Quyên góp
               </button>
             </div>
+
+            {isDonationConfirmModalVisible && (
+              <div
+                className="fixed inset-0 z-[126] flex items-center justify-center bg-black/45 p-3 backdrop-blur-[1px] md:p-5"
+                role="presentation"
+                onClick={() => {
+                  if (!isDonationSubmitting) {
+                    handleCloseDonationConfirmModal();
+                  }
+                }}
+              >
+                <div
+                  className="w-full max-w-md rounded-xl border border-[#d1e7e2] bg-white shadow-[0_20px_50px_rgba(14,124,107,0.2)]"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="home-donation-confirm-modal-title"
+                  onClick={event => event.stopPropagation()}
+                >
+                  <div className="border-b border-[#e6f3f0] px-4 py-3">
+                    <h4 id="home-donation-confirm-modal-title" className="text-base font-bold text-[#0d1117]">
+                      Xác nhận quyên góp
+                    </h4>
+                  </div>
+
+                  <div className="px-4 py-4">
+                    <p className="text-sm text-[#374151]">
+                      Bạn muốn quyên góp {Number(pendingDonationAmount || 0).toLocaleString('vi-VN')} token cho dự án này?
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 border-t border-[#e6f3f0] px-4 py-3">
+                    <button
+                      type="button"
+                      className="inline-flex h-10 items-center justify-center rounded-lg border border-[#d1d5db] px-4 text-sm font-semibold text-[#374151] transition hover:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleCloseDonationConfirmModal}
+                      disabled={isDonationSubmitting}
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 text-sm font-semibold text-white transition hover:bg-[#0b6759] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void handleConfirmDonationSubmit()}
+                      disabled={isDonationSubmitting}
+                    >
+                      {isDonationSubmitting ? 'Đang xử lý...' : 'xác nhận'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       )}

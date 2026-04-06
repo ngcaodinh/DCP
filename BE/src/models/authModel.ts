@@ -54,12 +54,25 @@ const authUserSchema = new Schema<AuthUser>({
   isEmailVerified: { type: Boolean, required: true },
   accountStatus: { type: String, required: true },
   organizationName: { type: String, default: null },
-  legalRegistrationNumber: { type: String, default: null, unique: true, sparse: true },
+  legalRegistrationNumber: { type: String, default: null },
   lastLoginAt: { type: Date, required: true },
   lastLoginIp: { type: String, default: null },
   lastLoginUserAgent: { type: String, default: null },
   correlationId: { type: String, required: true }
 });
+
+// Ghi chú logic phức tạp: dùng partial unique index để chỉ bắt buộc duy nhất khi legalRegistrationNumber là chuỗi hợp lệ,
+// tránh lỗi duplicate khi giá trị null hoặc thiếu ở giai đoạn đăng ký ban đầu.
+authUserSchema.index(
+  { legalRegistrationNumber: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      legalRegistrationNumber: { $exists: true, $gt: '' }
+    }
+  }
+);
+
 
 const refreshSessionSchema = new Schema<RefreshSession>({
   id: { type: String, required: true, unique: true },

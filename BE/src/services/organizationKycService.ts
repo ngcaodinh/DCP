@@ -1,5 +1,7 @@
 import crypto from 'crypto';
-import { AuthUser, findUserById, findUserByLegalRegistrationNumber, updateUser } from '../models/authModel';
+import { ethers } from 'ethers';
+import { getLogger } from '../config/logger';
+import { AuthUser, addAuditLog, findUserById, findUserByLegalRegistrationNumber, updateUser } from '../models/authModel';
 import {
   OrganizationKycFile,
   OrganizationKycSubmission,
@@ -40,6 +42,94 @@ const allowedMimeTypeSet = new Set(['application/pdf', 'image/png', 'image/jpg',
 const pinataPinFileEndpoint = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
 const pinataRequestTimeoutMilliseconds = 15000;
 const pinataMaximumRetryCount = 2;
+const donationRankingContractAbi = [
+  'function hasRole(bytes32 role, address account) external view returns (bool)',
+  'function projectManagerRole() external view returns (bytes32)',
+  'function grantProjectManagerRole(address account) external'
+];
+const logger = getLogger();
+
+/** Hàm lấy contract admin cho donation ranking. Mục đích: phục vụ cấp quyền PROJECT_MANAGER_ROLE cho organization sau khi KYC được duyệt. */
+function getDonationRankingAdminContract() {
+  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
+  const donationRankingContractAddress = process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() || process.env.DONATION_RANKING_ADDRESS?.trim() || '';
+  const adminPrivateKey = process.env.DONATION_ADMIN_PRIVATE_KEY?.trim() || '';
+  const expectedChainId = Number(process.env.BLOCKCHAIN_CHAIN_ID || 0);
+
+  if (!blockchainRpcUrl || !donationRankingContractAddress || !adminPrivateKey) {
+    throw new Error('Thiếu cấu hình cấp quyền blockchain. Cần BLOCKCHAIN_RPC_URL, DONATION_RANKING_CONTRACT_ADDRESS và DONATION_ADMIN_PRIVATE_KEY.');
+  }
+
+  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const adminSigner = new ethers.Wallet(adminPrivateKey, provider);
+  const donationRankingContract = new ethers.Contract(donationRankingContractAddress, donationRankingContractAbi, adminSigner);
+
+  return {
+    provider,
+    adminSigner,
+    donationRankingContract,
+    expectedChainId
+  };
+}
+
+/** Hàm cấp PROJECT_MANAGER_ROLE cho ví organization. Mục đích: đảm bảo tài khoản organizations có quyền tạo project on-chain ngay sau khi KYC approve. */
+async function ensureOrganizationWalletProjectManagerRole(walletAddress: string): Promise<{ transactionHash: string | null; wasAlreadyGranted: boolean }> {
+  const normalizedWalletAddress = walletAddress.trim();
+  if (!normalizedWalletAddress || !ethers.isAddress(normalizedWalletAddress)) {
+    throw new Error('Địa chỉ ví organization không hợp lệ để cấp quyền blockchain.');
+  }
+
+  const { provider, donationRankingContract, expectedChainId } = getDonationRankingAdminContract();
+  const network = await provider.getNetwork();
+  if (expectedChainId > 0 && Number(network.chainId) !== expectedChainId) {
+    throw new Error('Sai network blockchain của dịch vụ cấp quyền organization.');
+  }
+
+  const projectManagerRoleHash = await donationRankingContract.projectManagerRole();
+  const hasProjectManagerRole = await donationRankingContract.hasRole(projectManagerRoleHash, normalizedWalletAddress);
+  if (hasProjectManagerRole) {
+    return { transactionHash: null, wasAlreadyGranted: true };
+  }
+
+  const grantRoleTransaction = await donationRankingContract.grantProjectManagerRole(normalizedWalletAddress);
+  const grantRoleReceipt = await grantRoleTransaction.wait();
+
+  // Ghi chú logic phức tạp: kiểm tra receipt status để fail-fast khi transaction bị mined nhưng thất bại ở EVM.
+  if (grantRoleReceipt && Number(grantRoleReceipt.status) !== 1) {
+    throw new Error(`Transaction cấp PROJECT_MANAGER_ROLE thất bại. txHash=${grantRoleTransaction.hash}`);
+  }
+
+  const hasProjectManagerRoleAfterGrant = await donationRankingContract.hasRole(projectManagerRoleHash, normalizedWalletAddress);
+  if (!hasProjectManagerRoleAfterGrant) {
+    throw new Error(`Cấp PROJECT_MANAGER_ROLE thất bại cho ví ${normalizedWalletAddress}. txHash=${grantRoleTransaction.hash}`);
+  }
+
+  return { transactionHash: grantRoleTransaction.hash, wasAlreadyGranted: false };
+}
+
+/** Hàm ghi audit log cho KYC review và cấp role on-chain. Mục đích: truy vết đầy đủ reviewer, organization, wallet và transaction blockchain. */
+async function addOrganizationKycAuditLog(params: {
+  reviewerUserId: string;
+  organizationUserId: string;
+  organizationEmail: string | null;
+  action: OrganizationKycReviewAction;
+  walletAddress: string;
+  status: 'SUCCESS' | 'FAILED';
+  transactionHash: string | null;
+  detailMessage: string;
+}): Promise<void> {
+  await addAuditLog({
+    id: crypto.randomUUID(),
+    userId: params.organizationUserId,
+    email: params.organizationEmail,
+    eventType: `ORGANIZATION_KYC_REVIEW_${params.action.toUpperCase()}_${params.status}`,
+    ipAddress: 'SYSTEM',
+    userAgent: `reviewer:${params.reviewerUserId}`,
+    detail: `walletAddress=${params.walletAddress}; txHash=${params.transactionHash || 'N/A'}; detail=${params.detailMessage}`,
+    createdAt: new Date()
+  });
+}
+
 
 /**
  * Hàm kiểm tra dữ liệu hồ sơ KYC đầu vào.
@@ -443,6 +533,71 @@ export async function reviewOrganizationKycSubmission(
 
     if (normalizedAction === 'approve' && updatedOrganizationUser.role !== 'organizations') {
       throw new Error('Đã phê duyệt hồ sơ nhưng không thể cập nhật role tài khoản thành organizations.');
+    }
+
+    if (normalizedAction === 'approve') {
+      try {
+        const grantRoleResult = await ensureOrganizationWalletProjectManagerRole(updatedOrganizationUser.walletAddress);
+        const detailMessage = grantRoleResult.wasAlreadyGranted
+          ? 'KYC approve thành công, ví organization đã có PROJECT_MANAGER_ROLE từ trước.'
+          : 'KYC approve thành công và đã cấp PROJECT_MANAGER_ROLE cho ví organization.';
+
+        logger.info(
+          `KYC approve + grant role success. reviewerUserId=${reviewerUserId} organizationUserId=${updatedOrganizationUser.id} walletAddress=${updatedOrganizationUser.walletAddress} txHash=${grantRoleResult.transactionHash || 'N/A'}`
+        );
+
+        await addOrganizationKycAuditLog({
+          reviewerUserId,
+          organizationUserId: updatedOrganizationUser.id,
+          organizationEmail: updatedOrganizationUser.email,
+          action: normalizedAction,
+          walletAddress: updatedOrganizationUser.walletAddress,
+          status: 'SUCCESS',
+          transactionHash: grantRoleResult.transactionHash,
+          detailMessage
+        });
+      } catch (error) {
+        // Ghi chú logic phức tạp: rollback role/accountStatus nếu cấp quyền on-chain thất bại để tránh "đã duyệt KYC nhưng chưa có quyền tạo project".
+        await updateUser({
+          ...updatedOrganizationUser,
+          role: organizationUser.role,
+          accountStatus: organizationUser.accountStatus
+        });
+
+        logger.error(
+          `KYC approve + grant role failed. reviewerUserId=${reviewerUserId} organizationUserId=${updatedOrganizationUser.id} walletAddress=${updatedOrganizationUser.walletAddress} errorMessage=${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+
+        await addOrganizationKycAuditLog({
+          reviewerUserId,
+          organizationUserId: updatedOrganizationUser.id,
+          organizationEmail: updatedOrganizationUser.email,
+          action: normalizedAction,
+          walletAddress: updatedOrganizationUser.walletAddress,
+          status: 'FAILED',
+          transactionHash: null,
+          detailMessage: error instanceof Error ? error.message : 'Cấp PROJECT_MANAGER_ROLE thất bại.'
+        });
+
+        throw error;
+      }
+    }
+
+    if (normalizedAction === 'reject') {
+      logger.info(
+        `KYC reject success. reviewerUserId=${reviewerUserId} organizationUserId=${updatedOrganizationUser.id} walletAddress=${updatedOrganizationUser.walletAddress}`
+      );
+
+      await addOrganizationKycAuditLog({
+        reviewerUserId,
+        organizationUserId: updatedOrganizationUser.id,
+        organizationEmail: updatedOrganizationUser.email,
+        action: normalizedAction,
+        walletAddress: updatedOrganizationUser.walletAddress,
+        status: 'SUCCESS',
+        transactionHash: null,
+        detailMessage: 'KYC bị từ chối bởi reviewer.'
+      });
     }
 
     return {

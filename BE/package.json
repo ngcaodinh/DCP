@@ -9,7 +9,10 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest run",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "backfill:organization-project-manager-role": "node scripts/backfillProjectManagerRoleForOrganizations.js",
+    "migrate:legal-registration-index": "node scripts/migrateLegalRegistrationNumberIndex.js",
+    "grant:project-manager-role": "node scripts/grantProjectManagerRole.js"
   },
   "dependencies": {
     "@zerodev/sdk": "^5.5.8",

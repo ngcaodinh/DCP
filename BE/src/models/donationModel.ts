@@ -1,5 +1,7 @@
 import mongoose, { Schema } from 'mongoose';
 
+export type DonationStatus = 'PENDING_ONCHAIN' | 'ONCHAIN_CONFIRMED' | 'INDEXED';
+
 export type DonationRecord = {
   transactionHash: string;
   projectId: string;
@@ -8,6 +10,10 @@ export type DonationRecord = {
   timestamp: Date;
   isAnonymous: boolean;
   blockNumber: number;
+  donationStatus: DonationStatus;
+  onChainConfirmedAt: Date;
+  indexedAt: Date;
+  correlationId: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -20,6 +26,10 @@ const donationSchema = new Schema<DonationRecord>({
   timestamp: { type: Date, required: true, index: true },
   isAnonymous: { type: Boolean, required: true },
   blockNumber: { type: Number, required: true, index: true },
+  donationStatus: { type: String, required: true, enum: ['PENDING_ONCHAIN', 'ONCHAIN_CONFIRMED', 'INDEXED'], default: 'INDEXED' },
+  onChainConfirmedAt: { type: Date, required: true },
+  indexedAt: { type: Date, required: true },
+  correlationId: { type: String, required: true, index: true },
   createdAt: { type: Date, required: true },
   updatedAt: { type: Date, required: true }
 });

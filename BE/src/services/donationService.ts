@@ -8,9 +8,12 @@ import {
   getLatestIndexedBlockNumberFromRepository,
   upsertDonationRecordByTransactionHash
 } from '../repositories/donationRepository';
+import { findUserById } from '../models/authModel';
 import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
+
+type DonationStatus = 'PENDING_ONCHAIN' | 'ONCHAIN_CONFIRMED' | 'INDEXED';
 
 type DonationEventLog = {
   transactionHash: string;
@@ -20,6 +23,10 @@ type DonationEventLog = {
   timestamp: Date;
   isAnonymous: boolean;
   blockNumber: number;
+  donationStatus: DonationStatus;
+  onChainConfirmedAt: Date;
+  indexedAt: Date;
+  correlationId: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -27,6 +34,139 @@ type DonationEventLog = {
 const donationReceivedEventAbi = [
   'event DonationReceived(address indexed donor, uint256 indexed projectId, uint256 amount, uint256 timestamp, bool isAnonymous)'
 ];
+
+const donationRelayContractAbi = [
+  'function donate(uint256 projectId, uint256 amount, bool isAnonymous) external returns (bool)',
+  'error InvalidAddress()',
+  'error InvalidProjectId()',
+  'error InvalidAmount()',
+  'error ProjectNotFound()',
+  'error InvalidProjectState()',
+  'error InvalidProjectStateTransition()',
+  'error TransferFromFailed()',
+  'error EnforcedPause()',
+  'error ExpectedPause()',
+  'error ReentrancyGuardReentrantCall()',
+  'error AccessControlUnauthorizedAccount(address account, bytes32 neededRole)',
+  'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
+  'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)'
+];
+
+type DecodedContractRevert = {
+  selector: string;
+  errorName: string;
+};
+
+/** Hàm lấy selector từ revert data. Mục đích: tách 4-byte selector để fallback decode khi parseError thất bại. */
+function extractRevertSelector(revertData: string): string {
+  if (!revertData.startsWith('0x') || revertData.length < 10) {
+    return '';
+  }
+
+  return revertData.slice(0, 10).toLowerCase();
+}
+
+/** Hàm decode custom error từ contract. Mục đích: chuyển dữ liệu revert thành tên lỗi nghiệp vụ để map response ổn định. */
+function decodeDonationRelayRevert(revertData: string): DecodedContractRevert {
+  const donationInterface = new ethers.Interface(donationRelayContractAbi);
+  const fallbackSelectorMap: Record<string, string> = {
+    '0x4c4f68ca': 'ProjectNotFound'
+  };
+
+  const selector = extractRevertSelector(revertData);
+  try {
+    const parsedError = donationInterface.parseError(revertData);
+    if (parsedError) {
+      return { selector, errorName: parsedError.name };
+    }
+  } catch {
+    // Ghi chú logic phức tạp: parseError có thể fail với dữ liệu revert cắt ngắn, nên phải fallback theo selector map.
+  }
+
+  return {
+    selector,
+    errorName: fallbackSelectorMap[selector] || 'UnknownContractError'
+  };
+}
+
+/** Hàm map lỗi contract revert sang ApplicationError. Mục đích: trả message thân thiện và errorCode ổn định cho frontend. */
+function mapDonationRelayRevertToApplicationError(decodedRevert: DecodedContractRevert): ApplicationError {
+  const errorNameToApplicationErrorMap: Record<string, ApplicationError> = {
+    ProjectNotFound: new ApplicationError('Dự án quyên góp không tồn tại trên blockchain.', 404, 'PROJECT_NOT_FOUND'),
+    InvalidProjectId: new ApplicationError('Mã dự án không hợp lệ.', 400, 'VALIDATION_ERROR'),
+    InvalidAmount: new ApplicationError('Số token quyên góp không hợp lệ.', 400, 'AMOUNT_INVALID'),
+    InvalidProjectState: new ApplicationError('Dự án hiện không ở trạng thái nhận quyên góp.', 400, 'PROJECT_NOT_ACTIVE'),
+    AccessControlUnauthorizedAccount: new ApplicationError('Tài khoản relay chưa được cấp quyền trên contract donation.', 403, 'UNAUTHORIZED_RELAYER'),
+    EnforcedPause: new ApplicationError('Hệ thống donation on-chain đang tạm dừng để bảo trì.', 503, 'CONTRACT_REVERTED'),
+    TransferFromFailed: new ApplicationError('Giao dịch token thất bại. Vui lòng kiểm tra số dư hoặc cấp quyền token cho ví relay.', 400, 'CONTRACT_REVERTED'),
+    ERC20InsufficientBalance: new ApplicationError('Ví relay không đủ số dư token để thực hiện quyên góp.', 400, 'CONTRACT_REVERTED'),
+    ERC20InsufficientAllowance: new ApplicationError('Ví relay chưa được cấp đủ quyền sử dụng token để quyên góp.', 400, 'CONTRACT_REVERTED')
+  };
+
+  return (
+    errorNameToApplicationErrorMap[decodedRevert.errorName] ||
+    new ApplicationError('Giao dịch quyên góp bị từ chối bởi smart contract.', 400, 'CONTRACT_REVERTED')
+  );
+}
+
+/** Hàm lấy revert data từ lỗi ethers. Mục đích: gom nhiều cấu trúc lỗi khác nhau của CALL_EXCEPTION về một định dạng chung. */
+function extractRevertDataFromEthersError(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return '';
+  }
+
+  const possibleError = error as {
+    data?: string;
+    info?: { error?: { data?: string } };
+    error?: { data?: string };
+  };
+
+  if (typeof possibleError.data === 'string') {
+    return possibleError.data;
+  }
+  if (typeof possibleError.info?.error?.data === 'string') {
+    return possibleError.info.error.data;
+  }
+  if (typeof possibleError.error?.data === 'string') {
+    return possibleError.error.data;
+  }
+
+  return '';
+}
+
+/** Hàm chuẩn hóa lỗi donate relay từ ethers. Mục đích: bắt CALL_EXCEPTION và map sang lỗi nghiệp vụ trước khi trả về controller. */
+function normalizeDonationRelayError(error: unknown, logContext: Record<string, unknown>): ApplicationError {
+  if (error instanceof ApplicationError) {
+    return error;
+  }
+
+  const errorWithCode = error as { code?: string };
+  if (errorWithCode?.code === 'CALL_EXCEPTION') {
+    const revertData = extractRevertDataFromEthersError(error);
+    const decodedRevert = decodeDonationRelayRevert(revertData);
+    const mappedError = mapDonationRelayRevertToApplicationError(decodedRevert);
+
+    logger.error('Donation relay contract call reverted.', {
+      ...logContext,
+      selector: decodedRevert.selector,
+      errorName: decodedRevert.errorName
+    });
+
+    return mappedError;
+  }
+
+  logger.error('Donation relay transaction failed with unexpected error.', {
+    ...logContext,
+    errorMessage: (error as Error)?.message || 'Unknown error'
+  });
+
+  return new ApplicationError('Không thể gửi giao dịch quyên góp lúc này. Vui lòng thử lại sau.', 500, 'INTERNAL_ERROR');
+}
+
+/** Hàm tạo correlation id cho donation. Mục đích: gắn định danh xuyên suốt để trace luồng on-chain và off-chain. */
+function generateDonationCorrelationId(transactionHash: string): string {
+  return `donation:${transactionHash.toLowerCase()}`;
+}
 
 /** Hàm chuẩn hóa giới hạn bản ghi. Mục đích: tránh query quá lớn gây ảnh hưởng hiệu năng API public. */
 function normalizeLimitCount(limitCount: number, defaultLimit = 20, maximumLimit = 100): number {
@@ -138,6 +278,10 @@ export async function syncDonationEventsFromBlockchain() {
       timestamp: new Date(Number(parsedEvent.args.timestamp) * 1000),
       isAnonymous: Boolean(parsedEvent.args.isAnonymous),
       blockNumber: eventLog.blockNumber,
+      donationStatus: 'INDEXED',
+      onChainConfirmedAt: now,
+      indexedAt: now,
+      correlationId: generateDonationCorrelationId(eventLog.transactionHash),
       createdAt: now,
       updatedAt: now
     };
@@ -157,18 +301,29 @@ export async function submitDonationViaRelay(projectId: string, amount: number, 
   const normalizedProjectId = projectId.trim();
   const parsedAmount = Number(amount);
   const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
-  const donationRankingContractAddress = process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() || '';
-  const donationRelayerPrivateKey = process.env.DONATION_RELAYER_PRIVATE_KEY?.trim() || '';
+  // Ghi chú logic phức tạp: hỗ trợ cả tên biến cấu hình mới và legacy để tránh vỡ môi trường cũ.
+  const donationRankingContractAddress =
+    process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() ||
+    process.env.DONATION_RANKING_ADDRESS?.trim() ||
+    '';
+  const donationRelayerPrivateKey =
+    process.env.DONATION_RELAYER_PRIVATE_KEY?.trim() ||
+    process.env.BACKEND_MINTER_PRIVATE_KEY?.trim() ||
+    '';
   const expectedChainId = Number(process.env.BLOCKCHAIN_CHAIN_ID || 0);
 
   if (!normalizedProjectId || !Number.isInteger(Number(normalizedProjectId))) {
     throw new ApplicationError('projectId không hợp lệ.', 400, 'VALIDATION_ERROR');
   }
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-    throw new ApplicationError('Số token quyên góp phải lớn hơn 0.', 400, 'VALIDATION_ERROR');
+    throw new ApplicationError('Số token quyên góp phải lớn hơn 0.', 400, 'AMOUNT_INVALID');
   }
   if (!blockchainRpcUrl || !donationRankingContractAddress || !donationRelayerPrivateKey) {
-    throw new ApplicationError('Thiếu cấu hình relay donation trên hệ thống.', 500, 'INTERNAL_ERROR');
+    throw new ApplicationError(
+      'Thiếu cấu hình relay donation. Cần BLOCKCHAIN_RPC_URL, DONATION_RANKING_CONTRACT_ADDRESS (hoặc DONATION_RANKING_ADDRESS), DONATION_RELAYER_PRIVATE_KEY (hoặc BACKEND_MINTER_PRIVATE_KEY).',
+      500,
+      'INTERNAL_ERROR'
+    );
   }
 
   const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
@@ -178,17 +333,30 @@ export async function submitDonationViaRelay(projectId: string, amount: number, 
   }
 
   const relayerWallet = new ethers.Wallet(donationRelayerPrivateKey, provider);
-  const donationContract = new ethers.Contract(
-    donationRankingContractAddress,
-    ['function donate(uint256 projectId, uint256 amount, bool isAnonymous) external returns (bool)'],
-    relayerWallet
-  );
+  const relayLogContext = {
+    projectId: normalizedProjectId,
+    amount: Math.floor(parsedAmount),
+    relayerAddress: relayerWallet.address.toLowerCase(),
+    contractAddress: donationRankingContractAddress,
+    chainId: Number(network.chainId)
+  };
 
-  // Ghi chú logic phức tạp: ép kiểu BigInt để tránh sai lệch số lớn khi serialize amount/projectId.
-  const donationTransaction = await donationContract.donate(BigInt(normalizedProjectId), BigInt(Math.floor(parsedAmount)), isAnonymous);
-  await donationTransaction.wait();
+  const donationContract = new ethers.Contract(donationRankingContractAddress, donationRelayContractAbi, relayerWallet);
 
-  return { transactionHash: donationTransaction.hash };
+  try {
+    // Ghi chú logic phức tạp: ép kiểu BigInt để tránh sai lệch số lớn khi serialize amount/projectId.
+    const donationTransaction = await donationContract.donate(BigInt(normalizedProjectId), BigInt(Math.floor(parsedAmount)), isAnonymous);
+    await donationTransaction.wait();
+
+    logger.info('Donation relay transaction submitted successfully.', {
+      ...relayLogContext,
+      transactionHash: donationTransaction.hash
+    });
+
+    return { transactionHash: donationTransaction.hash };
+  } catch (error) {
+    throw normalizeDonationRelayError(error, relayLogContext);
+  }
 }
 
 
@@ -198,13 +366,17 @@ function isValidTransactionHash(transactionHashValue: string): boolean {
 }
 
 /** Hàm ghi nhận donation từ transaction hash của người dùng. Mục đích: xác minh event on-chain rồi upsert lịch sử donation công khai. */
-export async function recordDonationFromTransactionHash(projectId: string, transactionHash: string, isAnonymous: boolean) {
+export async function recordDonationFromTransactionHash(authenticatedUserId: string, projectId: string, transactionHash: string, isAnonymous: boolean) {
+  const normalizedAuthenticatedUserId = authenticatedUserId.trim();
   const normalizedProjectId = projectId.trim();
   const normalizedTransactionHash = transactionHash.trim();
   const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
   const donationRankingContractAddress = process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() || '';
   const expectedChainId = Number(process.env.BLOCKCHAIN_CHAIN_ID || 0);
 
+  if (!normalizedAuthenticatedUserId) {
+    throw new ApplicationError('userId không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
   if (!normalizedProjectId || !Number.isInteger(Number(normalizedProjectId))) {
     throw new ApplicationError('projectId không hợp lệ.', 400, 'VALIDATION_ERROR');
   }
@@ -213,6 +385,11 @@ export async function recordDonationFromTransactionHash(projectId: string, trans
   }
   if (!blockchainRpcUrl || !donationRankingContractAddress) {
     throw new ApplicationError('Thiếu cấu hình blockchain để ghi nhận donation.', 500, 'INTERNAL_ERROR');
+  }
+
+  const authenticatedUser = await findUserById(normalizedAuthenticatedUserId);
+  if (!authenticatedUser) {
+    throw new ApplicationError('Không tìm thấy thông tin người dùng để ghi nhận quyên góp.', 404, 'USER_NOT_FOUND');
   }
 
   const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
@@ -247,17 +424,30 @@ export async function recordDonationFromTransactionHash(projectId: string, trans
       continue;
     }
 
+    const donorAddressOnChain = String(parsedLog.args.donor).toLowerCase();
+    const authenticatedUserWalletAddress = String(authenticatedUser.walletAddress || '').toLowerCase();
+
+    // Ghi chú logic phức tạp: bắt buộc ví người ký on-chain trùng ví đã xác thực để chặn giả mạo txHash giữa các tài khoản.
+    if (!authenticatedUserWalletAddress || donorAddressOnChain !== authenticatedUserWalletAddress) {
+      throw new ApplicationError('Ví người gửi giao dịch không khớp với ví của tài khoản đăng nhập.', 403, 'DONOR_MISMATCH');
+    }
+
     // Ghi chú logic phức tạp: ưu tiên amount/timestamp on-chain để tránh client giả mạo dữ liệu request body.
+    const now = new Date();
     donationEventRecord = {
       transactionHash: normalizedTransactionHash,
       projectId: parsedProjectId,
-      donorAddress: String(parsedLog.args.donor).toLowerCase(),
+      donorAddress: donorAddressOnChain,
       amount: Number(parsedLog.args.amount),
       timestamp: new Date(Number(parsedLog.args.timestamp) * 1000),
       isAnonymous: Boolean(parsedLog.args.isAnonymous ?? isAnonymous),
       blockNumber: transactionReceipt.blockNumber,
-      createdAt: new Date(),
-      updatedAt: new Date()
+      donationStatus: 'INDEXED',
+      onChainConfirmedAt: now,
+      indexedAt: now,
+      correlationId: generateDonationCorrelationId(normalizedTransactionHash),
+      createdAt: now,
+      updatedAt: now
     };
 
     break;

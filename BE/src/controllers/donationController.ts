@@ -72,7 +72,12 @@ export async function handleSubmitDonationViaRelay(request: AuthenticatedRequest
     const donationResult = await submitDonationViaRelay(String(projectId || ''), Number(amount || 0), Boolean(isAnonymous));
     sendSuccessResponse(response, 200, 'Gửi giao dịch quyên góp thành công.', donationResult);
   } catch (error) {
-    logger.error('Gửi giao dịch quyên góp thất bại.', { errorMessage: (error as Error).message });
+    logger.error('Gửi giao dịch quyên góp thất bại.', {
+      projectId: String(projectId || ''),
+      amount: Number(amount || 0),
+      isAnonymous: Boolean(isAnonymous),
+      errorMessage: (error as Error).message
+    });
     sendErrorFromUnknown(response, error, 'Không thể gửi giao dịch quyên góp.');
   }
 }
@@ -92,6 +97,7 @@ export async function handleRecordDonationFromTransactionHash(request: Authentic
 
   try {
     const recordResult = await recordDonationFromTransactionHash(
+      request.authenticatedUser.userId,
       String(projectId || ''),
       String(transactionHash || ''),
       Boolean(isAnonymous)
