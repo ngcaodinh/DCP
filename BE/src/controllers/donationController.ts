@@ -2,16 +2,33 @@ import { Response } from 'express';
 import { getLogger } from '../config/logger';
 import { AuthenticatedRequest } from '../middleware/authenticationMiddleware';
 import {
+  executeOneClickDonation,
   getDonationHistoryByProjectId,
   getPublicDonationCampaignDetail,
   getPublicDonationCampaigns,
+  getPublicDonorList,
   recordDonationFromTransactionHash,
-  submitDonationViaRelay,
   syncDonationEventsFromBlockchain
 } from '../services/donationService';
 import { sendErrorFromUnknown, sendErrorResponse, sendSuccessResponse } from '../utils/apiResponse';
 
 const logger = getLogger();
+
+/** Hàm tự ghi nhận donation chạy nền sau khi đã submit on-chain. Mục đích: giảm phụ thuộc FE gọi /donations/record và tránh mất lịch sử. */
+function triggerAutoRecordDonationInBackground(authenticatedUserId: string, projectId: string, transactionHash: string, isAnonymous: boolean): void {
+  void recordDonationFromTransactionHash(authenticatedUserId, projectId, transactionHash, isAnonymous)
+    .then(() => {
+      logger.info('Tự động ghi nhận donation chạy nền thành công.', { authenticatedUserId, projectId, transactionHash });
+    })
+    .catch((error) => {
+      logger.warn('Tự động ghi nhận donation chạy nền thất bại.', {
+        authenticatedUserId,
+        projectId,
+        transactionHash,
+        errorMessage: (error as Error).message
+      });
+    });
+}
 
 /** Hàm xử lý request lấy danh sách campaign quyên góp công khai. Mục đích: trả dữ liệu cho trang campaign UC3.1. */
 export async function handleGetPublicDonationCampaigns(request: AuthenticatedRequest, response: Response): Promise<void> {
@@ -59,28 +76,60 @@ export async function handleGetDonationHistoryByProjectId(request: Authenticated
   }
 }
 
-/** Hàm xử lý request gửi donate qua relay backend. Mục đích: thực thi donation không phụ thuộc MetaMask trên frontend. */
-export async function handleSubmitDonationViaRelay(request: AuthenticatedRequest, response: Response): Promise<void> {
+/** Hàm xử lý request lấy danh sách nhà hảo tâm công khai. Mục đích: trả dữ liệu đầy đủ cho trang danh sách người đã quyên góp. */
+export async function handleGetPublicDonorList(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const parsedLimitCount = Number(request.query.limit);
+  const parsedProjectId = String(request.query.projectId || '').trim();
+
+  try {
+    const donorList = await getPublicDonorList(parsedLimitCount, parsedProjectId);
+    sendSuccessResponse(response, 200, 'Lấy danh sách nhà hảo tâm thành công.', donorList);
+  } catch (error) {
+    logger.error('Lấy danh sách nhà hảo tâm thất bại.', { errorMessage: (error as Error).message });
+    sendErrorFromUnknown(response, error, 'Không thể lấy danh sách nhà hảo tâm.');
+  }
+}
+
+
+/** Hàm xử lý request donation one-click. Mục đích: backend gửi batch approve + donate để frontend thao tác kiểu web2 click. */
+export async function handleOneClickDonation(request: AuthenticatedRequest, response: Response): Promise<void> {
   if (!request.authenticatedUser) {
     sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
     return;
   }
 
-  const { projectId, amount, isAnonymous } = request.body as { projectId?: string; amount?: number; isAnonymous?: boolean };
+  const { projectId, amount, isAnonymous } = request.body as {
+    projectId?: string;
+    amount?: number;
+    isAnonymous?: boolean;
+  };
 
   try {
-    const donationResult = await submitDonationViaRelay(String(projectId || ''), Number(amount || 0), Boolean(isAnonymous));
-    sendSuccessResponse(response, 200, 'Gửi giao dịch quyên góp thành công.', donationResult);
+    const normalizedProjectId = String(projectId || '').trim();
+    const normalizedAnonymousFlag = Boolean(isAnonymous);
+
+    const oneClickDonationResult = await executeOneClickDonation(
+      request.authenticatedUser.userId,
+      normalizedProjectId,
+      Number(amount || 0),
+      normalizedAnonymousFlag
+    );
+
+    sendSuccessResponse(response, 200, 'Gửi giao dịch one-click donation thành công.', oneClickDonationResult);
+
+    // Ghi chú logic phức tạp: ghi nhận chạy nền để đảm bảo lịch sử vẫn được lưu ngay cả khi FE không kịp gọi /donations/record.
+    triggerAutoRecordDonationInBackground(
+      request.authenticatedUser.userId,
+      normalizedProjectId,
+      oneClickDonationResult.transactionHash,
+      normalizedAnonymousFlag
+    );
   } catch (error) {
-    logger.error('Gửi giao dịch quyên góp thất bại.', {
-      projectId: String(projectId || ''),
-      amount: Number(amount || 0),
-      isAnonymous: Boolean(isAnonymous),
-      errorMessage: (error as Error).message
-    });
-    sendErrorFromUnknown(response, error, 'Không thể gửi giao dịch quyên góp.');
+    logger.error('Gửi giao dịch one-click donation thất bại.', { errorMessage: (error as Error).message });
+    sendErrorFromUnknown(response, error, 'Không thể gửi giao dịch one-click donation.');
   }
 }
+
 
 /** Hàm xử lý request ghi nhận donation bằng transaction hash từ ví người dùng. Mục đích: xác nhận giao dịch on-chain và index idempotent cho UC3.1. */
 export async function handleRecordDonationFromTransactionHash(request: AuthenticatedRequest, response: Response): Promise<void> {

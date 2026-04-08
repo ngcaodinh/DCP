@@ -52,6 +52,11 @@ export async function findDonationsByProjectId(projectId: string, limitCount: nu
   return DonationMongoModel.find({ projectId }).sort({ timestamp: -1 }).limit(limitCount).lean<DonationRecord[]>().exec();
 }
 
+/** Hàm lấy danh sách donation toàn cục. Mục đích: cung cấp dữ liệu gốc cho trang danh sách nhà hảo tâm công khai. */
+export async function findDonations(limitCount: number): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({}).sort({ timestamp: -1 }).limit(limitCount).lean<DonationRecord[]>().exec();
+}
+
 /** Hàm lấy tổng donation theo project. Mục đích: trả về số tiền đã quyên góp để hiển thị ở danh sách và trang chi tiết. */
 export async function aggregateDonationSummaryByProjectId(projectId: string): Promise<{ totalAmount: number; donationCount: number }> {
   const aggregateResult = await DonationMongoModel.aggregate<{ totalAmount: number; donationCount: number }>([
@@ -71,5 +76,7 @@ export async function findLatestIndexedBlockNumber(): Promise<number> {
   const latestRecord = await DonationMongoModel.findOne({}).sort({ blockNumber: -1 }).lean<DonationRecord>().exec();
   return latestRecord?.blockNumber || 0;
 }
+
+
 
 

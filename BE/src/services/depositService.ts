@@ -98,7 +98,10 @@ export async function createDepositRequest(input: CreateDepositInput): Promise<C
   const returnUrl = `${configuredReturnUrl}${configuredReturnUrl.includes('?') ? '&' : '?'}orderCode=${orderCode}`;
   const cancelUrl = `${configuredCancelUrl}${configuredCancelUrl.includes('?') ? '&' : '?'}orderCode=${orderCode}`;
 
-  logger.info('Bắt đầu tạo payment link deposit.', { correlationId });
+  logger.info('Bắt đầu tạo payment link deposit.', {
+    correlationId,
+    walletAddress: input.walletAddress
+  });
 
   const paymentLinkResult = await createPayosPaymentLink({
     orderCode,
@@ -129,7 +132,11 @@ export async function createDepositRequest(input: CreateDepositInput): Promise<C
     webhookProcessedAt: null
   });
 
-  logger.info('Tạo payment link deposit thành công.', { correlationId });
+  logger.info('Tạo payment link deposit thành công.', {
+    correlationId,
+    orderCode: paymentLinkResult.orderCode,
+    walletAddress: input.walletAddress
+  });
 
   return {
     orderCode: paymentLinkResult.orderCode,
@@ -358,16 +365,30 @@ export async function processDepositWebhook(payload: PayosWebhookPayload): Promi
       logger.error(`Phát hiện thanh toán đến muộn sau khi giao dịch đã FAILED (orderCode=${depositTransaction.orderCode}), yêu cầu đối soát thủ công.`, {
         correlationId: depositTransaction.correlationId,
         orderCode: depositTransaction.orderCode,
+        walletAddress: depositTransaction.walletAddress,
         finalStatus: depositTransaction.status
       });
     } else {
       logger.info('Webhook deposit được bỏ qua do giao dịch đã FAILED.', {
         correlationId: depositTransaction.correlationId,
         orderCode: depositTransaction.orderCode,
+        walletAddress: depositTransaction.walletAddress,
         finalStatus: depositTransaction.status
       });
     }
 
+    return depositTransaction;
+  }
+
+  if (depositTransaction.status === 'PAYMENT_CONFIRMED') {
+    // Ghi chú logic phức tạp: webhook có thể bị gửi lặp sau khi hệ thống đã xác nhận thanh toán.
+    // Cần bỏ qua để đảm bảo idempotent theo orderCode và tránh nguy cơ mint lặp.
+    logger.info('Webhook deposit được bỏ qua do giao dịch đã ở trạng thái PAYMENT_CONFIRMED.', {
+      correlationId: depositTransaction.correlationId,
+      orderCode: depositTransaction.orderCode,
+      walletAddress: depositTransaction.walletAddress,
+      finalStatus: depositTransaction.status
+    });
     return depositTransaction;
   }
 
@@ -423,6 +444,7 @@ export async function processDepositWebhook(payload: PayosWebhookPayload): Promi
   logger.info('Thanh toán deposit đã được xác nhận, bắt đầu mint token.', {
     correlationId: paymentConfirmedTransaction.correlationId,
     orderCode: paymentConfirmedTransaction.orderCode,
+    walletAddress: paymentConfirmedTransaction.walletAddress,
     finalStatus: paymentConfirmedTransaction.status
   });
 
@@ -447,6 +469,8 @@ export async function processDepositWebhook(payload: PayosWebhookPayload): Promi
     logger.info('Mint token deposit thành công.', {
       correlationId: mintCompletedTransaction.correlationId,
       orderCode: mintCompletedTransaction.orderCode,
+      walletAddress: mintCompletedTransaction.walletAddress,
+      onChainTransactionHash: mintCompletedTransaction.onChainTransactionHash || undefined,
       finalStatus: mintCompletedTransaction.status
     });
 
@@ -463,6 +487,7 @@ export async function processDepositWebhook(payload: PayosWebhookPayload): Promi
     logger.error('Mint token deposit thất bại.', {
       correlationId: paymentConfirmedTransaction.correlationId,
       orderCode: failedAfterMintTransaction.orderCode,
+      walletAddress: failedAfterMintTransaction.walletAddress,
       finalStatus: failedAfterMintTransaction.status,
       errorMessage: (error as Error).message
     });

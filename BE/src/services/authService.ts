@@ -75,12 +75,23 @@ async function verifyGoogleIdentityToken(identityToken: string): Promise<TokenPa
   return googlePayload;
 }
 
+type SmartAccountCreationResult = {
+  walletAddress: string;
+  ownerAddress: string | null;
+  encryptedOwnerPrivateKey: string | null;
+};
+
 /**
- * Hàm tạo địa chỉ Smart Account.
- * Mục đích: khởi tạo ví ERC-4337 cho người dùng mới bằng ZeroDev SDK.
+ * Hàm tạo dữ liệu Smart Account.
+ * Mục đích: khởi tạo ví ERC-4337 và trả thêm owner key đã mã hóa để backend thực thi one-click.
  */
-async function createSmartAccountAddress(): Promise<string> {
-  return createZeroDevSmartAccount();
+async function createSmartAccountProvision(): Promise<SmartAccountCreationResult> {
+  const createdSmartAccount = await createZeroDevSmartAccount();
+  return {
+    walletAddress: createdSmartAccount.smartAccountAddress,
+    ownerAddress: createdSmartAccount.ownerAddress,
+    encryptedOwnerPrivateKey: createdSmartAccount.encryptedOwnerPrivateKey
+  };
 }
 
 /**
@@ -93,12 +104,12 @@ function createFallbackWalletAddress(): string {
 }
 
 /**
- * Hàm tạo địa chỉ Smart Account có fallback an toàn cho dev.
+ * Hàm tạo Smart Account có fallback an toàn cho dev.
  * Mục đích: ngăn toàn bộ luồng login bị fail bởi lỗi hạ tầng ZeroDev không liên quan Google token.
  */
-async function createWalletAddressWithFallback(): Promise<string> {
+async function createSmartAccountWithFallback(): Promise<SmartAccountCreationResult> {
   try {
-    return await createSmartAccountAddress();
+    return await createSmartAccountProvision();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown ZeroDev error';
 
@@ -109,12 +120,43 @@ async function createWalletAddressWithFallback(): Promise<string> {
         errorMessage,
         fallbackWalletAddress
       });
-      return fallbackWalletAddress;
+      return {
+        walletAddress: fallbackWalletAddress,
+        ownerAddress: null,
+        encryptedOwnerPrivateKey: null
+      };
     }
 
     throw error;
   }
 }
+
+/**
+ * Hàm đảm bảo user đã có smart account one-click.
+ * Mục đích: tự động cấp bổ sung cho user cũ đăng nhập từ trước khi hệ thống lưu owner key mã hóa.
+ */
+async function ensureSmartAccountProvisioned(existingUser: AuthUser): Promise<AuthUser> {
+  const hasOneClickSmartAccount = Boolean(existingUser.smartAccountOwnerEncryptedPrivateKey);
+  if (hasOneClickSmartAccount) {
+    return existingUser;
+  }
+
+  const smartAccountCreationResult = await createSmartAccountWithFallback();
+
+  // Ghi chú logic phức tạp: chỉ cập nhật khi có owner key mã hóa hợp lệ để tránh ghi đè dữ liệu bằng fallback null.
+  if (!smartAccountCreationResult.encryptedOwnerPrivateKey || !smartAccountCreationResult.ownerAddress) {
+    return existingUser;
+  }
+
+  return updateUser({
+    ...existingUser,
+    walletAddress: smartAccountCreationResult.walletAddress,
+    smartAccountOwnerAddress: smartAccountCreationResult.ownerAddress,
+    smartAccountOwnerEncryptedPrivateKey: smartAccountCreationResult.encryptedOwnerPrivateKey,
+    updatedAt: new Date()
+  });
+}
+
 
 /**
  * Hàm tạo JWT access token.
@@ -293,13 +335,15 @@ export async function loginWithGoogle(
 
   if (!existingUser) {
     try {
-      const walletAddress = await createWalletAddressWithFallback();
+      const smartAccountCreationResult = await createSmartAccountWithFallback();
       authenticatedUser = await createUser({
         id: crypto.randomUUID(),
         email: userProfile.email,
         fullName: userProfile.fullName,
         role,
-        walletAddress,
+        walletAddress: smartAccountCreationResult.walletAddress,
+        smartAccountOwnerAddress: smartAccountCreationResult.ownerAddress,
+        smartAccountOwnerEncryptedPrivateKey: smartAccountCreationResult.encryptedOwnerPrivateKey,
         socialProvider: 'google',
         socialAccountId: userProfile.socialAccountId,
         isEmailVerified: userProfile.isEmailVerified,
@@ -334,11 +378,14 @@ export async function loginWithGoogle(
   } else {
     handleNewDeviceLogin(existingUser, ipAddress, userAgent);
 
+    // Ghi chú logic phức tạp: user cũ có thể chưa có owner key mã hóa, cần tự động cấp để dùng flow one-click donation.
+    const userAfterSmartAccountProvision = await ensureSmartAccountProvisioned(existingUser);
+
     // Ghi chú logic phức tạp: với tài khoản đã tồn tại, hệ thống luôn lấy role từ DB làm nguồn sự thật.
     // Cách này cho phép tài khoản regulatory/admin đăng nhập ổn định ngay cả khi FE gửi role mặc định donor.
     // Đồng thời vẫn không làm thay đổi role trong DB, nên không phát sinh nâng quyền trái phép từ client.
     authenticatedUser = await updateUser({
-      ...existingUser,
+      ...userAfterSmartAccountProvision,
       lastLoginAt: new Date(),
       lastLoginIp: ipAddress,
       lastLoginUserAgent: userAgent,

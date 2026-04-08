@@ -4,10 +4,21 @@ type LogMetadata = {
   errorStack?: string;
   smartAccountAddress?: string;
   fallbackWalletAddress?: string;
+  walletAddress?: string;
   orderCode?: string;
   checksumSource?: string;
   verifyMode?: string;
   finalStatus?: string;
+  selector?: string;
+  errorName?: string;
+  charityTokenAddress?: string;
+  approveTransactionHash?: string;
+  relayBalance?: string;
+  relayAllowance?: string;
+  transactionHash?: string;
+  onChainTransactionHash?: string;
+  paymasterErrorMessage?: string;
+  donationContractAddress?: string;
 };
 
 const logger = {

@@ -37,6 +37,7 @@ type DepositSidebarRecentDeposit = {
 type DepositSidebarResponse = {
   profile: DepositSidebarProfile;
   tokenBalance: number;
+  tokenBalanceOnChain?: number;
   recentDeposits: DepositSidebarRecentDeposit[];
 };
 
@@ -205,6 +206,7 @@ function DepositHomePageContent() {
   const [sidebarErrorMessage, setSidebarErrorMessage] = useState('');
   const [sidebarProfile, setSidebarProfile] = useState<DepositSidebarProfile | null>(null);
   const [sidebarTokenBalance, setSidebarTokenBalance] = useState(0);
+
   const [sidebarRecentDeposits, setSidebarRecentDeposits] = useState<DepositSidebarRecentDeposit[]>([]);
 
   const formattedAmount = useMemo(() => formatCurrency(amountValue), [amountValue]);
@@ -355,8 +357,10 @@ function DepositHomePageContent() {
       }
 
       const responsePayload: DepositSidebarResponse = await response.json();
+      const tokenBalanceOnChain = Number(responsePayload.tokenBalanceOnChain ?? responsePayload.tokenBalance ?? 0);
+
       setSidebarProfile(responsePayload.profile);
-      setSidebarTokenBalance(Number(responsePayload.tokenBalance || 0));
+      setSidebarTokenBalance(tokenBalanceOnChain);
       setSidebarRecentDeposits(Array.isArray(responsePayload.recentDeposits) ? responsePayload.recentDeposits : []);
     } catch (_error) {
       setSidebarErrorMessage('Không thể kết nối máy chủ. Vui lòng kiểm tra mạng và thử lại.');
@@ -754,6 +758,7 @@ function DepositHomePageContent() {
                   <div className="text-xl font-extrabold text-[#1AAE97]">{sidebarTokenBalanceDisplay}</div>
                   <div className="text-xs text-white/50">Charity Token</div>
                   <div className="text-xs text-white/40">≈ {sidebarTokenBalanceVndDisplay}</div>
+
                 </div>
               </>
             )}

@@ -3,8 +3,9 @@ import {
   handleGetDonationHistoryByProjectId,
   handleGetPublicDonationCampaignDetail,
   handleGetPublicDonationCampaigns,
+  handleGetPublicDonorList,
+  handleOneClickDonation,
   handleRecordDonationFromTransactionHash,
-  handleSubmitDonationViaRelay,
   handleSyncDonationEventsFromBlockchain
 } from '../controllers/donationController';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
@@ -24,8 +25,9 @@ export function createDonationRoutes(): Router {
   router.get('/campaigns', attachRequestMetadata(), getCampaignRateLimit, handleGetPublicDonationCampaigns);
   router.get('/campaigns/:projectId', attachRequestMetadata(), getCampaignRateLimit, handleGetPublicDonationCampaignDetail);
   router.get('/campaigns/:projectId/history', attachRequestMetadata(), getHistoryRateLimit, handleGetDonationHistoryByProjectId);
+  router.get('/donors', attachRequestMetadata(), getHistoryRateLimit, handleGetPublicDonorList);
+  router.post('/one-click', attachRequestMetadata(), authenticationMiddleware, getHistoryRateLimit, handleOneClickDonation);
   router.post('/record', attachRequestMetadata(), authenticationMiddleware, getHistoryRateLimit, handleRecordDonationFromTransactionHash);
-  router.post('/submit', attachRequestMetadata(), authenticationMiddleware, getHistoryRateLimit, handleSubmitDonationViaRelay);
 
   router.post(
     '/sync-events',

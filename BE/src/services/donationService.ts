@@ -5,10 +5,13 @@ import {
   findDonationSummaryByProjectId,
   findPublicCampaignByProjectId,
   findPublicCampaigns,
+  findPublicDonorList,
   getLatestIndexedBlockNumberFromRepository,
   upsertDonationRecordByTransactionHash
 } from '../repositories/donationRepository';
-import { findUserById } from '../models/authModel';
+import { findUserById, updateUser } from '../models/authModel';
+import { getZeroDevConfig } from '../config/zeroDev';
+import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
 import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
@@ -35,133 +38,199 @@ const donationReceivedEventAbi = [
   'event DonationReceived(address indexed donor, uint256 indexed projectId, uint256 amount, uint256 timestamp, bool isAnonymous)'
 ];
 
-const donationRelayContractAbi = [
-  'function donate(uint256 projectId, uint256 amount, bool isAnonymous) external returns (bool)',
-  'error InvalidAddress()',
-  'error InvalidProjectId()',
-  'error InvalidAmount()',
-  'error ProjectNotFound()',
-  'error InvalidProjectState()',
-  'error InvalidProjectStateTransition()',
-  'error TransferFromFailed()',
-  'error EnforcedPause()',
-  'error ExpectedPause()',
-  'error ReentrancyGuardReentrantCall()',
-  'error AccessControlUnauthorizedAccount(address account, bytes32 neededRole)',
-  'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
-  'error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)'
-];
+const erc20Abi = [
+  {
+    type: 'function',
+    name: 'balanceOf',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    type: 'function',
+    name: 'allowance',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' }
+    ],
+    outputs: [{ name: '', type: 'uint256' }]
+  },
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' }
+    ],
+    outputs: [{ name: '', type: 'bool' }]
+  }
+] as const;
 
-type DecodedContractRevert = {
-  selector: string;
-  errorName: string;
-};
+const donationContractAbi = [
+  {
+    type: 'function',
+    name: 'charityToken',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }]
+  },
+  {
+    type: 'function',
+    name: 'donate',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'projectId', type: 'uint256' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'isAnonymous', type: 'bool' }
+    ],
+    outputs: [{ name: '', type: 'bool' }]
+  }
+] as const;
 
-/** Hàm lấy selector từ revert data. Mục đích: tách 4-byte selector để fallback decode khi parseError thất bại. */
-function extractRevertSelector(revertData: string): string {
-  if (!revertData.startsWith('0x') || revertData.length < 10) {
-    return '';
+/** Hàm chuẩn hóa projectId sang bigint. Mục đích: hỗ trợ cả mã số thuần và mã dạng PRJ-1001 cho call on-chain. */
+function normalizeProjectIdToBigInt(projectId: string): bigint {
+  const normalizedProjectId = projectId.trim();
+  if (/^[0-9]+$/.test(normalizedProjectId)) {
+    return BigInt(normalizedProjectId);
   }
 
-  return revertData.slice(0, 10).toLowerCase();
+  const numericPartMatch = normalizedProjectId.match(/([0-9]+)/);
+  if (!numericPartMatch?.[1]) {
+    throw new ApplicationError('projectId không hợp lệ để gửi giao dịch.', 400, 'VALIDATION_ERROR');
+  }
+
+  return BigInt(numericPartMatch[1]);
 }
 
-/** Hàm decode custom error từ contract. Mục đích: chuyển dữ liệu revert thành tên lỗi nghiệp vụ để map response ổn định. */
-function decodeDonationRelayRevert(revertData: string): DecodedContractRevert {
-  const donationInterface = new ethers.Interface(donationRelayContractAbi);
-  const fallbackSelectorMap: Record<string, string> = {
-    '0x4c4f68ca': 'ProjectNotFound'
-  };
-
-  const selector = extractRevertSelector(revertData);
-  try {
-    const parsedError = donationInterface.parseError(revertData);
-    if (parsedError) {
-      return { selector, errorName: parsedError.name };
-    }
-  } catch {
-    // Ghi chú logic phức tạp: parseError có thể fail với dữ liệu revert cắt ngắn, nên phải fallback theo selector map.
+/** Hàm gửi donation one-click bằng ZeroDev. Mục đích: backend batch approve + donate để frontend không cần popup MetaMask. */
+export async function executeOneClickDonation(authenticatedUserId: string, projectId: string, amount: number, isAnonymous: boolean) {
+  const normalizedAmount = Math.floor(Number(amount));
+  if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+    throw new ApplicationError('Số token quyên góp phải lớn hơn 0.', 400, 'VALIDATION_ERROR');
   }
 
-  return {
-    selector,
-    errorName: fallbackSelectorMap[selector] || 'UnknownContractError'
-  };
-}
-
-/** Hàm map lỗi contract revert sang ApplicationError. Mục đích: trả message thân thiện và errorCode ổn định cho frontend. */
-function mapDonationRelayRevertToApplicationError(decodedRevert: DecodedContractRevert): ApplicationError {
-  const errorNameToApplicationErrorMap: Record<string, ApplicationError> = {
-    ProjectNotFound: new ApplicationError('Dự án quyên góp không tồn tại trên blockchain.', 404, 'PROJECT_NOT_FOUND'),
-    InvalidProjectId: new ApplicationError('Mã dự án không hợp lệ.', 400, 'VALIDATION_ERROR'),
-    InvalidAmount: new ApplicationError('Số token quyên góp không hợp lệ.', 400, 'AMOUNT_INVALID'),
-    InvalidProjectState: new ApplicationError('Dự án hiện không ở trạng thái nhận quyên góp.', 400, 'PROJECT_NOT_ACTIVE'),
-    AccessControlUnauthorizedAccount: new ApplicationError('Tài khoản relay chưa được cấp quyền trên contract donation.', 403, 'UNAUTHORIZED_RELAYER'),
-    EnforcedPause: new ApplicationError('Hệ thống donation on-chain đang tạm dừng để bảo trì.', 503, 'CONTRACT_REVERTED'),
-    TransferFromFailed: new ApplicationError('Giao dịch token thất bại. Vui lòng kiểm tra số dư hoặc cấp quyền token cho ví relay.', 400, 'CONTRACT_REVERTED'),
-    ERC20InsufficientBalance: new ApplicationError('Ví relay không đủ số dư token để thực hiện quyên góp.', 400, 'CONTRACT_REVERTED'),
-    ERC20InsufficientAllowance: new ApplicationError('Ví relay chưa được cấp đủ quyền sử dụng token để quyên góp.', 400, 'CONTRACT_REVERTED')
-  };
-
-  return (
-    errorNameToApplicationErrorMap[decodedRevert.errorName] ||
-    new ApplicationError('Giao dịch quyên góp bị từ chối bởi smart contract.', 400, 'CONTRACT_REVERTED')
-  );
-}
-
-/** Hàm lấy revert data từ lỗi ethers. Mục đích: gom nhiều cấu trúc lỗi khác nhau của CALL_EXCEPTION về một định dạng chung. */
-function extractRevertDataFromEthersError(error: unknown): string {
-  if (!error || typeof error !== 'object') {
-    return '';
+  const authenticatedUser = await findUserById(authenticatedUserId.trim());
+  if (!authenticatedUser) {
+    throw new ApplicationError('Không tìm thấy người dùng đăng nhập.', 404, 'NOT_FOUND');
+  }
+  if (!authenticatedUser.smartAccountOwnerEncryptedPrivateKey) {
+    throw new ApplicationError('Tài khoản chưa sẵn sàng cho luồng one-click donation.', 400, 'VALIDATION_ERROR');
   }
 
-  const possibleError = error as {
-    data?: string;
-    info?: { error?: { data?: string } };
-    error?: { data?: string };
-  };
-
-  if (typeof possibleError.data === 'string') {
-    return possibleError.data;
-  }
-  if (typeof possibleError.info?.error?.data === 'string') {
-    return possibleError.info.error.data;
-  }
-  if (typeof possibleError.error?.data === 'string') {
-    return possibleError.error.data;
+  const donationContractAddress = String(process.env.DONATION_RANKING_CONTRACT_ADDRESS || '').trim() as `0x${string}`;
+  if (!donationContractAddress) {
+    throw new ApplicationError('Thiếu cấu hình DONATION_RANKING_CONTRACT_ADDRESS.', 500, 'INTERNAL_ERROR');
   }
 
-  return '';
-}
-
-/** Hàm chuẩn hóa lỗi donate relay từ ethers. Mục đích: bắt CALL_EXCEPTION và map sang lỗi nghiệp vụ trước khi trả về controller. */
-function normalizeDonationRelayError(error: unknown, logContext: Record<string, unknown>): ApplicationError {
-  if (error instanceof ApplicationError) {
-    return error;
+  const paymasterEnabledKernelClient = await createKernelClientFromEncryptedOwnerKey(authenticatedUser.smartAccountOwnerEncryptedPrivateKey);
+  const paymasterEnabledKernelClientAccount = (paymasterEnabledKernelClient as { account?: { address?: `0x${string}` } }).account;
+  if (!paymasterEnabledKernelClientAccount?.address) {
+    throw new ApplicationError('Không thể lấy smart account address để gửi giao dịch.', 500, 'INTERNAL_ERROR');
   }
 
-  const errorWithCode = error as { code?: string };
-  if (errorWithCode?.code === 'CALL_EXCEPTION') {
-    const revertData = extractRevertDataFromEthersError(error);
-    const decodedRevert = decodeDonationRelayRevert(revertData);
-    const mappedError = mapDonationRelayRevertToApplicationError(decodedRevert);
+  const projectIdAsBigInt = normalizeProjectIdToBigInt(projectId);
+  const donationAmountAsBigInt = BigInt(normalizedAmount);
+  const maxApprovalAmount = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
 
-    logger.error('Donation relay contract call reverted.', {
-      ...logContext,
-      selector: decodedRevert.selector,
-      errorName: decodedRevert.errorName
+  const normalizedAuthenticatedWalletAddress = String(authenticatedUser.walletAddress || '').trim().toLowerCase();
+  const normalizedKernelAccountAddress = paymasterEnabledKernelClientAccount.address.toLowerCase();
+
+  // Ghi chú logic phức tạp: nếu ví trong hồ sơ user lệch với smart account dựng từ owner key,
+  // hệ thống tự đồng bộ lại DB ngay tại thời điểm donation để xử lý dứt điểm dữ liệu user cũ.
+  if (normalizedAuthenticatedWalletAddress && normalizedAuthenticatedWalletAddress !== normalizedKernelAccountAddress) {
+    await updateUser({
+      ...authenticatedUser,
+      walletAddress: normalizedKernelAccountAddress
     });
 
-    return mappedError;
+    logger.warn('Đã tự động đồng bộ walletAddress do phát hiện SMART_ACCOUNT_MISMATCH.', {
+      correlationId: authenticatedUser.correlationId,
+      walletAddress: normalizedKernelAccountAddress,
+      smartAccountAddress: normalizedKernelAccountAddress
+    });
   }
 
-  logger.error('Donation relay transaction failed with unexpected error.', {
-    ...logContext,
-    errorMessage: (error as Error)?.message || 'Unknown error'
+  const readOnlyProvider = new ethers.JsonRpcProvider(getZeroDevConfig().rpcUrl);
+  const donationContract = new ethers.Contract(donationContractAddress, donationContractAbi, readOnlyProvider);
+  const charityTokenAddress = (await donationContract.charityToken()) as `0x${string}`;
+  const charityTokenContract = new ethers.Contract(charityTokenAddress, erc20Abi, readOnlyProvider);
+  const currentTokenBalance = (await charityTokenContract.balanceOf(paymasterEnabledKernelClientAccount.address)) as bigint;
+
+  if (currentTokenBalance < donationAmountAsBigInt) {
+    throw new ApplicationError(
+      `Số dư token trong smart account không đủ để quyên góp. Số dư hiện tại: ${currentTokenBalance.toString()} Token.`,
+      400,
+      'INSUFFICIENT_TOKEN_BALANCE'
+    );
+  }
+
+  const currentAllowance = (await charityTokenContract.allowance(paymasterEnabledKernelClientAccount.address, donationContractAddress)) as bigint;
+
+  const callList: Array<{ to: `0x${string}`; data: `0x${string}`; value: bigint }> = [];
+
+  if (currentAllowance < donationAmountAsBigInt) {
+    callList.push({
+      to: charityTokenAddress,
+      data: charityTokenContract.interface.encodeFunctionData('approve', [donationContractAddress, maxApprovalAmount]) as `0x${string}`,
+      value: 0n
+    });
+  }
+
+  callList.push({
+    to: donationContractAddress,
+    data: donationContract.interface.encodeFunctionData('donate', [projectIdAsBigInt, donationAmountAsBigInt, Boolean(isAnonymous)]) as `0x${string}`,
+    value: 0n
   });
 
-  return new ApplicationError('Không thể gửi giao dịch quyên góp lúc này. Vui lòng thử lại sau.', 500, 'INTERNAL_ERROR');
+  // Ghi chú logic phức tạp: hệ thống bắt buộc paymaster sponsor gas để đúng yêu cầu "deployer tài trợ phí gas".
+  // Vì vậy khi paymaster policy không khớp, trả lỗi nghiệp vụ rõ ràng thay vì fallback sang self-sponsored.
+  const sendTransactionPayload = {
+    calls: callList,
+    entryPointAddress: getZeroDevConfig().entryPointAddress
+  };
+
+  let transactionHash: string;
+  try {
+    transactionHash = await (paymasterEnabledKernelClient as any).sendTransaction(sendTransactionPayload);
+  } catch (paymasterError) {
+    const paymasterErrorMessage = (paymasterError as Error)?.message || '';
+    const isPaymasterPolicyError =
+      paymasterErrorMessage.includes('pm_getPaymasterStubData') ||
+      paymasterErrorMessage.includes('did not match any gas sponsoring policies') ||
+      paymasterErrorMessage.includes('no ERC20 gas token data present');
+
+    if (isPaymasterPolicyError) {
+      logger.error('Paymaster từ chối tài trợ gas cho one-click donation.', {
+        paymasterErrorMessage,
+        smartAccountAddress: paymasterEnabledKernelClientAccount.address,
+        donationContractAddress
+      });
+
+      throw new ApplicationError(
+        'Paymaster chưa cấu hình policy phù hợp để tài trợ phí gas cho giao dịch quyên góp.',
+        400,
+        'PAYMASTER_POLICY_MISMATCH'
+      );
+    }
+
+    throw paymasterError;
+  }
+
+  logger.info('One-click donation transaction submitted.', { transactionHash });
+  return {
+    transactionHash,
+    projectId: projectIdAsBigInt.toString(),
+    amount: Number(donationAmountAsBigInt),
+    isAnonymous: Boolean(isAnonymous)
+  };
 }
+
+
+
+
+
 
 /** Hàm tạo correlation id cho donation. Mục đích: gắn định danh xuyên suốt để trace luồng on-chain và off-chain. */
 function generateDonationCorrelationId(transactionHash: string): string {
@@ -236,6 +305,12 @@ export async function getDonationHistoryByProjectId(projectId: string, limitCoun
   return findDonationHistoryByProjectId(normalizedProjectId, normalizedLimitCount);
 }
 
+/** Hàm lấy danh sách nhà hảo tâm công khai. Mục đích: trả dữ liệu cho màn hình liệt kê nhà hảo tâm, có hỗ trợ lọc theo projectId. */
+export async function getPublicDonorList(limitCount: number, projectId?: string) {
+  const normalizedLimitCount = normalizeLimitCount(limitCount, 100, 500);
+  return findPublicDonorList(normalizedLimitCount, projectId);
+}
+
 /** Hàm đồng bộ event DonationReceived từ blockchain. Mục đích: index giao dịch on-chain về MongoDB để API history truy vấn nhanh. */
 export async function syncDonationEventsFromBlockchain() {
   const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
@@ -296,68 +371,6 @@ export async function syncDonationEventsFromBlockchain() {
   return { totalSyncedEvents: donationEventList.length, fromBlockNumber };
 }
 
-/** Hàm gửi giao dịch donate qua backend relay. Mục đích: hỗ trợ trải nghiệm Web2/AA không phụ thuộc MetaMask trực tiếp trên frontend. */
-export async function submitDonationViaRelay(projectId: string, amount: number, isAnonymous: boolean) {
-  const normalizedProjectId = projectId.trim();
-  const parsedAmount = Number(amount);
-  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
-  // Ghi chú logic phức tạp: hỗ trợ cả tên biến cấu hình mới và legacy để tránh vỡ môi trường cũ.
-  const donationRankingContractAddress =
-    process.env.DONATION_RANKING_CONTRACT_ADDRESS?.trim() ||
-    process.env.DONATION_RANKING_ADDRESS?.trim() ||
-    '';
-  const donationRelayerPrivateKey =
-    process.env.DONATION_RELAYER_PRIVATE_KEY?.trim() ||
-    process.env.BACKEND_MINTER_PRIVATE_KEY?.trim() ||
-    '';
-  const expectedChainId = Number(process.env.BLOCKCHAIN_CHAIN_ID || 0);
-
-  if (!normalizedProjectId || !Number.isInteger(Number(normalizedProjectId))) {
-    throw new ApplicationError('projectId không hợp lệ.', 400, 'VALIDATION_ERROR');
-  }
-  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-    throw new ApplicationError('Số token quyên góp phải lớn hơn 0.', 400, 'AMOUNT_INVALID');
-  }
-  if (!blockchainRpcUrl || !donationRankingContractAddress || !donationRelayerPrivateKey) {
-    throw new ApplicationError(
-      'Thiếu cấu hình relay donation. Cần BLOCKCHAIN_RPC_URL, DONATION_RANKING_CONTRACT_ADDRESS (hoặc DONATION_RANKING_ADDRESS), DONATION_RELAYER_PRIVATE_KEY (hoặc BACKEND_MINTER_PRIVATE_KEY).',
-      500,
-      'INTERNAL_ERROR'
-    );
-  }
-
-  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
-  const network = await provider.getNetwork();
-  if (expectedChainId > 0 && Number(network.chainId) !== expectedChainId) {
-    throw new ApplicationError('Sai network blockchain của dịch vụ relay.', 400, 'CHAIN_MISMATCH');
-  }
-
-  const relayerWallet = new ethers.Wallet(donationRelayerPrivateKey, provider);
-  const relayLogContext = {
-    projectId: normalizedProjectId,
-    amount: Math.floor(parsedAmount),
-    relayerAddress: relayerWallet.address.toLowerCase(),
-    contractAddress: donationRankingContractAddress,
-    chainId: Number(network.chainId)
-  };
-
-  const donationContract = new ethers.Contract(donationRankingContractAddress, donationRelayContractAbi, relayerWallet);
-
-  try {
-    // Ghi chú logic phức tạp: ép kiểu BigInt để tránh sai lệch số lớn khi serialize amount/projectId.
-    const donationTransaction = await donationContract.donate(BigInt(normalizedProjectId), BigInt(Math.floor(parsedAmount)), isAnonymous);
-    await donationTransaction.wait();
-
-    logger.info('Donation relay transaction submitted successfully.', {
-      ...relayLogContext,
-      transactionHash: donationTransaction.hash
-    });
-
-    return { transactionHash: donationTransaction.hash };
-  } catch (error) {
-    throw normalizeDonationRelayError(error, relayLogContext);
-  }
-}
 
 
 /** Hàm kiểm tra định dạng transaction hash. Mục đích: chặn dữ liệu sai trước khi gọi RPC blockchain. */
@@ -389,7 +402,7 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
 
   const authenticatedUser = await findUserById(normalizedAuthenticatedUserId);
   if (!authenticatedUser) {
-    throw new ApplicationError('Không tìm thấy thông tin người dùng để ghi nhận quyên góp.', 404, 'USER_NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy thông tin người dùng để ghi nhận quyên góp.', 404, 'NOT_FOUND');
   }
 
   const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
@@ -414,7 +427,15 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
       continue;
     }
 
-    const parsedLog = eventInterface.parseLog({ topics: receiptLog.topics, data: receiptLog.data });
+    let parsedLog: ethers.LogDescription | null = null;
+    try {
+      // Ghi chú logic phức tạp: parseLog có thể throw khi log thuộc event khác cùng contract,
+      // vì vậy cần bắt lỗi và bỏ qua để tiếp tục quét toàn bộ receipt logs.
+      parsedLog = eventInterface.parseLog({ topics: receiptLog.topics, data: receiptLog.data });
+    } catch {
+      continue;
+    }
+
     if (!parsedLog || parsedLog.name !== 'DonationReceived') {
       continue;
     }
@@ -429,7 +450,7 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
 
     // Ghi chú logic phức tạp: bắt buộc ví người ký on-chain trùng ví đã xác thực để chặn giả mạo txHash giữa các tài khoản.
     if (!authenticatedUserWalletAddress || donorAddressOnChain !== authenticatedUserWalletAddress) {
-      throw new ApplicationError('Ví người gửi giao dịch không khớp với ví của tài khoản đăng nhập.', 403, 'DONOR_MISMATCH');
+      throw new ApplicationError('Ví người gửi giao dịch không khớp với ví của tài khoản đăng nhập.', 403, 'FORBIDDEN');
     }
 
     // Ghi chú logic phức tạp: ưu tiên amount/timestamp on-chain để tránh client giả mạo dữ liệu request body.

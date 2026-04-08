@@ -6,6 +6,8 @@ export type AuthUser = {
   fullName: string;
   role: string;
   walletAddress: string;
+  smartAccountOwnerAddress: string | null;
+  smartAccountOwnerEncryptedPrivateKey: string | null;
   socialProvider: string;
   socialAccountId: string;
   isEmailVerified: boolean;
@@ -49,6 +51,8 @@ const authUserSchema = new Schema<AuthUser>({
   fullName: { type: String, required: true },
   role: { type: String, required: true },
   walletAddress: { type: String, required: true },
+  smartAccountOwnerAddress: { type: String, default: null },
+  smartAccountOwnerEncryptedPrivateKey: { type: String, default: null },
   socialProvider: { type: String, required: true },
   socialAccountId: { type: String, required: true },
   isEmailVerified: { type: Boolean, required: true },
@@ -215,3 +219,22 @@ export async function addAuditLog(entry: AuditLogEntry): Promise<void> {
   await AuditLogModel.create(entry);
 }
 
+/**
+ * Hàm lấy danh sách người dùng theo nhiều ví.
+ * Mục đích: map dữ liệu donation on-chain sang thông tin công khai nhà hảo tâm từ MongoDB.
+ */
+export async function findUsersByWalletAddressList(walletAddressList: string[]): Promise<AuthUser[]> {
+  if (!walletAddressList.length) {
+    return [];
+  }
+
+  const normalizedWalletAddressList = walletAddressList
+    .map(walletAddressItem => String(walletAddressItem || '').trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!normalizedWalletAddressList.length) {
+    return [];
+  }
+
+  return AuthUserModel.find({ walletAddress: { $in: normalizedWalletAddressList } }).lean<AuthUser[]>().exec();
+}

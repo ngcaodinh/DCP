@@ -274,6 +274,7 @@ const mapDonationErrorMessage = (error: unknown): string => {
   if (apiError?.errorCode === 'CHAIN_MISMATCH') return 'Hệ thống relay đang ở sai mạng blockchain. Vui lòng thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_TIMEOUT') return 'Giao dịch đang pending quá lâu. Vui lòng đợi thêm hoặc thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_REVERTED') return 'Giao dịch bị từ chối trên blockchain. Vui lòng kiểm tra lại số dư token.';
+  if (apiError?.errorCode === 'PAYMASTER_POLICY_MISMATCH') return 'Hệ thống tài trợ phí gas chưa cấu hình policy phù hợp cho giao dịch quyên góp. Vui lòng liên hệ quản trị viên.';
   if (apiError?.errorCode === 'VALIDATION_ERROR') {
     return apiError.message || 'Dữ liệu quyên góp không hợp lệ. Vui lòng kiểm tra lại thông tin.';
   }
@@ -611,7 +612,7 @@ export default function HomePage() {
       throw { statusCode: 400, errorCode: 'VALIDATION_ERROR', message: 'Mã dự án không hợp lệ để gửi giao dịch.' };
     }
 
-    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/submit'), {
+    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/one-click'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${authSession.accessToken}` },
       body: JSON.stringify({ projectId: relayProjectId, amount, isAnonymous: false })
@@ -1346,7 +1347,7 @@ export default function HomePage() {
                     <p className="text-xs text-[#6b7280]">Dự án</p>
                     <p className="mt-1 text-sm font-semibold text-[#111827]">{selectedDonationCampaignDetail.name}</p>
                     <p className="mt-2 text-xs text-[#6b7280]">
-                      Đã quyên góp: {Number(selectedDonationCampaignDetail.donatedAmount || 0).toLocaleString('vi-VN')} token · Lượt donate:{' '}
+                      Tổng tiền quyên góp đến hiện tại: {Number(selectedDonationCampaignDetail.donatedAmount || 0).toLocaleString('vi-VN')} token · Số lượt quyên góp:{' '}
                       {Number(selectedDonationCampaignDetail.donationCount || 0).toLocaleString('vi-VN')}
                     </p>
                     <p className="mt-1 text-xs text-[#6b7280]">Số dư của bạn: {Number(userTokenBalance).toLocaleString('vi-VN')} token</p>
@@ -1531,6 +1532,14 @@ export default function HomePage() {
                       <p className="mt-1.5 text-sm leading-5 text-[#374151] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5] overflow-hidden">
                         {selectedProjectDetail.description}
                       </p>
+                      <div className="mt-3 border-t border-[#eef2f7] pt-3">
+                        <a
+                          href={`/donors?projectId=${encodeURIComponent(selectedProjectDetail.projectId)}`}
+                          className="inline-flex items-center text-sm font-semibold text-[#0e7c6b] transition hover:text-[#0b6759] hover:underline"
+                        >
+                          Xem danh sách nhà hảo tâm đã quyên góp →
+                        </a>
+                      </div>
                     </div>
                   </section>
 

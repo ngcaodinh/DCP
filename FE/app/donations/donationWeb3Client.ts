@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, Eip1193Provider } from 'ethers';
+import { BrowserProvider, Contract, Eip1193Provider, Interface } from 'ethers';
 
 export type DonationClientErrorCode =
   | 'WALLET_NOT_FOUND'
@@ -20,7 +20,16 @@ export class DonationClientError extends Error {
   }
 }
 
-const donationContractAbi = ['function donate(uint256 projectId, uint256 amount, bool isAnonymous) external returns (bool)'];
+const donationContractAbi = [
+  'function donate(uint256 projectId, uint256 amount, bool isAnonymous) external returns (bool)',
+  'function charityToken() external view returns (address)'
+];
+
+const charityTokenContractAbi = [
+  'function balanceOf(address account) external view returns (uint256)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+  'function approve(address spender, uint256 amount) external returns (bool)'
+];
 
 type EthereumBrowserWindow = Window & {
   ethereum?: Eip1193Provider;
@@ -90,7 +99,69 @@ function resolveContractProjectId(projectId: string): string {
   throw new DonationClientError('VALIDATION_ERROR', 'Mã dự án chưa có định danh on-chain hợp lệ để gửi giao dịch.');
 }
 
-/** Hàm gửi giao dịch donate bằng ví người dùng. Mục đích: thực thi đúng UC3.1 theo luồng user ký trực tiếp on-chain. */
+type BatchCall = {
+  to: string;
+  data: string;
+  value?: string;
+};
+
+/** Hàm lấy txHash từ kết quả wallet_getCallsStatus. Mục đích: tương thích nhiều cấu trúc response của từng ví hỗ trợ batch call. */
+function extractTransactionHashFromBatchStatus(batchStatusResult: unknown): string {
+  const normalizedResult = batchStatusResult as {
+    receipts?: Array<{ transactionHash?: string }>;
+    calls?: Array<{ transactionHash?: string }>;
+    transactions?: Array<{ hash?: string }>;
+  };
+
+  return String(
+    normalizedResult?.receipts?.[0]?.transactionHash ||
+    normalizedResult?.calls?.[0]?.transactionHash ||
+    normalizedResult?.transactions?.[0]?.hash ||
+    ''
+  );
+}
+
+/** Hàm tạo danh sách call batch approve + donate. Mục đích: gộp 2 bước nghiệp vụ vào 1 lần xác nhận ví theo chuẩn wallet_sendCalls. */
+async function buildDonationBatchCalls(
+  signerAddress: string,
+  donationContractAddress: string,
+  donationContract: Contract,
+  donationAmountAsBigInt: bigint,
+  contractProjectIdAsBigInt: bigint,
+  isAnonymous: boolean
+): Promise<BatchCall[]> {
+  const charityTokenAddress: string = await donationContract.charityToken();
+  const charityTokenContract = new Contract(charityTokenAddress, charityTokenContractAbi, donationContract.runner);
+
+  const currentBalance: bigint = await charityTokenContract.balanceOf(signerAddress);
+  if (currentBalance < donationAmountAsBigInt) {
+    throw new DonationClientError('TRANSACTION_FAILED', 'Số dư token trong ví không đủ để quyên góp.');
+  }
+
+  const currentAllowance: bigint = await charityTokenContract.allowance(signerAddress, donationContractAddress);
+  const tokenInterface = new Interface(charityTokenContractAbi);
+  const donationInterface = new Interface(donationContractAbi);
+  const batchCalls: BatchCall[] = [];
+
+  if (currentAllowance < donationAmountAsBigInt) {
+    // Ghi chú logic phức tạp: đặt approve trước donate ngay trong cùng một batch để người dùng chỉ cần xác nhận một lần.
+    batchCalls.push({
+      to: charityTokenAddress,
+      data: tokenInterface.encodeFunctionData('approve', [donationContractAddress, BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')]),
+      value: '0x0'
+    });
+  }
+
+  batchCalls.push({
+    to: donationContractAddress,
+    data: donationInterface.encodeFunctionData('donate', [contractProjectIdAsBigInt, donationAmountAsBigInt, isAnonymous]),
+    value: '0x0'
+  });
+
+  return batchCalls;
+}
+
+/** Hàm gửi giao dịch donate bằng ví người dùng. Mục đích: ưu tiên batch approve + donate để người dùng chỉ cần xác nhận một lần. */
 export async function donateByWallet(projectId: string, amount: number, isAnonymous: boolean): Promise<string> {
   const normalizedContractProjectId = resolveContractProjectId(projectId);
   const normalizedAmount = Math.floor(Number(amount));
@@ -108,15 +179,40 @@ export async function donateByWallet(projectId: string, amount: number, isAnonym
     await ensureExpectedChain(browserProvider, expectedChainId);
 
     const signer = await browserProvider.getSigner();
+    const signerAddress = (await signer.getAddress()).toLowerCase();
     const donationContract = new Contract(donationContractAddress, donationContractAbi, signer);
-    const donationTransaction = await donationContract.donate(BigInt(normalizedContractProjectId), BigInt(normalizedAmount), isAnonymous);
-    const transactionReceipt = await donationTransaction.wait(1);
+    const donationAmountAsBigInt = BigInt(normalizedAmount);
+    const projectIdAsBigInt = BigInt(normalizedContractProjectId);
 
-    if (!transactionReceipt || transactionReceipt.status !== 1) {
-      throw new DonationClientError('TRANSACTION_FAILED', 'Giao dịch quyên góp thất bại trên blockchain.');
+    const batchCalls = await buildDonationBatchCalls(
+      signerAddress,
+      donationContractAddress,
+      donationContract,
+      donationAmountAsBigInt,
+      projectIdAsBigInt,
+      isAnonymous
+    );
+
+    // Ghi chú logic phức tạp: wallet_sendCalls thực hiện batch trong một luồng xác nhận duy nhất, sau đó poll wallet_getCallsStatus để lấy txHash.
+    const batchIdentifier = await browserProvider.send('wallet_sendCalls', [
+      {
+        from: signerAddress,
+        chainId: `0x${expectedChainId.toString(16)}`,
+        version: '1.0',
+        calls: batchCalls
+      }
+    ]);
+
+    for (let pollAttemptIndex = 0; pollAttemptIndex < 20; pollAttemptIndex += 1) {
+      const batchStatusResult = await browserProvider.send('wallet_getCallsStatus', [batchIdentifier]);
+      const transactionHash = extractTransactionHashFromBatchStatus(batchStatusResult);
+      if (transactionHash) {
+        return transactionHash;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
     }
 
-    return donationTransaction.hash;
+    throw new DonationClientError('TRANSACTION_FAILED', 'Không thể lấy transaction hash từ batch giao dịch. Vui lòng kiểm tra lịch sử ví.');
   } catch (error) {
     if (error instanceof DonationClientError) {
       throw error;
@@ -128,6 +224,12 @@ export async function donateByWallet(projectId: string, amount: number, isAnonym
     }
 
     const normalizedErrorMessage = String(typedError?.message || '').toLowerCase();
+    if (normalizedErrorMessage.includes('wallet_sendcalls') || normalizedErrorMessage.includes('method not found')) {
+      throw new DonationClientError(
+        'TRANSACTION_FAILED',
+        'Ví hiện tại chưa hỗ trợ ký batch 1 lần xác nhận. Vui lòng dùng smart wallet ERC-4337 tương thích hoặc nâng cấp ví.'
+      );
+    }
     if (normalizedErrorMessage.includes('timeout')) {
       throw new DonationClientError('RPC_TIMEOUT', 'Kết nối blockchain bị timeout. Vui lòng thử lại.');
     }

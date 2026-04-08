@@ -49,6 +49,7 @@ function mapDonationErrorMessage(error: unknown): string {
   if (apiError?.errorCode === 'CHAIN_MISMATCH') return 'Hệ thống relay đang ở sai mạng blockchain. Vui lòng thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_TIMEOUT') return 'Giao dịch đang pending quá lâu. Vui lòng đợi thêm hoặc thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_REVERTED') return 'Giao dịch bị từ chối trên blockchain. Vui lòng kiểm tra lại số dư token.';
+  if (apiError?.errorCode === 'PAYMASTER_POLICY_MISMATCH') return 'Hệ thống tài trợ phí gas chưa cấu hình policy phù hợp cho giao dịch quyên góp. Vui lòng liên hệ quản trị viên.';
   if (apiError?.errorCode === 'VALIDATION_ERROR') {
     return apiError.message || 'Dữ liệu quyên góp không hợp lệ. Vui lòng kiểm tra lại thông tin.';
   }
@@ -121,7 +122,7 @@ export default function DonationCampaignDetailPage() {
       throw { statusCode: 400, errorCode: 'VALIDATION_ERROR', message: 'Mã dự án không hợp lệ để gửi giao dịch.' } as ApiErrorResponse;
     }
 
-    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/submit'), {
+    return fetchApi<{ transactionHash: string }>(buildApiUrl('/donations/one-click'), {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ projectId: relayProjectId, amount, isAnonymous })

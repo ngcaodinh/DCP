@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
+import { ethers } from 'ethers';
 import { createDepositRequest, getDepositTransactionStatus, processDepositWebhook } from '../services/depositService';
-import {
-  calculateMintCompletedTokenBalanceByUserId,
-  listRecentDepositTransactionsByUserId
-} from '../models/depositModel';
+import { listRecentDepositTransactionsByUserId } from '../models/depositModel';
 import { findUserById } from '../models/authModel';
 import { getLogger } from '../config/logger';
+
+const charityTokenAbi = ['function balanceOf(address account) view returns (uint256)'];
 
 const logger = getLogger();
 
@@ -173,6 +173,25 @@ export async function handleGetDepositStatus(request: Request, response: Respons
 }
 
 /**
+ * Hàm đọc số dư token on-chain theo địa chỉ ví người dùng.
+ * Mục đích: đồng bộ số dư hiển thị với số dư thực tế dùng khi one-click donation.
+ */
+async function getOnChainTokenBalance(walletAddress: string): Promise<number> {
+  const blockchainRpcUrl = String(process.env.BLOCKCHAIN_RPC_URL || '').trim();
+  const charityTokenContractAddress = String(process.env.CHARITY_TOKEN_CONTRACT_ADDRESS || '').trim();
+
+  if (!blockchainRpcUrl || !charityTokenContractAddress || !walletAddress) {
+    return 0;
+  }
+
+  const readOnlyProvider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const charityTokenContract = new ethers.Contract(charityTokenContractAddress, charityTokenAbi, readOnlyProvider);
+  const tokenBalanceAsBigInt = await charityTokenContract.balanceOf(walletAddress) as bigint;
+
+  return Number(tokenBalanceAsBigInt);
+}
+
+/**
  * Hàm lấy dữ liệu sidebar của trang deposit.
  * Mục đích: trả thông tin hồ sơ, số dư token và lịch sử nạp tiền gần đây theo user hiện tại.
  */
@@ -190,7 +209,7 @@ export async function handleGetDepositSidebar(request: Request, response: Respon
       return;
     }
 
-    const tokenBalance = await calculateMintCompletedTokenBalanceByUserId(user.id);
+    const tokenBalanceOnChain = await getOnChainTokenBalance(user.walletAddress);
     const recentTransactions = await listRecentDepositTransactionsByUserId(user.id, 5);
 
     response.status(200).json({
@@ -199,7 +218,8 @@ export async function handleGetDepositSidebar(request: Request, response: Respon
         role: user.role,
         walletAddress: user.walletAddress
       },
-      tokenBalance,
+      tokenBalance: tokenBalanceOnChain,
+      tokenBalanceOnChain,
       recentDeposits: recentTransactions.map((transaction) => ({
         orderCode: transaction.orderCode,
         amountVnd: transaction.amountVnd,
