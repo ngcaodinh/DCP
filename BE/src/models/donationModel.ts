@@ -57,6 +57,24 @@ export async function findDonations(limitCount: number): Promise<DonationRecord[
   return DonationMongoModel.find({}).sort({ timestamp: -1 }).limit(limitCount).lean<DonationRecord[]>().exec();
 }
 
+/** Hàm lấy donation toàn cục có phân trang. Mục đích: hỗ trợ server-side pagination cho API nhà hảo tâm. */
+export async function findDonationsPaginated(limitCount: number, skipCount: number): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({}).sort({ timestamp: -1 }).skip(skipCount).limit(limitCount).lean<DonationRecord[]>().exec();
+}
+
+/** Hàm lấy donation theo project có phân trang. Mục đích: trả dữ liệu nhà hảo tâm theo đúng dự án người dùng chọn. */
+export async function findDonationsByProjectIdPaginated(projectId: string, limitCount: number, skipCount: number): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({ projectId }).sort({ timestamp: -1 }).skip(skipCount).limit(limitCount).lean<DonationRecord[]>().exec();
+}
+
+/** Hàm đếm tổng donation. Mục đích: tính metadata phân trang cho API nhà hảo tâm. */
+export async function countDonations(projectId?: string): Promise<number> {
+  const normalizedProjectId = String(projectId || '').trim();
+  const filterQuery = normalizedProjectId ? { projectId: normalizedProjectId } : {};
+  return DonationMongoModel.countDocuments(filterQuery).exec();
+}
+
+
 /** Hàm lấy tổng donation theo project. Mục đích: trả về số tiền đã quyên góp để hiển thị ở danh sách và trang chi tiết. */
 export async function aggregateDonationSummaryByProjectId(projectId: string): Promise<{ totalAmount: number; donationCount: number }> {
   const aggregateResult = await DonationMongoModel.aggregate<{ totalAmount: number; donationCount: number }>([

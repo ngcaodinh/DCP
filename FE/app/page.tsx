@@ -363,6 +363,7 @@ export default function HomePage() {
   const [supportProjectList, setSupportProjectList] = useState<HomeSupportProject[]>([]);
   const [isSupportProjectsLoading, setIsSupportProjectsLoading] = useState(true);
   const [supportProjectsErrorMessage, setSupportProjectsErrorMessage] = useState('');
+  const [isShowingAllSupportProjects, setIsShowingAllSupportProjects] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isProjectDetailModalVisible, setIsProjectDetailModalVisible] = useState(false);
   const [isProjectDetailLoading, setIsProjectDetailLoading] = useState(false);
@@ -509,13 +510,14 @@ export default function HomePage() {
    * Mục đích: hiển thị menu dropdown chứa hành động đăng xuất.
    */
 
-  /** Hàm tải danh sách dự án hỗ trợ. Mục đích: tái sử dụng sau khi donate thành công để đồng bộ dữ liệu Home. */
-  const loadSupportProjectList = useCallback(async () => {
+  /** Hàm tải danh sách dự án hỗ trợ. Mục đích: cho phép lấy dữ liệu preview hoặc toàn bộ danh sách theo hành động người dùng. */
+  const loadSupportProjectList = useCallback(async (shouldLoadAllProjects: boolean) => {
     setIsSupportProjectsLoading(true);
     setSupportProjectsErrorMessage('');
 
     try {
-      const supportProjectsResponse = await fetchApi<HomeSupportProject[]>(buildApiUrl('/projects/public-support?limit=6'), {
+      const supportProjectApiPath = shouldLoadAllProjects ? '/projects/public-support?limit=12' : '/projects/public-support?limit=6';
+      const supportProjectsResponse = await fetchApi<HomeSupportProject[]>(buildApiUrl(supportProjectApiPath), {
         method: 'GET',
         cache: 'no-store'
       });
@@ -533,8 +535,20 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    void loadSupportProjectList();
+    void loadSupportProjectList(false);
   }, [loadSupportProjectList]);
+
+  /** Hàm xử lý mở toàn bộ danh sách dự án hỗ trợ. Mục đích: chuyển từ chế độ preview sang hiển thị đầy đủ ngay trên Home. */
+  const handleShowAllSupportProjects = async () => {
+    // Ghi chú logic UI quan trọng: tránh bấm lặp khi đang tải để không tạo request chồng chéo.
+    if (isSupportProjectsLoading || isShowingAllSupportProjects) {
+      return;
+    }
+
+    setIsShowingAllSupportProjects(true);
+    await loadSupportProjectList(true);
+  };
+
 
   /** Hàm tải số dư token từ backend. Mục đích: phục vụ validate số token trước khi gửi giao dịch donate. */
   const loadUserTokenBalance = useCallback(async (): Promise<number> => {
@@ -928,7 +942,7 @@ export default function HomePage() {
       const refreshedCampaignDetailPromise = loadDonationCampaignDetail(selectedDonationCampaignDetail.projectId);
       const refreshedBalancePromise = loadUserTokenBalance();
 
-      await Promise.all([loadSupportProjectList(), refreshedCampaignDetailPromise, refreshedBalancePromise]);
+      await Promise.all([loadSupportProjectList(isShowingAllSupportProjects), refreshedCampaignDetailPromise, refreshedBalancePromise]);
 
       const refreshedCampaignDetail = await refreshedCampaignDetailPromise;
       if (refreshedCampaignDetail) {
@@ -1263,9 +1277,20 @@ export default function HomePage() {
             })}
         </div>
         <div className="projects-footer">
-          <a href="#" className="btn-ghost btn-ghost-large">
-            Xem tất cả dự án →
-          </a>
+          {!isShowingAllSupportProjects ? (
+            <button
+              type="button"
+              className="btn-ghost btn-ghost-large"
+              onClick={() => void handleShowAllSupportProjects()}
+              disabled={isSupportProjectsLoading}
+            >
+              {isSupportProjectsLoading ? 'Đang tải danh sách dự án...' : 'Xem tất cả dự án →'}
+            </button>
+          ) : (
+            <span className="btn-ghost btn-ghost-large" aria-live="polite">
+              Đang hiển thị toàn bộ dự án
+            </span>
+          )}
         </div>
       </section>
 

@@ -5,7 +5,7 @@ import {
   findDonationSummaryByProjectId,
   findPublicCampaignByProjectId,
   findPublicCampaigns,
-  findPublicDonorList,
+  findPublicDonorListPaginated,
   getLatestIndexedBlockNumberFromRepository,
   upsertDonationRecordByTransactionHash
 } from '../repositories/donationRepository';
@@ -305,10 +305,11 @@ export async function getDonationHistoryByProjectId(projectId: string, limitCoun
   return findDonationHistoryByProjectId(normalizedProjectId, normalizedLimitCount);
 }
 
-/** Hàm lấy danh sách nhà hảo tâm công khai. Mục đích: trả dữ liệu cho màn hình liệt kê nhà hảo tâm, có hỗ trợ lọc theo projectId. */
-export async function getPublicDonorList(limitCount: number, projectId?: string) {
-  const normalizedLimitCount = normalizeLimitCount(limitCount, 100, 500);
-  return findPublicDonorList(normalizedLimitCount, projectId);
+/** Hàm lấy danh sách nhà hảo tâm công khai. Mục đích: trả dữ liệu có phân trang theo page/limit và lọc theo projectId. */
+export async function getPublicDonorList(pageNumber: number, limitCount: number, projectId?: string) {
+  const normalizedPageNumber = Number.isFinite(pageNumber) ? Math.max(1, Math.floor(pageNumber)) : 1;
+  const normalizedLimitCount = normalizeLimitCount(limitCount, 25, 75);
+  return findPublicDonorListPaginated(normalizedPageNumber, normalizedLimitCount, projectId);
 }
 
 /** Hàm đồng bộ event DonationReceived từ blockchain. Mục đích: index giao dịch on-chain về MongoDB để API history truy vấn nhanh. */

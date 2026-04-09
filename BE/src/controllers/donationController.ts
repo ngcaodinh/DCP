@@ -78,12 +78,13 @@ export async function handleGetDonationHistoryByProjectId(request: Authenticated
 
 /** Hàm xử lý request lấy danh sách nhà hảo tâm công khai. Mục đích: trả dữ liệu đầy đủ cho trang danh sách người đã quyên góp. */
 export async function handleGetPublicDonorList(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const parsedPageNumber = Number(request.query.page);
   const parsedLimitCount = Number(request.query.limit);
   const parsedProjectId = String(request.query.projectId || '').trim();
 
   try {
-    const donorList = await getPublicDonorList(parsedLimitCount, parsedProjectId);
-    sendSuccessResponse(response, 200, 'Lấy danh sách nhà hảo tâm thành công.', donorList);
+    const donorListPagination = await getPublicDonorList(parsedPageNumber, parsedLimitCount, parsedProjectId);
+    sendSuccessResponse(response, 200, 'Lấy danh sách nhà hảo tâm thành công.', donorListPagination);
   } catch (error) {
     logger.error('Lấy danh sách nhà hảo tâm thất bại.', { errorMessage: (error as Error).message });
     sendErrorFromUnknown(response, error, 'Không thể lấy danh sách nhà hảo tâm.');

@@ -19,6 +19,8 @@ type LogMetadata = {
   onChainTransactionHash?: string;
   paymasterErrorMessage?: string;
   donationContractAddress?: string;
+  authenticatedUserId?: string;
+  projectId?: string;
 };
 
 const logger = {
