@@ -14,10 +14,12 @@ export type AuthUser = {
   accountStatus: 'ACTIVE' | 'INACTIVE_PENDING_KYC';
   organizationName: string | null;
   legalRegistrationNumber: string | null;
+  isSybil: boolean;
   lastLoginAt: Date;
   lastLoginIp: string | null;
   lastLoginUserAgent: string | null;
   correlationId: string;
+  updatedAt?: Date;
 };
 
 export type RefreshSession = {
@@ -59,6 +61,7 @@ const authUserSchema = new Schema<AuthUser>({
   accountStatus: { type: String, required: true },
   organizationName: { type: String, default: null },
   legalRegistrationNumber: { type: String, default: null },
+  isSybil: { type: Boolean, required: true, default: false },
   lastLoginAt: { type: Date, required: true },
   lastLoginIp: { type: String, default: null },
   lastLoginUserAgent: { type: String, default: null },

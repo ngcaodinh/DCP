@@ -95,6 +95,18 @@ export async function findLatestIndexedBlockNumber(): Promise<number> {
   return latestRecord?.blockNumber || 0;
 }
 
+/** Hàm lấy donation trong khoảng thời gian. Mục đích: cung cấp tập đóng góp cho job tính bảng xếp hạng QF. */
+export async function findDonationsInTimeRange(startedAt: Date, endedAt: Date): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({
+    timestamp: { $gte: startedAt, $lte: endedAt },
+    donationStatus: 'INDEXED'
+  })
+    .sort({ timestamp: -1 })
+    .lean<DonationRecord[]>()
+    .exec();
+}
+
+
 
 
 

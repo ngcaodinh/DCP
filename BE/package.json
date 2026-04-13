@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "scripts": {
     "predev": "powershell -ExecutionPolicy Bypass -File ..\\scripts\\kill-ports.ps1",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest run",
@@ -46,6 +46,7 @@
     "mongodb-memory-server": "^10.1.4",
     "nodemon": "^3.1.14",
     "supertest": "^7.1.1",
+    "tsx": "^4.19.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.5.4",
     "vitest": "^2.1.8"

@@ -36,18 +36,34 @@ type HomeDonationCampaignDetail = {
   deadline?: string;
 };
 
-type HomeDepositSidebarResponse = {
-  tokenBalance: number;
-};
+
 
 
 type RankingItem = {
-  rank: string;
-  name: string;
-  organization: string;
-  score: string;
-  raised: string;
-  donors: string;
+  projectId: string;
+  projectName: string;
+  organizationName: string;
+  rankPosition: number;
+  totalRaisedAmount: number;
+  uniqueDonorCount: number;
+  quadraticScoreRaw: number;
+  matchingAmount: number;
+  totalFundingScore: number;
+};
+
+type RankingSnapshotResponse = {
+  snapshot: {
+    calculatedAt: string;
+    calculationWindowHours: number;
+    totalValidDonations: number;
+  } | null;
+  items: RankingItem[];
+  metadata: {
+    totalItems: number;
+    totalPages: number;
+    currentPage: number;
+    pageSize: number;
+  };
 };
 
 type TransactionItem = {
@@ -85,32 +101,7 @@ const stats: StatItem[] = [
   { id: 4, value: 98, suffix: '%', label: 'Giao dịch thành công', delay: 0.3 }
 ];
 
-const rankingItems: RankingItem[] = [
-  {
-    rank: '4',
-    name: 'Nước sạch cho 500 hộ dân Sóc Trăng',
-    organization: '✅ Nước Xanh VN',
-    score: '7.9',
-    raised: '256,000,000₫',
-    donors: '142'
-  },
-  {
-    rank: '5',
-    name: 'Sách giáo khoa cho học sinh nghèo',
-    organization: '✅ Học Mãi Foundation',
-    score: '7.4',
-    raised: '189,000,000₫',
-    donors: '298'
-  },
-  {
-    rank: '6',
-    name: 'Chăm sóc người cao tuổi cô đơn',
-    organization: '✅ Mái Ấm Tuổi Già',
-    score: '7.1',
-    raised: '134,000,000₫',
-    donors: '89'
-  }
-];
+
 
 const initialTransactions: TransactionItem[] = [
   {
@@ -225,6 +216,27 @@ const formatUpdatedTime = (updatedAtIso: string): string => {
   }
 
   return parsedUpdatedAt.toLocaleString('vi-VN', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+/** Hàm định dạng điểm QF hiển thị. Mục đích: giữ số thập phân ngắn gọn và đồng nhất trong bảng xếp hạng. */
+const formatRankingScore = (scoreValue: number): string => {
+  return Number(scoreValue || 0).toFixed(2);
+};
+
+/** Hàm định dạng timestamp ranking. Mục đích: hiển thị thời điểm cập nhật bảng xếp hạng cho người dùng. */
+const formatRankingCalculatedAt = (calculatedAtIso: string): string => {
+  const parsedCalculatedAt = new Date(calculatedAtIso);
+  if (Number.isNaN(parsedCalculatedAt.getTime())) {
+    return '';
+  }
+
+  return parsedCalculatedAt.toLocaleString('vi-VN', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -371,7 +383,6 @@ export default function HomePage() {
   const [selectedProjectDetail, setSelectedProjectDetail] = useState<HomeSupportProjectDetail | null>(null);
   const [isDonationModalVisible, setIsDonationModalVisible] = useState(false);
   const [selectedDonationCampaignDetail, setSelectedDonationCampaignDetail] = useState<HomeDonationCampaignDetail | null>(null);
-  const [selectedDonationProjectId, setSelectedDonationProjectId] = useState('');
   const [donationAmountInput, setDonationAmountInput] = useState('');
   const [donationErrorMessage, setDonationErrorMessage] = useState('');
   const [donationSuccessMessage, setDonationSuccessMessage] = useState('');
@@ -383,6 +394,10 @@ export default function HomePage() {
   const [isLoginRequiredDialogVisible, setIsLoginRequiredDialogVisible] = useState(false);
   const [statValues, setStatValues] = useState(() => stats.map(() => 0));
   const [transactions, setTransactions] = useState<TransactionItem[]>(initialTransactions);
+  const [rankingItemList, setRankingItemList] = useState<RankingItem[]>([]);
+  const [isRankingLoading, setIsRankingLoading] = useState(true);
+  const [rankingErrorMessage, setRankingErrorMessage] = useState('');
+  const [rankingCalculatedAtLabel, setRankingCalculatedAtLabel] = useState('');
   const [authenticatedUserName, setAuthenticatedUserName] = useState('');
   const [isUserMenuVisible, setIsUserMenuVisible] = useState(false);
   const userMenuContainerRef = useRef<HTMLDivElement | null>(null);
@@ -538,6 +553,45 @@ export default function HomePage() {
     void loadSupportProjectList(false);
   }, [loadSupportProjectList]);
 
+
+  /** Hàm tải bảng xếp hạng QF. Mục đích: đồng bộ dữ liệu ranking từ backend để hiển thị realtime trên Home. */
+  const loadRankingSnapshot = useCallback(async () => {
+    setIsRankingLoading(true);
+    setRankingErrorMessage('');
+
+    try {
+      const rankingResponse = await fetchApi<RankingSnapshotResponse>(buildApiUrl('/rankings?page=1&limit=10&sortBy=rankPosition&sortDirection=asc'), {
+        method: 'GET',
+        cache: 'no-store'
+      });
+
+      const rankingPayload = rankingResponse.data;
+      setRankingItemList(rankingPayload.items || []);
+      setRankingCalculatedAtLabel(rankingPayload.snapshot?.calculatedAt ? formatRankingCalculatedAt(rankingPayload.snapshot.calculatedAt) : '');
+    } catch (error) {
+      const fallbackErrorMessage = 'Không thể tải bảng xếp hạng QF. Vui lòng thử lại sau.';
+      const normalizedErrorMessage = error instanceof Error ? error.message : fallbackErrorMessage;
+      console.error('Fetch ranking snapshot failed.', error);
+      setRankingErrorMessage(normalizedErrorMessage || fallbackErrorMessage);
+      setRankingItemList([]);
+      setRankingCalculatedAtLabel('');
+    } finally {
+      setIsRankingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRankingSnapshot();
+
+    // Ghi chú logic phức tạp: polling theo chu kỳ giúp UI gần realtime nhưng vẫn kiểm soát số lượng request.
+    const refreshIntervalId = window.setInterval(() => {
+      void loadRankingSnapshot();
+    }, 30000);
+
+    return () => {
+      window.clearInterval(refreshIntervalId);
+    };
+  }, [loadRankingSnapshot]);
   /** Hàm xử lý mở toàn bộ danh sách dự án hỗ trợ. Mục đích: chuyển từ chế độ preview sang hiển thị đầy đủ ngay trên Home. */
   const handleShowAllSupportProjects = async () => {
     // Ghi chú logic UI quan trọng: tránh bấm lặp khi đang tải để không tạo request chồng chéo.
@@ -673,7 +727,6 @@ export default function HomePage() {
     setIsDonationModalVisible(false);
     setIsDonationConfirmModalVisible(false);
     setPendingDonationAmount(null);
-    setSelectedDonationProjectId('');
     setSelectedDonationCampaignDetail(null);
     setDonationAmountInput('');
     setDonationErrorMessage('');
@@ -709,7 +762,6 @@ export default function HomePage() {
     }
 
     setIsDonationModalVisible(true);
-    setSelectedDonationProjectId(normalizedProjectId);
     setDonationAmountInput('');
     setDonationErrorMessage('');
     setDonationSuccessMessage('');
@@ -1818,75 +1870,102 @@ export default function HomePage() {
           <div>
             <div className="section-label">Bảng xếp hạng</div>
             <h2 className="section-title">Top Quadratic Funding</h2>
+            {rankingCalculatedAtLabel && <p className="section-sub">Cập nhật lúc: {rankingCalculatedAtLabel}</p>}
           </div>
-          <a href="#" className="rank-link">
-            Xem tất cả →
-          </a>
+          <button className="rank-link" type="button" onClick={() => void loadRankingSnapshot()} disabled={isRankingLoading}>
+            {isRankingLoading ? 'Đang tải...' : 'Làm mới ↻'}
+          </button>
         </div>
-        <div className="top3-grid">
-          {[
-            {
-              medal: '🥈',
-              title: 'Phẫu thuật tim miễn phí',
-              organization: 'Trái Tim Xanh Foundation',
-              score: 'QF Score 8.7',
-              delay: 0.1
-            },
-            {
-              medal: '🥇',
-              title: 'Trường học vùng cao Hà Giang',
-              organization: 'Ánh Sáng Việt Nam',
-              score: 'QF Score 9.2',
-              delay: 0
-            },
-            {
-              medal: '🥉',
-              title: 'Tái thiết nhà Quảng Bình',
-              organization: 'Cứu Trợ Miền Trung',
-              score: 'QF Score 8.1',
-              delay: 0.2
-            }
-          ].map((card, index) => (
-            <div
-              className={`rank-card ${index === 1 ? 'first' : ''} ${visibleCards.ranking ? 'visible' : ''}`}
-              key={card.title}
-              style={{ transitionDelay: `${card.delay}s` }}
-              data-observe
-              data-group="ranking"
-            >
-              <span className="rank-medal">{card.medal}</span>
-              <div className="rank-name">{card.title}</div>
-              <div className="rank-org">{card.organization}</div>
-              <span className="qf-score-big">{card.score}</span>
-            </div>
-          ))}
-        </div>
-        <table className="rank-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Dự án</th>
-              <th>Tổ chức</th>
-              <th>QF Score</th>
-              <th>Đã gây quỹ</th>
-              <th>Donors</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rankingItems.map(item => (
-              <tr key={item.rank}>
-                <td className="rank-number">{item.rank}</td>
-                <td className="rank-project">{item.name}</td>
-                <td className="rank-organization">{item.organization}</td>
-                <td>
-                  <span className="rank-score">{item.score}</span>
-                </td>
-                <td>{item.raised}</td>
-                <td>{item.donors}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+
+        {rankingErrorMessage && (
+          <p className="project-empty" role="alert">
+            {rankingErrorMessage}
+          </p>
+        )}
+
+        {!rankingErrorMessage && !isRankingLoading && rankingItemList.length === 0 && (
+          <p className="project-empty">Chưa có dữ liệu xếp hạng QF ở thời điểm hiện tại.</p>
+        )}
+
+        {!rankingErrorMessage && rankingItemList.length > 0 && (
+          <>
+            {/* Top 3 Grid: reorder to [2, 1, 3] so rank-1 sits in wider center column — matching dcp-home.html */}
+            {(() => {
+              const top3 = rankingItemList.slice(0, 3);
+
+              // Reorder items: [2, 1, 3] layout — rank 1 always in the wider center column
+              let orderedTop3: typeof top3 = [];
+              if (top3.length === 3) {
+                orderedTop3 = [top3[1], top3[0], top3[2]]; // [rank2, rank1, rank3]
+              } else if (top3.length === 2) {
+                orderedTop3 = [top3[1], top3[0]];           // [rank2, rank1]
+              } else {
+                orderedTop3 = [...top3];                    // [rank1]
+              }
+
+              return (
+                <div className="top3-grid">
+                  {orderedTop3.map((item, index) => {
+                    const isFirst = index === 1; // rank 1 luôn ở vị trí giữa sau khi reorder
+
+                    // Xác định medal emoji theo số lượng items và index trong mảng đã reorder
+                    const medal = (() => {
+                      if (orderedTop3.length === 1) return '🥇';
+                      if (orderedTop3.length === 2) return index === 0 ? '🥈' : '🥇';
+                      if (index === 1) return '🥇';
+                      return index === 0 ? '🥈' : '🥉';
+                    })();
+
+                    return (
+                      <div
+                        className={`rank-card ${isFirst ? 'first' : ''} visible`}
+                        key={item.projectId}
+                        style={{ transitionDelay: `${index * 0.1}s` }}
+                        data-observe
+                        data-group="ranking"
+                      >
+                        <span className="rank-medal">{medal}</span>
+                        <div className="rank-name">{item.projectName}</div>
+                        <div className="rank-org">{item.organizationName || 'Tổ chức chưa cập nhật'}</div>
+                        <div className="rank-raised">
+                          <span className="raised-amount">{formatCurrencyVnd(item.totalRaisedAmount)}₫</span>
+                          <span className="raised-donors">👥 {item.uniqueDonorCount}</span>
+                        </div>
+                        <span className="qf-score-big">QF Score {formatRankingScore(item.totalFundingScore)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+            <table className="rank-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Dự án</th>
+                  <th>Tổ chức</th>
+                  <th>QF Score</th>
+                  <th>Đã gây quỹ</th>
+                  <th>Donors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankingItemList.map(item => (
+                  <tr key={item.projectId}>
+                    <td className="rank-number">{item.rankPosition}</td>
+                    <td className="rank-project">{item.projectName}</td>
+                    <td className="rank-organization">{item.organizationName || 'Chưa cập nhật'}</td>
+                    <td>
+                      <span className="rank-score">{formatRankingScore(item.totalFundingScore)}</span>
+                    </td>
+                    <td>{`${formatCurrencyVnd(item.totalRaisedAmount)}₫`}</td>
+                    <td>{item.uniqueDonorCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
       </section>
 
       <section className="cta-section">

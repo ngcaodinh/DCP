@@ -13,6 +13,8 @@ import { findUserById, updateUser } from '../models/authModel';
 import { getZeroDevConfig } from '../config/zeroDev';
 import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
 import { ApplicationError } from '../utils/applicationError';
+import { enqueueRankingRecalculate } from '../queues/rankingQueue';
+import { triggerRealtimeRankingUpdate } from './rankingService';
 
 const logger = getLogger();
 
@@ -368,6 +370,14 @@ export async function syncDonationEventsFromBlockchain() {
     await upsertDonationRecordByTransactionHash(donationEvent);
   }
 
+  // Ghi chú logic phức tạp: sau khi đồng bộ event từ blockchain, trigger async recalculate ranking snapshot.
+  // Ưu tiên realtime: gọi đồng bộ triggerRealtimeRankingUpdate để Top QF cập nhật ngay lập tức.
+  // Queue vẫn được enqueue để đảm bảo eventual consistency trong trường hợp realtime thất bại.
+  if (donationEventList.length > 0) {
+    triggerRealtimeRankingUpdate(24);           // Non-blocking — không await, không block sync job
+    enqueueRankingRecalculate(24);              // Fallback đảm bảo eventual consistency
+  }
+
   logger.info(`Donation events synced successfully. totalSyncedEvents=${donationEventList.length} fromBlockNumber=${fromBlockNumber}`);
   return { totalSyncedEvents: donationEventList.length, fromBlockNumber };
 }
@@ -480,6 +490,12 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
   }
 
   await upsertDonationRecordByTransactionHash(donationEventRecord);
+
+  // Ghi chú logic phức tạp: sau khi ghi nhận donation từ user-submitted txHash, trigger realtime ranking.
+  // Gọi đồng bộ không await để Top QF cập nhật ngay, không block response donation.
+  // Queue đồng thời enqueue để đảm bảo eventual consistency khi realtime thất bại.
+  triggerRealtimeRankingUpdate(24);           // Non-blocking — Top QF cập nhật ngay sau donation
+  enqueueRankingRecalculate(24);              // Fallback eventual consistency
 
   return {
     transactionHash: donationEventRecord.transactionHash,

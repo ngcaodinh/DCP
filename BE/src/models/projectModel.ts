@@ -94,6 +94,54 @@ export async function findPublicSupportProjectByProjectId(projectId: string): Pr
     .exec();
 }
 
+/** Hàm lấy danh sách dự án active theo nhiều projectId. Mục đích: lọc đúng tập dự án hợp lệ trước khi tính bảng xếp hạng. */
+export async function findActiveProjectsByProjectIdList(projectIdList: string[]): Promise<ProjectRecord[]> {
+  if (!projectIdList.length) {
+    return [];
+  }
+
+  return ProjectMongoModel.find({
+    projectId: { $in: projectIdList },
+    status: 'ACTIVE',
+    deadline: { $gte: new Date() }
+  })
+    .lean<ProjectRecord[]>()
+    .exec();
+}
+
+/**
+ * Hàm lấy tất cả dự án (bất kể trạng thái) theo danh sách projectId.
+ * Mục đích: phục vụ bảng xếp hạng QF — không giới hạn theo status hay deadline.
+ *
+ * Logic lọc deadline:
+ * - Project không có deadline → luôn hiển thị (không bị giới hạn thời gian)
+ * - Project có deadline trong vòng 30 ngày qua hoặc tương lai → hiển thị
+ * - Project có deadline quá 30 ngày trước → KHÔNG hiển thị (đã hết hạn quá lâu)
+ *
+ * Nhờ vậy, bảng xếp hạng luôn tươi mới, phản ánh đúng thời điểm hiện tại.
+ */
+export async function findAllProjectsByProjectIdList(projectIdList: string[]): Promise<ProjectRecord[]> {
+  if (!projectIdList.length) {
+    return [];
+  }
+
+  // Tính ngưỡng: deadline phải >= (hiện tại - 30 ngày) mới hiển thị.
+  // Project hết deadline quá 30 ngày → không xuất hiện trong bảng xếp hạng.
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  return ProjectMongoModel.find({
+    projectId: { $in: projectIdList },
+    $or: [
+      { deadline: null },
+      { deadline: undefined },
+      { deadline: { $gte: thirtyDaysAgo } }
+    ]
+  })
+    .lean<ProjectRecord[]>()
+    .exec();
+}
+
+
 /** Hàm cập nhật dự án theo projectId. Mục đích: cập nhật trạng thái vòng đời và metadata review. */
 export async function updateProjectByProjectId(
   projectId: string,

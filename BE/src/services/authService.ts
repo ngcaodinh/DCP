@@ -350,6 +350,7 @@ export async function loginWithGoogle(
         accountStatus: role === 'organization' ? 'INACTIVE_PENDING_KYC' : 'ACTIVE',
         organizationName: null,
         legalRegistrationNumber: null,
+        isSybil: false,
         lastLoginAt: new Date(),
         lastLoginIp: ipAddress,
         lastLoginUserAgent: userAgent,

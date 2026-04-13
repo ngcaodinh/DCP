@@ -128,7 +128,7 @@ export async function createKernelClientFromEncryptedOwnerKeyWithoutPaymaster(en
 /** Hàm tạo Smart Account và dữ liệu owner bảo mật. Mục đích: cấp đủ thông tin để user đăng nhập social nhưng donate kiểu web2 click. */
 export async function createZeroDevSmartAccount(): Promise<ZeroDevSmartAccountProvisionResult> {
   const { ownerPrivateKey, ownerAccount } = createOwnerAccount();
-  const kernelClient = await createKernelClientFromOwnerPrivateKey(ownerPrivateKey);
+  const kernelClient = await createKernelClientFromOwnerPrivateKey(ownerPrivateKey, true);
 
   const kernelClientAccount = (kernelClient as { account?: { address?: string } }).account;
   if (!kernelClientAccount?.address) {
