@@ -436,6 +436,12 @@ function resolveApiErrorMessage(error: unknown, fallbackErrorMessage: string): s
     return 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
   }
 
+  // HTTP 409 Conflict: tài khoản ngân hàng đã được liên kết với tổ chức khác.
+  // Backend trả về message cụ thể, frontend hiển thị nguyên bản để người dùng rõ nguyên nhân.
+  if (typedError.statusCode === 409) {
+    return typedError.message || 'Tài khoản ngân hàng này đã được liên kết với tổ chức khác.';
+  }
+
   return typedError.message || fallbackErrorMessage;
 }
 
@@ -1226,87 +1232,186 @@ function BankSettingsPanel({
       title="Tài khoản ngân hàng nhận giải ngân"
       className={isBankSetupHighlighted ? 'ring-2 ring-[#0E7C6B]/35 ring-offset-2 ring-offset-[#F8FAFB]' : ''}
     >
-      <div className="rounded-[10px] border border-[#E6F7F4] bg-gradient-to-r from-[#F2FBFA] to-[#F0F9FF] p-3">
-        <p className="font-semibold">🏦 Trạng thái tài khoản thụ hưởng</p>
-        <p className="mt-1 text-xs text-[#6B7280]">
-          {submittedAtLabel
-            ? `Lần nộp gần nhất: ${submittedAtLabel}`
-            : 'Tổ chức chưa nộp hồ sơ ngân hàng/KYC.'}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <StatusBadge label={statusLabel} className={statusStyle} />
-          <StatusBadge label="🔒 Cố định giải ngân" className="bg-[#F3F4F6] text-[#4B5563]" />
+      {/* Khối trạng thái chính — hiển thị badge, thời gian, và chi tiết ngân hàng đã duyệt */}
+      <div className="space-y-3">
+        {/* Header: badge trạng thái + badge cố định */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <StatusBadge label={statusLabel} className={statusStyle} />
+            {bankStatus === 'APPROVED' ? (
+              <StatusBadge label="Cố định giải ngân" className="bg-[#EEF2FF] text-[#4338CA]" />
+            ) : null}
+          </div>
+          {submittedAtLabel ? (
+            <span className="text-xs text-[#9CA3AF]">
+              Nộp lần cuối: {submittedAtLabel}
+            </span>
+          ) : null}
         </div>
+
+        {/* Thông báo lý do từ chối */}
         {bankStatus === 'REJECTED' && latestOrganizationKycSubmission?.rejectionReason ? (
-          <p className="mt-2 text-xs text-[#991B1B]">Lý do từ chối: {latestOrganizationKycSubmission.rejectionReason}</p>
+          <div className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-3 py-2.5 text-xs text-[#991B1B]">
+            <span className="mr-1 font-semibold">Lý do từ chối:</span>
+            {latestOrganizationKycSubmission.rejectionReason}
+          </div>
+        ) : null}
+
+        {/* Thông báo cảnh báo khi chưa liên kết */}
+        {bankStatus === null && !isOrganizationKycLoading ? (
+          <div className="rounded-lg border border-[#FEF9C3] bg-[#FEFCE8] px-3 py-2.5 text-xs text-[#854D0E]">
+            Tổ chức chưa liên kết tài khoản ngân hàng. Hãy điền thông tin bên dưới để bắt đầu nhận giải ngân.
+          </div>
+        ) : null}
+
+        {/* Thông báo đang chờ duyệt */}
+        {bankStatus === 'PENDING_REVIEW' ? (
+          <div className="rounded-lg border border-[#FEF3C7] bg-[#FFFBEB] px-3 py-2.5 text-xs text-[#92400E]">
+            Hồ sơ đang chờ regulatory xác minh. Bạn sẽ nhận thông báo khi có kết quả duyệt.
+          </div>
+        ) : null}
+
+        {/* Chi tiết tài khoản đã duyệt */}
+        {bankStatus === 'APPROVED' && latestOrganizationKycSubmission?.beneficiaryBankAccount ? (
+          <div className="rounded-xl border border-[#BBF7D0] bg-[#F0FDF4] overflow-hidden">
+            {/* Header của card chi tiết */}
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-[#DCFCE7] border-b border-[#BBF7D0]">
+              <span className="text-sm">🏦</span>
+              <span className="text-xs font-semibold text-[#166534]">Tài khoản thụ hưởng đã xác minh</span>
+              <span className="ml-auto text-xs text-[#16A34A]">✓ Xác nhận</span>
+            </div>
+            {/* Body: 2 cột */}
+            <div className="grid grid-cols-2 divide-x divide-[#D1FAE5]">
+              <div className="px-4 py-3 space-y-3">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280] mb-0.5">Ngân hàng</p>
+                  <p className="text-sm font-semibold text-[#111827]">{latestOrganizationKycSubmission.beneficiaryBankAccount.bankName}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280] mb-0.5">Chi nhánh</p>
+                  <p className="text-sm font-medium text-[#374151]">
+                    {latestOrganizationKycSubmission.beneficiaryBankAccount.branchName || '—'}
+                  </p>
+                </div>
+              </div>
+              <div className="px-4 py-3 space-y-3">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280] mb-0.5">Số tài khoản</p>
+                  <p className="text-sm font-semibold text-[#111827] font-mono">
+                    {latestOrganizationKycSubmission.beneficiaryBankAccount.bankAccountNumber}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280] mb-0.5">Tên chủ tài khoản</p>
+                  <p className="text-sm font-semibold text-[#111827]">
+                    {latestOrganizationKycSubmission.beneficiaryBankAccount.accountHolderName}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : null}
       </div>
 
-      {isOrganizationKycLoading ? <p className="mt-3 text-sm text-[#6B7280]">Đang tải trạng thái duyệt tài khoản...</p> : null}
+      {/* Dòng phân cách */}
+      {(bankStatus === 'APPROVED' || bankStatus === 'REJECTED') && !isOrganizationKycLoading ? (
+        <div className="mt-4 mb-3 border-t border-[#E5E7EB]" />
+      ) : null}
 
+      {/* Loading state */}
+      {isOrganizationKycLoading ? (
+        <div className="mt-4 flex items-center gap-2 text-xs text-[#6B7280]">
+          <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#0E7C6B] border-t-transparent" />
+          Đang tải trạng thái duyệt tài khoản...
+        </div>
+      ) : null}
+
+      {/* Error state */}
       {organizationKycErrorMessage ? (
-        <div className="mt-3 rounded border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm">
-          <p className="text-[#991B1B]">{organizationKycErrorMessage}</p>
+        <div className="mt-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-3">
+          <p className="text-xs text-[#991B1B]">{organizationKycErrorMessage}</p>
           <button
             type="button"
-            onClick={() => {
-              void Promise.resolve(onRetryLoadOrganizationKycSubmissions());
-            }}
-            className="mt-2 rounded border border-[#FCA5A5] px-3 py-1 text-xs font-semibold text-[#991B1B]"
+            onClick={() => { void Promise.resolve(onRetryLoadOrganizationKycSubmissions()); }}
+            className="mt-2 rounded border border-[#FCA5A5] px-3 py-1 text-xs font-semibold text-[#991B1B] hover:bg-[#FEE2E2]"
           >
             Thử lại
           </button>
         </div>
       ) : null}
 
-      {bankSubmitSuccessMessage ? <p className="mt-3 text-xs text-[#166534]">{bankSubmitSuccessMessage}</p> : null}
-      {bankSubmitErrorMessage ? <p className="mt-3 text-xs text-[#DC2626]">{bankSubmitErrorMessage}</p> : null}
+      {/* Success/Error messages từ form submit */}
+      {bankSubmitSuccessMessage ? (
+        <div className="mt-3 rounded-lg border border-[#BBF7D0] bg-[#F0FDF4] px-3 py-2 text-xs text-[#166534]">
+          {bankSubmitSuccessMessage}
+        </div>
+      ) : null}
+      {bankSubmitErrorMessage ? (
+        <div className="mt-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#991B1B]">
+          {bankSubmitErrorMessage}
+        </div>
+      ) : null}
 
+      {/* Form liên kết tài khoản ngân hàng */}
       {shouldShowBankForm && !isOrganizationKycLoading ? (
-        <div className="mt-3 grid gap-3 text-sm">
-          <select
-            className="rounded border border-[#D1D5DB] px-3 py-2"
-            value={bankFormData.bankName}
-            onChange={event => handleBankFieldChange('bankName', event.target.value)}
-          >
-            <option value="">-- Chọn ngân hàng --</option>
-            {vietnameseBankNameOptions.map(bankNameOption => (
-              <option key={bankNameOption} value={bankNameOption}>{bankNameOption}</option>
-            ))}
-          </select>
-          {bankFormErrors.bankName ? <p className="text-xs text-[#DC2626]">{bankFormErrors.bankName}</p> : null}
+        <div className="mt-4">
+          <div className="rounded-xl border border-[#E6F7F4] bg-[#F9FDFC] p-4">
+            <p className="mb-3 text-xs font-medium text-[#0E7C6B]">📝 Liên kết tài khoản ngân hàng</p>
+            <div className="grid gap-3 text-sm">
+              <select
+                className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] focus:border-[#0E7C6B] focus:outline-none focus:ring-1 focus:ring-[#0E7C6B]"
+                value={bankFormData.bankName}
+                onChange={event => handleBankFieldChange('bankName', event.target.value)}
+              >
+                <option value="">-- Chọn ngân hàng --</option>
+                {vietnameseBankNameOptions.map(bankNameOption => (
+                  <option key={bankNameOption} value={bankNameOption}>{bankNameOption}</option>
+                ))}
+              </select>
+              {bankFormErrors.bankName ? <p className="text-xs text-[#DC2626]">{bankFormErrors.bankName}</p> : null}
 
-          <input
-            className="rounded border border-[#D1D5DB] px-3 py-2"
-            placeholder="Số tài khoản"
-            value={bankFormData.bankAccountNumber}
-            onChange={event => handleBankFieldChange('bankAccountNumber', event.target.value.replace(/[^0-9]/g, ''))}
-          />
-          {bankFormErrors.bankAccountNumber ? <p className="text-xs text-[#DC2626]">{bankFormErrors.bankAccountNumber}</p> : null}
+              <div>
+                <input
+                  className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] placeholder-[#9CA3AF] focus:border-[#0E7C6B] focus:outline-none focus:ring-1 focus:ring-[#0E7C6B]"
+                  placeholder="Số tài khoản"
+                  value={bankFormData.bankAccountNumber}
+                  onChange={event => handleBankFieldChange('bankAccountNumber', event.target.value.replace(/[^0-9]/g, ''))}
+                />
+                {bankFormErrors.bankAccountNumber ? <p className="mt-1 text-xs text-[#DC2626]">{bankFormErrors.bankAccountNumber}</p> : null}
+              </div>
 
-          <input
-            className="rounded border border-[#D1D5DB] px-3 py-2"
-            placeholder="Tên chủ tài khoản"
-            value={bankFormData.accountHolderName}
-            onChange={event => handleBankFieldChange('accountHolderName', normalizeAccountHolderName(event.target.value))}
-          />
-          {bankFormErrors.accountHolderName ? <p className="text-xs text-[#DC2626]">{bankFormErrors.accountHolderName}</p> : null}
+              <div>
+                <input
+                  className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] placeholder-[#9CA3AF] focus:border-[#0E7C6B] focus:outline-none focus:ring-1 focus:ring-[#0E7C6B]"
+                  placeholder="Tên chủ tài khoản"
+                  value={bankFormData.accountHolderName}
+                  onChange={event => handleBankFieldChange('accountHolderName', normalizeAccountHolderName(event.target.value))}
+                />
+                {bankFormErrors.accountHolderName ? <p className="mt-1 text-xs text-[#DC2626]">{bankFormErrors.accountHolderName}</p> : null}
+              </div>
 
-          <input
-            className="rounded border border-[#D1D5DB] px-3 py-2"
-            placeholder="Chi nhánh (không bắt buộc)"
-            value={bankFormData.branchName}
-            onChange={event => handleBankFieldChange('branchName', event.target.value)}
-          />
+              <input
+                className="w-full rounded-lg border border-[#D1D5DB] bg-white px-3 py-2.5 text-sm text-[#111827] placeholder-[#9CA3AF] focus:border-[#0E7C6B] focus:outline-none focus:ring-1 focus:ring-[#0E7C6B]"
+                placeholder="Chi nhánh (không bắt buộc)"
+                value={bankFormData.branchName}
+                onChange={event => handleBankFieldChange('branchName', event.target.value)}
+              />
 
-          <button
-            type="button"
-            onClick={handleSubmitBeneficiaryBankAccount}
-            disabled={isSubmittingBankForm || isOrganizationKycLoading}
-            className="rounded bg-[#0E7C6B] px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmittingBankForm ? 'Đang gửi duyệt...' : 'Gửi duyệt tài khoản'}
-          </button>
+              <button
+                type="button"
+                onClick={handleSubmitBeneficiaryBankAccount}
+                disabled={isSubmittingBankForm || isOrganizationKycLoading}
+                className="w-full rounded-lg bg-[#0E7C6B] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0A5C50] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isSubmittingBankForm ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Đang gửi duyệt...
+                  </span>
+                ) : 'Gửi duyệt tài khoản'}
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </SectionCard>
@@ -1441,15 +1546,22 @@ export function SettingsSection({
     setActiveSettingsTab(tab);
   };
 
-  /** Hàm lấy hồ sơ KYC mới nhất. Mục đích: dùng bản ghi mới nhất để hiển thị trạng thái tài khoản thụ hưởng chính xác. */
+  /**
+   * Hàm lấy hồ sơ bank account mới nhất. Mục đích: chỉ chọn submission chứa dữ liệu tài khoản ngân hàng thực sự,
+   * tránh nhầm lẫn với KYC profile submission (là hai loại submission khác nhau về nghiệp vụ).
+   */
   const latestOrganizationKycSubmission = useMemo(() => {
     const safeOrganizationKycSubmissionList = Array.isArray(organizationKycSubmissionList) ? organizationKycSubmissionList : [];
-    if (!safeOrganizationKycSubmissionList.length) {
+
+    // Logic này chỉ lọc submission có dữ liệu bank account thực sự, loại trừ KYC profile submission.
+    const submissionListWithBankAccount = safeOrganizationKycSubmissionList
+      .filter(submissionItem => submissionItem.beneficiaryBankAccount !== null);
+
+    if (!submissionListWithBankAccount.length) {
       return null;
     }
 
-    // Logic này sắp xếp theo thời gian nộp giảm dần để luôn chọn đúng bản ghi mới nhất.
-    const submissionListByLatest = [...safeOrganizationKycSubmissionList].sort((leftSubmission, rightSubmission) => {
+    const submissionListByLatest = [...submissionListWithBankAccount].sort((leftSubmission, rightSubmission) => {
       return new Date(rightSubmission.submittedAt).getTime() - new Date(leftSubmission.submittedAt).getTime();
     });
 

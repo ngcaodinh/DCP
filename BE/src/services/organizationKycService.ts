@@ -6,6 +6,7 @@ import {
   OrganizationKycFile,
   OrganizationKycSubmission,
   createOrganizationKycSubmission,
+  findExistingBankAccountOwner,
   findLatestSubmissionByOrganizationId,
   findPendingKycSubmissions,
   findSubmissionBySubmissionId,
@@ -401,7 +402,7 @@ export type BeneficiaryBankAccountSubmissionResult = {
   isExistingPendingSubmission: boolean;
 };
 
-/** Hàm nộp thông tin tài khoản ngân hàng thụ hưởng. Mục đích: tạo hồ sơ KYC chờ duyệt theo cơ chế idempotent để tránh tạo trùng request. */
+/** Hàm nộp thông tin tài khoản ngân hàng thụ hưởng. Mục đích: tạo hồ sơ KYC chờ duyệt theo cơ chế idempotent để tránh tạo trùng request, đồng thời đảm bảo mỗi tài khoản ngân hàng chỉ được liên kết duy nhất với một tổ chức. */
 export async function submitBeneficiaryBankAccount(
   userId: string,
   payload: BeneficiaryBankAccountSubmissionPayload
@@ -424,6 +425,16 @@ export async function submitBeneficiaryBankAccount(
   }
   if (!/^[0-9]{8,20}$/.test(normalizedBankAccountNumber)) {
     throw new Error('Số tài khoản phải là chữ số và có độ dài từ 8 đến 20 ký tự.');
+  }
+
+  // Ràng buộc logic: kiểm tra số tài khoản ngân hàng chưa được liên kết với tổ chức nào khác.
+  // Chỉ kiểm tra các bản ghi APPROVED hoặc PENDING_REVIEW — bản ghi REJECTED thì cho phép tái sử dụng.
+  const existingBankAccountOwner = await findExistingBankAccountOwner(normalizedBankAccountNumber, organizationUser.id);
+  if (existingBankAccountOwner) {
+    const existingStatusLabel = existingBankAccountOwner.status === 'APPROVED'
+      ? 'đã được phê duyệt'
+      : 'đang chờ phê duyệt';
+    throw new Error(`Tài khoản ngân hàng này đã được liên kết với tổ chức khác (${existingBankAccountOwner.organizationName}) và ${existingStatusLabel}. Mỗi tài khoản ngân hàng chỉ được liên kết duy nhất với một tổ chức.`);
   }
 
   const existingSubmissionList = await findSubmissionsByOrganizationId(organizationUser.id);

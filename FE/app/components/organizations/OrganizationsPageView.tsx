@@ -46,9 +46,11 @@ type SidebarItemProps = {
   onTriggerAction: (action: 'createProject' | 'toggleNotification') => void;
 };
 
-/** Hàm kiểm tra có tài khoản thụ hưởng đã duyệt hay chưa. Mục đích: chặn UI tạo dự án khi chưa đủ điều kiện ngân hàng theo dữ liệu thật từ KYC. */
+/** Hàm kiểm tra có tài khoản thụ hưởng đã duyệt hay chưa. Mục đích: chặn UI tạo dự án khi chưa đủ điều kiện ngân hàng theo dữ liệu thật từ KYC. Chỉ check submission có dữ liệu bank account thực sự, tránh nhầm với KYC profile submission. */
 function hasApprovedBeneficiaryBankAccount(submissionList: OrganizationKycSubmissionSummary[]): boolean {
-  return submissionList.some(submissionItem => submissionItem.status === 'APPROVED');
+  return submissionList.some(submissionItem =>
+    submissionItem.beneficiaryBankAccount !== null && submissionItem.status === 'APPROVED'
+  );
 }
 
 /** Hàm chuẩn hóa message lỗi API. Mục đích: hiển thị thông báo ổn định khi response lỗi hoặc thiếu cấu trúc mong muốn. */

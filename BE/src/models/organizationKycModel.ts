@@ -83,6 +83,28 @@ const organizationKycSubmissionSchema = new Schema<OrganizationKycSubmission>({
   files: { type: [organizationKycFileSchema], required: true }
 });
 
+// Tạo partial unique index để đảm bảo mỗi số tài khoản ngân hàng chỉ được liên kết với một tổ chức.
+// Chỉ apply lên documents có beneficiaryBankAccount.bankAccountNumber != null/empty, tránh collision với dữ liệu cũ.
+// Dùng Object.assign để tránh lỗi TS "duplicate property name" khi dùng $ne nhiều lần trong object literal.
+const bankAccountNumberPartialFilter = Object.assign(
+  {},
+  { $exists: true },
+  { $ne: null },
+  { $ne: '' }
+);
+organizationKycSubmissionSchema.index(
+  { 'beneficiaryBankAccount.bankAccountNumber': 1 },
+  Object.assign(
+    {},
+    { unique: true },
+    {
+      partialFilterExpression: {
+        'beneficiaryBankAccount.bankAccountNumber': bankAccountNumberPartialFilter
+      }
+    }
+  )
+);
+
 const OrganizationKycSubmissionModel = mongoose.model<OrganizationKycSubmission>(
   'OrganizationKycSubmission',
   organizationKycSubmissionSchema
@@ -152,6 +174,35 @@ export async function findPendingKycSubmissions(): Promise<OrganizationKycSubmis
  */
 export async function findSubmissionBySubmissionId(submissionId: string): Promise<OrganizationKycSubmission | null> {
   return OrganizationKycSubmissionModel.findOne({ submissionId }).lean<OrganizationKycSubmission>().exec();
+}
+
+/**
+ * Hàm tìm tổ chức đã liên kết với số tài khoản ngân hàng nhất định (ngoại trừ tổ chức hiện tại).
+ * Mục đích: kiểm tra ràng buộc "mỗi tài khoản ngân hàng chỉ được liên kết duy nhất với một tổ chức" trước khi cho phép nộp hồ sơ.
+ * Chỉ trả về bản ghi có status APPROVED hoặc PENDING_REVIEW — bản ghi bị REJECTED thì tài khoản được phép tái sử dụng.
+ */
+export async function findExistingBankAccountOwner(
+  bankAccountNumber: string,
+  excludeOrganizationId: string
+): Promise<{ organizationId: string; organizationName: string; status: OrganizationKycSubmission['status'] } | null> {
+  const normalizedAccountNumber = bankAccountNumber.trim();
+  const existingSubmission = await OrganizationKycSubmissionModel.findOne({
+    'beneficiaryBankAccount.bankAccountNumber': normalizedAccountNumber,
+    organizationId: { $ne: excludeOrganizationId },
+    status: { $in: ['APPROVED', 'PENDING_REVIEW'] }
+  })
+    .lean<{ organizationId: string; organizationName: string; status: string }>()
+    .exec();
+
+  if (!existingSubmission) {
+    return null;
+  }
+
+  return {
+    organizationId: existingSubmission.organizationId,
+    organizationName: existingSubmission.organizationName,
+    status: existingSubmission.status as OrganizationKycSubmission['status']
+  };
 }
 
 /**

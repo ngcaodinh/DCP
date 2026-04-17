@@ -412,8 +412,11 @@ export async function handleSubmitBeneficiaryBankAccount(request: Request, respo
       submission: submissionResult
     });
   } catch (error) {
-    response.status(400).json({
-      message: (error as Error).message
+    const errorMessage = (error as Error).message;
+    // Phân biệt lỗi trùng lặp tài khoản ngân hàng (HTTP 409) với các lỗi khác (HTTP 400).
+    const isDuplicateBankAccount = errorMessage.includes('đã được liên kết với tổ chức khác');
+    response.status(isDuplicateBankAccount ? 409 : 400).json({
+      message: errorMessage
     });
   }
 }
