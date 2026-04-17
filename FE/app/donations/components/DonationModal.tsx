@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { ApiErrorResponse, buildApiUrl, fetchApi } from '../../utils/apiClient';
 import { readAuthSession } from '../../utils/authSession';
 
@@ -21,6 +22,17 @@ type DonationHistoryItem = {
 
 type TransactionStatus = 'idle' | 'processing' | 'submitted' | 'success' | 'failed';
 
+/** Hàm chuyển trạng thái giao dịch sang tiếng Việt. Mục đích: hiển thị trạng thái rõ ràng cho người dùng, không dùng enum tiếng Anh. */
+function mapTransactionStatusToVietnamese(statusValue: TransactionStatus): string {
+  switch (statusValue) {
+    case 'idle': return 'Sẵn sàng';
+    case 'processing': return 'Đang xử lý';
+    case 'submitted': return 'Đã gửi giao dịch';
+    case 'success': return 'Thành công';
+    case 'failed': return 'Thất bại';
+  }
+}
+
 type DonationModalProps = {
   campaignItem: DonationCampaignItem;
   onClose: () => void;
@@ -30,6 +42,11 @@ type DonationModalProps = {
 /** Hàm rút gọn địa chỉ ví. Mục đích: hiển thị donor address ngắn gọn trong lịch sử donation. */
 function formatWalletAddress(walletAddress: string): string {
   return walletAddress.length > 10 ? `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` : walletAddress;
+}
+
+/** Hàm rút gọn transaction hash. Mục đích: hiển thị TxHash ngắn gọn, dễ đọc cho người dùng. */
+function formatTransactionHash(transactionHash: string): string {
+  return transactionHash.length > 20 ? `${transactionHash.slice(0, 10)}...${transactionHash.slice(-8)}` : transactionHash;
 }
 
 /** Hàm kiểm tra campaign còn hạn donate. Mục đích: chặn donate khi campaign đã quá hạn. */
@@ -204,7 +221,7 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
 
   /** Hàm submit donation sau khi đã xác nhận. Mục đích: gọi backend one-click donation rồi ghi nhận txHash vào hệ thống. */
   const handleConfirmDonationSubmit = async () => {
-    // Ghi chú logic phức tạp: chặn double-submit tuyệt đối khi người dùng bấm xác nhận liên tiếp nhiều lần.
+    // Chặn double-submit tuyệt đối khi người dùng bấm xác nhận liên tiếp nhiều lần.
     if (isSubmitting) {
       return;
     }
@@ -215,26 +232,87 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
       return;
     }
 
+    // Kiểm tra auth token tồn tại trước khi gửi request để tránh call API không cần thiết.
+    // Ghi chú: readAuthSession() luôn trả về object, không bao giờ null/undefined.
+    // Nếu accessToken rỗng → backend trả 401 ngay.
+    const { accessToken } = readAuthSession();
+    if (!accessToken) {
+      setTransactionStatus('failed');
+      setStatusMessage('Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại để quyên góp.');
+      handleCloseConfirmModal();
+      return;
+    }
+
     try {
-      setIsSubmitting(true);
-      setTransactionStatus('processing');
-      setStatusMessage('Đang gửi giao dịch one-click donation...');
+      // Bước 1: Force synchronous render `isSubmitting=true` trước khi đóng modal.
+      // Dùng flushSync để ngăn React 18 batching — đảm bảo sub-modal hiển thị text
+      // "Đang ghi nhận vào hệ thống..." NGAY LẬP TỨC, người dùng THẤY được trước khi modal đóng.
+      flushSync(() => {
+        setIsSubmitting(true);
+      });
+
+      // Bước 2: Sau khi React đã re-render xong với isSubmitting=true, mới đóng sub-modal.
+      // Người dùng sẽ thấy nút "Xác nhận" disable + text loading TRƯỚC KHI modal đóng.
       handleCloseConfirmModal();
 
+      // Bước 3: Gán status — gán trước API call để đảm bảo state update xảy ra
+      // trước bất kỳ async nào, tránh delay do React batching.
+      setTransactionStatus('processing');
+      setStatusMessage('Hệ thống đang gửi giao dịch quyên góp, vui lòng chờ trong giây lát...');
+
+      // Bước 4: Gọi backend relay one-click donation.
+      console.log('[DonationModal] Bước 4: Gọi executeOneClickDonationRequest...');
       const donatedTransactionHash = await executeOneClickDonationRequest(campaignItem.projectId, pendingDonationAmount, false);
+      console.log('[DonationModal] Bước 4 hoàn tất. TxHash:', donatedTransactionHash);
 
+      // Bước 5: Backend tự động ghi nhận nền (triggerAutoRecordDonationInBackground),
+      // nhưng FE vẫn gọi /donations/record để đảm bảo idempotent — tránh miss nếu background job chưa kịp.
+      const shortenedTxHash = formatTransactionHash(donatedTransactionHash);
       setTransactionStatus('submitted');
-      setStatusMessage(`Đã gửi giao dịch on-chain. TxHash: ${donatedTransactionHash}. Đang ghi nhận vào hệ thống...`);
+      setStatusMessage(`Đã gửi giao dịch lên blockchain (${shortenedTxHash}). Đang ghi nhận vào hệ thống...`);
 
-      await recordDonationByTransactionHash(campaignItem.projectId, donatedTransactionHash);
+      console.log('[DonationModal] Bước 5: Gọi recordDonationByTransactionHash...');
+      try {
+        await recordDonationByTransactionHash(campaignItem.projectId, donatedTransactionHash);
+        console.log('[DonationModal] Bước 5 hoàn tất.');
+      } catch (recordError) {
+        // Backend đã tự ghi nhận nền → lỗi record ở đây không ngăn thông báo thành công.
+        // Chỉ log cảnh báo để trace, không rethrow.
+        const recordErrorForLog = recordError as ApiErrorResponse;
+        console.warn('[DonationModal] recordDonationByTransactionHash thất bại (backend đã ghi nền):', recordErrorForLog?.message);
+      }
 
+      // Bước 6: Hiển thị thành công — các bước phụ (history, parent callback) không được block thành công.
       setTransactionStatus('success');
-      setStatusMessage(`Xác nhận quyên góp thành công. TxHash: ${donatedTransactionHash}`);
+      setStatusMessage('Giao dịch quyên góp đã được xác nhận thành công trên blockchain.');
       setSuccessNoticeMessage('Quyên góp thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
       setIsSuccessNoticeVisible(true);
-      await loadDonationHistory();
-      await onDonationSuccess(campaignItem.projectId);
+      console.log('[DonationModal] Bước 6 hoàn tất. Success notice đã set.');
+
+      // Bước 7: Gọi parent callback — non-blocking, có catch riêng để không ảnh hưởng thành công.
+      console.log('[DonationModal] Bước 7: Gọi onDonationSuccess...');
+      try {
+        await onDonationSuccess(campaignItem.projectId);
+        console.log('[DonationModal] Bước 7 hoàn tất.');
+      } catch (callbackError) {
+        console.warn('[DonationModal] onDonationSuccess thất bại:', callbackError);
+      }
+
+      // Bước 8: Tải lịch sử donation — non-blocking, không block thành công.
+      console.log('[DonationModal] Bước 8: Gọi loadDonationHistory...');
+      try {
+        await loadDonationHistory();
+        console.log('[DonationModal] Bước 8 hoàn tất.');
+      } catch {
+        console.warn('[DonationModal] loadDonationHistory thất bại (không ảnh hưởng thành công donation).');
+      }
     } catch (error) {
+      const caughtError = error as ApiErrorResponse;
+      console.error('[DonationModal] Lỗi toàn cục trong handleConfirmDonationSubmit:', {
+        statusCode: caughtError?.statusCode,
+        errorCode: caughtError?.errorCode,
+        message: caughtError?.message
+      });
       setTransactionStatus('failed');
       setStatusMessage(mapDonationErrorMessage(error));
     } finally {
@@ -280,15 +358,15 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
             Hệ thống đang xử lý giao dịch quyên góp, vui lòng chờ trong giây lát...
           </div>
         )}
-        <p className="mt-3 text-sm text-[#374151]">Trạng thái: {transactionStatus}</p>
+        <p className="mt-3 text-sm text-[#374151]">Trạng thái: {mapTransactionStatusToVietnamese(transactionStatus)}</p>
         <p className="mt-1 text-sm text-[#374151]">{statusMessage}</p>
         <div className="mt-4 space-y-2">
           {historyList.length === 0 && <div className="rounded-md border border-[#e5e7eb] p-2 text-sm">Chưa có lịch sử quyên góp.</div>}
           {historyList.map(historyItem => (
             <div key={historyItem.transactionHash} className="rounded-md border border-[#e5e7eb] p-2 text-sm">
-              <div>Tx: {historyItem.transactionHash}</div>
-              <div>Donor: {historyItem.isAnonymous ? 'Ẩn danh' : formatWalletAddress(historyItem.donorAddress)}</div>
-              <div>Amount: {historyItem.amount}</div>
+              <div>Giao dịch: {historyItem.transactionHash}</div>
+              <div>Người quyên góp: {historyItem.isAnonymous ? 'Ẩn danh' : formatWalletAddress(historyItem.donorAddress)}</div>
+              <div>Số token: {historyItem.amount}</div>
             </div>
           ))}
         </div>
@@ -301,14 +379,15 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
                 Bạn muốn quyên góp {pendingDonationAmount.toLocaleString('vi-VN')} token cho dự án này?
               </p>
               <div className="mt-5 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={handleCloseConfirmModal}
-                  disabled={isSubmitting}
-                  className="rounded-md border border-[#d1d5db] px-4 py-2 text-sm text-[#374151] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Hủy
-                </button>
+                {isSubmitting ? null : (
+                  <button
+                    type="button"
+                    onClick={handleCloseConfirmModal}
+                    className="rounded-md border border-[#d1d5db] px-4 py-2 text-sm text-[#374151]"
+                  >
+                    Hủy
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -317,7 +396,7 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
                   disabled={isSubmitting}
                   className="rounded-md bg-[#0e7c6b] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSubmitting ? 'Đang quyên góp...' : 'Xác nhận'}
+                  {isSubmitting ? 'Đang ghi nhận vào hệ thống...' : 'Xác nhận'}
                 </button>
               </div>
             </div>

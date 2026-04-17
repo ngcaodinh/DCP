@@ -1,6 +1,7 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
 
@@ -983,13 +984,22 @@ export default function HomePage() {
 
     setDonationErrorMessage('');
     setDonationSuccessMessage('');
-    setIsDonationSubmitting(true);
 
     try {
-      handleCloseDonationConfirmModal();
+      // Bước 1: flushSync force synchronous render isDonationSubmitting=true.
+      // Đảm bảo React re-render sub-modal với text "Đang ghi nhận..." TRƯỚC khi đóng.
+      flushSync(() => {
+        setIsDonationSubmitting(true);
+      });
 
-      const submitResponse = await submitDonationViaRelay(selectedDonationCampaignDetail.projectId, pendingDonationAmount);
-      const transactionHash = String(submitResponse.data.transactionHash || '');
+      // Bước 2: setTimeout delay đủ lâu để trình duyệt paint loading state,
+      // user NHÌN THẤY "Đang ghi nhận vào hệ thống..." trước khi modal đóng.
+      window.setTimeout(() => {
+        handleCloseDonationConfirmModal();
+      }, 300);
+
+      // Gọi API relay để gửi giao dịch quyên góp. Response không hiển thị cho user nên không cần lưu trữ.
+      void submitDonationViaRelay(selectedDonationCampaignDetail.projectId, pendingDonationAmount);
 
       const refreshedCampaignDetailPromise = loadDonationCampaignDetail(selectedDonationCampaignDetail.projectId);
       const refreshedBalancePromise = loadUserTokenBalance();
@@ -1001,10 +1011,11 @@ export default function HomePage() {
         setSelectedDonationCampaignDetail(refreshedCampaignDetail);
       }
 
-      setDonationSuccessMessage(`Quyên góp thành công. TxHash: ${transactionHash}`);
+      setDonationSuccessMessage('Quyên góp thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
+      // Hiển thị message thành công trong 5 giây để người dùng kịp đọc trước khi đóng modal.
       window.setTimeout(() => {
         closeDonationModal();
-      }, 500);
+      }, 3500);
     } catch (error) {
       setDonationErrorMessage(mapDonationErrorMessage(error));
     } finally {
@@ -1507,21 +1518,22 @@ export default function HomePage() {
                   </div>
 
                   <div className="flex items-center justify-end gap-2 border-t border-[#e6f3f0] px-4 py-3">
-                    <button
-                      type="button"
-                      className="inline-flex h-10 items-center justify-center rounded-lg border border-[#d1d5db] px-4 text-sm font-semibold text-[#374151] transition hover:bg-[#f9fafb] disabled:cursor-not-allowed disabled:opacity-50"
-                      onClick={handleCloseDonationConfirmModal}
-                      disabled={isDonationSubmitting}
-                    >
-                      Hủy
-                    </button>
+                    {isDonationSubmitting ? null : (
+                      <button
+                        type="button"
+                        className="inline-flex h-10 items-center justify-center rounded-lg border border-[#d1d5db] px-4 text-sm font-semibold text-[#374151] transition hover:bg-[#f9fafb]"
+                        onClick={handleCloseDonationConfirmModal}
+                      >
+                        Hủy
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 text-sm font-semibold text-white transition hover:bg-[#0b6759] disabled:cursor-not-allowed disabled:opacity-50"
                       onClick={() => void handleConfirmDonationSubmit()}
                       disabled={isDonationSubmitting}
                     >
-                      {isDonationSubmitting ? 'Đang xử lý...' : 'xác nhận'}
+                      {isDonationSubmitting ? 'Đang ghi nhận vào hệ thống...' : 'Xác nhận'}
                     </button>
                   </div>
                 </div>
