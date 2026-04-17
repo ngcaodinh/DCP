@@ -1,85 +1,78 @@
-import { getRankingQueue } from '../queues/rankingQueue';
 import { getLogger } from '../config/logger';
 import { findCurrentRankingSnapshot } from '../repositories/rankingRepository';
 
 const logger = getLogger();
 
 /**
- * Khoảng thời gian giữa các lần chạy scheduler.
- * Giá trị 5 phút được lấy từ trigger trong UC4.1: "Có donation mới HOẶC mỗi 5 phút".
+ * Khoảng thời gian giữa các lần chạy scheduler (30 phút).
+ * Lưu ý: với incremental update, scheduler không còn cần chạy mỗi 5 phút nữa.
+ * Donation mới được cập nhật O(1) ngay khi được ghi nhận — không cần recalc toàn bộ.
+ * Scheduler 30 phút chỉ để đảm bảo cache không bị stale quá lâu nếu có lỗi nào đó.
  */
-const SCHEDULE_INTERVAL_MS = 5 * 60 * 1000;
+const SCHEDULE_INTERVAL_MS = 30 * 60 * 1000;
 
 /**
- * Ngưỡng thời gian tối đa (miligiây) mà snapshot được coi là "fresh".
- * Nếu snapshot đã cũ hơn ngưỡng này, scheduler sẽ trigger recalculate.
- * Bằng đúng SCHEDULE_INTERVAL_MS để đảm bảo luôn có ít nhất 1 recalculate trong mỗi chu kỳ.
+ * Ngưỡng thời gian tối đa (miligiây) mà cache được coi là "fresh".
+ * Nếu cache đã cũ hơn ngưỡng này, scheduler sẽ invalidate để trigger rebuild từ incremental.
  */
 const MAX_SNAPSHOT_AGE_MS = SCHEDULE_INTERVAL_MS;
 
 /**
- * Hàm kiểm tra xem snapshot hiện tại có cần recalculate không.
- * Mục đích: tránh spam Bull queue khi snapshot còn fresh.
+ * Hàm kiểm tra xem cache ranking có cần rebuild không.
+ * Mục đích: với incremental metrics, chỉ cần invalidate cache khi nó quá cũ.
+ * Incremental update đã cập nhật metrics O(1) rồi — scheduler chỉ dọn cache stale.
  *
- * @returns true nếu cần recalculate (không có snapshot HOẶC snapshot đã cũ).
+ * @returns true nếu cần invalidate cache (không có snapshot HOẶC snapshot đã cũ).
  */
-async function shouldRecalculateRankingSnapshot(): Promise<boolean> {
+async function shouldInvalidateRankingCache(): Promise<boolean> {
   const latestSnapshot = await findCurrentRankingSnapshot();
 
   if (!latestSnapshot) {
-    logger.info('Không có snapshot ranking. Scheduler sẽ trigger recalculate.');
+    logger.info('Không có snapshot ranking. Scheduler sẽ invalidate cache để rebuild từ incremental.');
     return true;
   }
 
   const snapshotAge = Date.now() - latestSnapshot.calculatedAt.getTime();
   if (snapshotAge > MAX_SNAPSHOT_AGE_MS) {
-    logger.info(`Snapshot ranking đã cũ (age=${Math.round(snapshotAge / 1000)}s). Scheduler sẽ trigger recalculate.`);
+    logger.info(`Snapshot ranking đã cũ (age=${Math.round(snapshotAge / 1000)}s). Scheduler sẽ invalidate cache.`);
     return true;
   }
 
-  logger.info(`Snapshot ranking còn fresh (age=${Math.round(snapshotAge / 1000)}s). Bỏ qua scheduled recalculate.`);
+  logger.info(`Snapshot ranking còn fresh (age=${Math.round(snapshotAge / 1000)}s). Bỏ qua scheduled invalidate.`);
   return false;
 }
 
 /**
  * Hàm khởi động scheduler cho bảng xếp hạng QF.
- * Mục đích: đảm bảo ranking được cập nhật định kỳ mỗi 5 phút theo UC4.1,
- * bất kể có donation mới hay không.
+ * Mục đích: với incremental update, scheduler không còn cần recalc toàn bộ donations mỗi 5 phút.
+ * Thay vào đó, chỉ invalidate cache khi nó quá cũ để rebuild từ incremental metrics.
  *
  * Flow:
- * 1. Scheduler chạy mỗi 5 phút (setInterval).
- * 2. Kiểm tra xem snapshot hiện tại có còn fresh không.
- * 3. Nếu snapshot cũ hoặc không tồn tại → enqueue job vào Bull queue.
- * 4. Bull queue limiter đảm bảo tối đa 1 job chạy trong 60 giây.
- * 5. Worker thực thi recalculate và invalidate cache.
+ * 1. Scheduler chạy mỗi 30 phút (setInterval).
+ * 2. Kiểm tra xem cache còn fresh không.
+ * 3. Nếu cache cũ hoặc không tồn tại → invalidate cache để GET /rankings rebuild.
+ * 4. Reconcile worker (00:00 hàng ngày) xử lý drift prevention.
+ *
+ * Lưu ý: với incremental update, donation mới được cập nhật O(1) ngay khi ghi nhận.
+ * Scheduler không còn cần enqueue job recalculate nữa — Bull queue ranking cũng không còn cần thiết.
  */
 export function startRankingScheduler(): void {
   setInterval(async () => {
     try {
-      const needRecalculate = await shouldRecalculateRankingSnapshot();
-      if (!needRecalculate) {
+      const needInvalidate = await shouldInvalidateRankingCache();
+      if (!needInvalidate) {
         return;
       }
 
-      const rankingQueue = getRankingQueue();
-      if (!rankingQueue) {
-        logger.warn('Ranking queue không khả dụng. Scheduler không thể enqueue job.');
-        return;
-      }
+      // Với incremental metrics, chỉ cần invalidate cache để trigger rebuild từ O(P) read.
+      // Không còn cần recalculate toàn bộ donations (bottleneck cũ).
+      // Import ở đây để tránh circular dependency.
+      const { invalidateRankingCache } = await import('../services/rankingCacheService');
+      await invalidateRankingCache();
 
-      const scheduledJobId = `scheduled-ranking-${Date.now()}`;
-      await rankingQueue.add(
-        { windowHours: 720 },
-        {
-          jobId: scheduledJobId,
-          removeOnComplete: 5,
-          removeOnFail: 10
-        }
-      );
-
-      logger.info(`Scheduled ranking recalculate job enqueued (jobId=${scheduledJobId}).`);
+      logger.info('Scheduled ranking cache invalidated.');
     } catch (error) {
-      logger.error('Scheduled ranking recalculate job thất bại.', {
+      logger.error('Scheduled ranking cache invalidation thất bại.', {
         errorMessage: (error as Error).message
       });
     }

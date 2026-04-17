@@ -9,7 +9,7 @@ type RankingSortDirection = 'asc' | 'desc';
 type RankingQueryInput = { page: number; limit: number; sortBy: RankingSortBy; sortDirection: RankingSortDirection };
 
 /** Hàm chuẩn hóa số làm tròn cho điểm QF. Mục đích: giữ số liệu ổn định khi sort và hiển thị. */
-function normalizeScoreNumber(scoreNumber: number): number {
+export function normalizeScoreNumber(scoreNumber: number): number {
   return Number(scoreNumber.toFixed(6));
 }
 

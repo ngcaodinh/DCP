@@ -1958,7 +1958,7 @@ export default function HomePage() {
                   <th>Tổ chức</th>
                   <th>QF Score</th>
                   <th>Đã gây quỹ</th>
-                  <th>Donors</th>
+                  <th>Số người đã quyên góp</th>
                 </tr>
               </thead>
               <tbody>

@@ -13,8 +13,8 @@ import { findUserById, updateUser } from '../models/authModel';
 import { getZeroDevConfig } from '../config/zeroDev';
 import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
 import { ApplicationError } from '../utils/applicationError';
-import { enqueueRankingRecalculate } from '../queues/rankingQueue';
-import { triggerRealtimeRankingUpdate } from './rankingService';
+import { applyDonationToMetrics } from './rankingIncrementalService';
+import { invalidateRankingCache } from './rankingCacheService';
 
 const logger = getLogger();
 
@@ -368,14 +368,15 @@ export async function syncDonationEventsFromBlockchain() {
   for (const donationEvent of donationEventList) {
     // Ghi chú logic phức tạp: sử dụng upsert theo transactionHash để đảm bảo đồng bộ idempotent khi job chạy lặp.
     await upsertDonationRecordByTransactionHash(donationEvent);
+    // Incremental update running totals — O(1) thay vì full recalculate.
+    // Mỗi event từ blockchain được cập nhật running totals ngay lập tức.
+    await applyDonationToMetrics(donationEvent.projectId, donationEvent.amount, donationEvent.donorAddress);
   }
 
-  // Ghi chú logic phức tạp: sau khi đồng bộ event từ blockchain, trigger async recalculate ranking snapshot.
-  // Ưu tiên realtime: gọi đồng bộ triggerRealtimeRankingUpdate để Top QF cập nhật ngay lập tức.
-  // Queue vẫn được enqueue để đảm bảo eventual consistency trong trường hợp realtime thất bại.
+  // Ghi chú logic phức tạp: invalidate cache sau khi đồng bộ để GET /rankings trả dữ liệu mới.
+  // Không còn triggerRealtimeRankingUpdate + enqueueRankingRecalculate vì incremental đã xử lý.
   if (donationEventList.length > 0) {
-    triggerRealtimeRankingUpdate(24);           // Non-blocking — không await, không block sync job
-    enqueueRankingRecalculate(24);              // Fallback đảm bảo eventual consistency
+    await invalidateRankingCache();
   }
 
   logger.info(`Donation events synced successfully. totalSyncedEvents=${donationEventList.length} fromBlockNumber=${fromBlockNumber}`);
@@ -491,11 +492,15 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
 
   await upsertDonationRecordByTransactionHash(donationEventRecord);
 
-  // Ghi chú logic phức tạp: sau khi ghi nhận donation từ user-submitted txHash, trigger realtime ranking.
-  // Gọi đồng bộ không await để Top QF cập nhật ngay, không block response donation.
-  // Queue đồng thời enqueue để đảm bảo eventual consistency khi realtime thất bại.
-  triggerRealtimeRankingUpdate(24);           // Non-blocking — Top QF cập nhật ngay sau donation
-  enqueueRankingRecalculate(24);              // Fallback eventual consistency
+  // Ghi chú logic phức tạp: incremental update — O(1) update running totals thay vì
+  // recalculate toàn bộ donations (trước đây dùng triggerRealtimeRankingUpdate + enqueueRankingRecalculate).
+  // Phương pháp mới: applyDonationToMetrics cập nhật running totals trong metrics document,
+  // không cần query lại tất cả donations. Bảng xếp hạng phản ánh ngay kết quả donation.
+  await applyDonationToMetrics(
+    donationEventRecord.projectId,
+    donationEventRecord.amount,
+    donationEventRecord.donorAddress
+  );
 
   return {
     transactionHash: donationEventRecord.transactionHash,

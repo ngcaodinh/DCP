@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { handleGetCurrentRankingSnapshot, handleRecalculateRankingSnapshot } from '../controllers/rankingController';
+import { handleGetCurrentRankingSnapshot, handleGetRankingV2, handleRecalculateRankingSnapshot } from '../controllers/rankingController';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
 import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
 import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
@@ -12,8 +12,10 @@ export function createRankingRoutes(): Router {
   const rankingAdminAuthorizationMiddleware = createRoleAuthorizationMiddleware(['admin', 'regulatory']);
   const recalculateRateLimit = createRateLimitMiddleware(10, 60 * 1000, { bucketName: 'ranking:recalculate' });
   const getRankingRateLimit = createRateLimitMiddleware(120, 60 * 1000, { bucketName: 'ranking:get' });
+  const getRankingV2RateLimit = createRateLimitMiddleware(120, 60 * 1000, { bucketName: 'ranking:get:v2' });
 
   router.get('/', attachRequestMetadata(), getRankingRateLimit, handleGetCurrentRankingSnapshot);
+  router.get('/v2', attachRequestMetadata(), getRankingV2RateLimit, handleGetRankingV2);
   router.post(
     '/recalculate',
     attachRequestMetadata(),
