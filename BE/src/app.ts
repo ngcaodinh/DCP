@@ -7,6 +7,7 @@ import { createDepositRoutes } from './routes/depositRoutes';
 import { createProjectRoutes } from './routes/projectRoutes';
 import { createDonationRoutes } from './routes/donationRoutes';
 import { createRankingRoutes } from './routes/rankingRoutes';
+import { createSybilRoutes } from './routes/sybilRoutes';
 
 const application = express();
 
@@ -42,6 +43,7 @@ function registerRoutes(): void {
   application.use('/projects', createProjectRoutes());
   application.use('/donations', createDonationRoutes());
   application.use('/rankings', createRankingRoutes());
+  application.use('/api/sybil', createSybilRoutes());
 }
 
 configureMiddlewares();

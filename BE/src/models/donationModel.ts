@@ -74,6 +74,17 @@ export async function countDonations(projectId?: string): Promise<number> {
   return DonationMongoModel.countDocuments(filterQuery).exec();
 }
 
+/**
+ * Hàm lấy danh sách donation theo donor address.
+ * Mục đích: phục vụ FR5/UC5.1 — truy xuất lịch sử donation của một ví để tính risk score.
+ */
+export async function findDonationsByDonorAddress(donorAddress: string): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({ donorAddress: donorAddress.toLowerCase() })
+    .sort({ timestamp: -1 })
+    .lean<DonationRecord[]>()
+    .exec();
+}
+
 
 /** Hàm lấy tổng donation theo project. Mục đích: trả về số tiền đã quyên góp để hiển thị ở danh sách và trang chi tiết. */
 export async function aggregateDonationSummaryByProjectId(projectId: string): Promise<{ totalAmount: number; donationCount: number }> {

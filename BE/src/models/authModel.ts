@@ -106,7 +106,7 @@ const auditLogSchema = new Schema<AuditLogEntry>({
   createdAt: { type: Date, required: true }
 });
 
-const AuthUserModel = mongoose.model<AuthUser>('AuthUser', authUserSchema);
+export const AuthUserModel = mongoose.model<AuthUser>('AuthUser', authUserSchema);
 const RefreshSessionModel = mongoose.model<RefreshSession>('RefreshSession', refreshSessionSchema);
 const AuditLogModel = mongoose.model<AuditLogEntry>('AuditLog', auditLogSchema);
 
@@ -124,6 +124,14 @@ export async function findUserByLegalRegistrationNumber(legalRegistrationNumber:
  */
 export async function findUserByEmail(email: string): Promise<AuthUser | null> {
   return AuthUserModel.findOne({ email }).lean<AuthUser>().exec();
+}
+
+/**
+ * Hàm tìm người dùng theo wallet address.
+ * Mục đích: phục vụ FR5/UC5.1 — lookup người dùng khi toggle Sybil status.
+ */
+export async function findUserByWalletAddress(walletAddress: string): Promise<AuthUser | null> {
+  return AuthUserModel.findOne({ walletAddress: walletAddress.toLowerCase() }).lean<AuthUser>().exec();
 }
 
 /**
@@ -240,4 +248,83 @@ export async function findUsersByWalletAddressList(walletAddressList: string[]):
   }
 
   return AuthUserModel.find({ walletAddress: { $in: normalizedWalletAddressList } }).lean<AuthUser[]>().exec();
+}
+
+// =============================================================================
+// SYBIL AUDIT LOG
+// =============================================================================
+
+/** Kiểu dữ liệu bản ghi thay đổi trạng thái Sybil — ghi nhận quyết định của Admin/Regulatory Bodies theo FR5/UC5.1. */
+export type SybilAuditLogEntry = {
+  id: string;
+  userId: string;
+  walletAddress: string;
+  action: 'mark_as_sybil' | 'unmark_as_sybil';
+  previousValue: boolean;
+  newValue: boolean;
+  reason: string;
+  performedBy: string;
+  performedByRole: string;
+  ipAddress: string;
+  userAgent: string;
+  createdAt: Date;
+};
+
+const sybilAuditLogSchema = new Schema<SybilAuditLogEntry>({
+  id: { type: String, required: true, unique: true },
+  userId: { type: String, required: true, index: true },
+  walletAddress: { type: String, required: true, index: true },
+  action: { type: String, required: true, enum: ['mark_as_sybil', 'unmark_as_sybil'] },
+  previousValue: { type: Boolean, required: true },
+  newValue: { type: Boolean, required: true },
+  reason: { type: String, required: true },
+  performedBy: { type: String, required: true },
+  performedByRole: { type: String, required: true },
+  ipAddress: { type: String, required: true },
+  userAgent: { type: String, required: true },
+  createdAt: { type: Date, required: true }
+});
+
+const SybilAuditLogModel = mongoose.model<SybilAuditLogEntry>('SybilAuditLog', sybilAuditLogSchema);
+
+/**
+ * Hàm ghi log thay đổi trạng thái Sybil.
+ * Mục đích: lưu audit trail bắt buộc theo FR5/UC5.1 — mọi quyết định đánh dấu hoặc bỏ đánh dấu
+ * Sybil đều phải được ghi nhận kèm lý do, người thực hiện và thời gian.
+ */
+export async function addSybilAuditLog(entry: SybilAuditLogEntry): Promise<SybilAuditLogEntry> {
+  const createdEntry = await SybilAuditLogModel.create(entry);
+  return createdEntry.toObject() as SybilAuditLogEntry;
+}
+
+/**
+ * Hàm lấy danh sách audit log Sybil.
+ * Mục đích: phục vụ trang quản lý Sybil của Regulatory Bodies — hiển thị lịch sử thay đổi.
+ */
+export async function findSybilAuditLogs(limitCount: number = 50, skipCount: number = 0): Promise<SybilAuditLogEntry[]> {
+  return SybilAuditLogModel.find({})
+    .sort({ createdAt: -1 })
+    .skip(skipCount)
+    .limit(limitCount)
+    .lean<SybilAuditLogEntry[]>()
+    .exec();
+}
+
+/**
+ * Hàm lấy audit log Sybil theo userId.
+ * Mục đích: hiển thị lịch sử thay đổi của một ví cụ thể trong modal chi tiết.
+ */
+export async function findSybilAuditLogsByUserId(userId: string): Promise<SybilAuditLogEntry[]> {
+  return SybilAuditLogModel.find({ userId })
+    .sort({ createdAt: -1 })
+    .lean<SybilAuditLogEntry[]>()
+    .exec();
+}
+
+/**
+ * Hàm đếm tổng audit log Sybil.
+ * Mục đích: hỗ trợ phân trang phía frontend.
+ */
+export async function countSybilAuditLogs(): Promise<number> {
+  return SybilAuditLogModel.countDocuments({}).exec();
 }

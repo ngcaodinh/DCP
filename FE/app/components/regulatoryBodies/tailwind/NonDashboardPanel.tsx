@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ApiErrorResponse, fetchApi } from '@/app/utils/apiClient';
+import { fetchApi } from '@/app/utils/apiClient';
 import { readAuthSession } from '../../../utils/authSession';
 import { getPageTitle } from './helpers';
 import type { PageKey, UrgentRequestItem } from './types';
+import SybilManagementPanel from './SybilManagementPanel';
 
 type NonDashboardPanelProps = {
   selectedPageKey: PageKey;
@@ -1357,6 +1358,10 @@ export default function NonDashboardPanel({ selectedPageKey, onOpenDisbursementR
 
   if (selectedPageKey === 'transparency') {
     return <TransparencyPanel />;
+  }
+
+  if (selectedPageKey === 'sybilManagement') {
+    return <SybilManagementPanel />;
   }
 
   return (

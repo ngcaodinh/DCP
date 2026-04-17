@@ -21,6 +21,8 @@ type LogMetadata = {
   donationContractAddress?: string;
   authenticatedUserId?: string;
   projectId?: string;
+  performedBy?: string;
+  reason?: string;
 };
 
 /**
