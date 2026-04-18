@@ -412,6 +412,156 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // =============================================================================
+  // AUTO SYBIL DETECTION
+  // =============================================================================
+
+  /** Kiểm tra điều kiện Time Pattern — các ví donate cùng lúc (±5 giây).
+   *  Trả về Set chứa walletAddress của các ví liên quan.
+   *  So sánh timestamp trong donationHistory (chi tiết) hoặc lastActivity (thô).
+   */
+  const detectTimePattern = useCallback((users: SybilUser[]): Set<string> => {
+    const TIME_THRESHOLD_MS = 5000; // ±5 giây
+    const affectedWallets = new Set<string>();
+
+    // Bước 1: Thu thập tất cả timestamp donation từ mọi ví
+    // Mỗi entry: { walletAddress, timestamp }
+    const allDonationTimestamps: { walletAddress: string; timestamp: number }[] = [];
+
+    for (const user of users) {
+      // Ưu tiên lấy từ donationHistory nếu có (chi tiết hơn)
+      if (user.donationHistory && user.donationHistory.length > 0) {
+        for (const donation of user.donationHistory) {
+          allDonationTimestamps.push({
+            walletAddress: user.walletAddress,
+            timestamp: new Date(donation.timestamp).getTime()
+          });
+        }
+      } else if (user.lastActivity) {
+        // Fallback: dùng lastActivity
+        allDonationTimestamps.push({
+          walletAddress: user.walletAddress,
+          timestamp: new Date(user.lastActivity).getTime()
+        });
+      }
+    }
+
+    // Bước 2: Với mỗi timestamp, tìm các ví khác donate trong vòng ±5 giây
+    for (let i = 0; i < allDonationTimestamps.length; i++) {
+      const current = allDonationTimestamps[i];
+      for (let j = i + 1; j < allDonationTimestamps.length; j++) {
+        const other = allDonationTimestamps[j];
+        // Bỏ qua nếu cùng một ví
+        if (current.walletAddress === other.walletAddress) continue;
+
+        // Kiểm tra chênh lệch thời gian
+        const diff = Math.abs(current.timestamp - other.timestamp);
+        if (diff <= TIME_THRESHOLD_MS) {
+          // Tìm thấy 2 ví khác nhau donate cùng lúc → cả 2 đều bị ảnh hưởng
+          affectedWallets.add(current.walletAddress);
+          affectedWallets.add(other.walletAddress);
+        }
+      }
+    }
+
+    return affectedWallets;
+  }, []);
+
+  /** Kiểm tra điều kiện điểm rủi ro tối đa — ví có totalRiskScore === 100.
+   *  Trả về Set chứa walletAddress của các ví thỏa điều kiện.
+   */
+  const detectMaxRiskScore = useCallback((users: SybilUser[]): Set<string> => {
+    const affectedWallets = new Set<string>();
+    for (const user of users) {
+      if (user.totalRiskScore === 100 && !user.isSybil) {
+        affectedWallets.add(user.walletAddress);
+      }
+    }
+    return affectedWallets;
+  }, []);
+
+  /** Lấy danh sách user cần auto-mark từ 2 điều kiện, loại trừ ví đã được đánh dấu. */
+  const getAutoMarkTargets = useCallback((users: SybilUser[]): SybilUser[] => {
+    const timePatternWallets = detectTimePattern(users);
+    const maxRiskWallets = detectMaxRiskScore(users);
+
+    // Merge 2 Set — tất cả ví thỏa điều kiện
+    const allTargetWallets = new Set<string>([...timePatternWallets, ...maxRiskWallets]);
+
+    // Chỉ giữ lại những ví chưa được đánh dấu Sybil
+    return users.filter((u) => allTargetWallets.has(u.walletAddress) && !u.isSybil);
+  }, [detectTimePattern, detectMaxRiskScore]);
+
+  /** Hàm gọi API đánh dấu Sybil cho một ví (dùng bởi auto-mark).
+   *  Tự động điền reason/reviewedBy, không cần user confirm.
+   */
+  const autoMarkSybil = useCallback(async (user: SybilUser) => {
+    try {
+      const authSession = readAuthSession();
+      const authHeaders = { Authorization: `Bearer ${authSession.accessToken}` };
+      const apiUrl = buildApiUrl('/api/sybil/toggle');
+
+      await fetchApi<{ success: boolean; message: string }>(apiUrl, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          userId: user.userId,
+          walletAddress: user.walletAddress,
+          action: 'mark',
+          reason: 'Tự động chặn do nguy cơ tìm ẩn cao',
+          reviewedBy: 'Hệ thống tự động'
+        })
+      });
+
+      // Log hành động tự động để debug
+      console.log(
+        `[Sybil Auto-Mark] Đã đánh dấu tự động: ${user.walletAddress} | ` +
+        `Risk Score: ${user.totalRiskScore} | Reason: Tự động chặn do nguy cơ tìm ẩn cao`
+      );
+
+      return true;
+    } catch (err) {
+      console.error(`[Sybil Auto-Mark] Lỗi khi đánh dấu ${user.walletAddress}:`, err);
+      return false;
+    }
+  }, []);
+
+  /** Effect chạy sau khi danh sách người dùng được load/cập nhật.
+   *  Kiểm tra điều kiện tự động đánh dấu và batch các lời gọi API.
+   */
+  useEffect(() => {
+    // Chỉ chạy khi đã load xong và không có lỗi, và có dữ liệu
+    if (isLoading || hasError || sybilUserList.length === 0) return;
+
+    const targets = getAutoMarkTargets(sybilUserList);
+    if (targets.length === 0) return;
+
+    // Log tổng quan
+    console.log(`[Sybil Auto-Mark] Phát hiện ${targets.length} ví cần đánh dấu tự động:`);
+    targets.forEach((u) => console.log(`  → ${u.walletAddress} (score: ${u.totalRiskScore})`));
+
+    // Batch: gọi API song song cho tất cả các ví (Promise.allSettled để không dừng khi 1 cái lỗi)
+    Promise.allSettled(targets.map((user) => autoMarkSybil(user))).then((results) => {
+      // Sau khi API hoàn tất → cập nhật local state cho những ví thành công
+      const successfulWallets = results
+        .map((r, idx) => ({ success: r.status === 'fulfilled' && r.value === true, wallet: targets[idx].walletAddress }))
+        .filter((r) => r.success)
+        .map((r) => r.wallet);
+
+      if (successfulWallets.length > 0) {
+        const now = new Date().toISOString();
+        setSybilUserList((prev) =>
+          prev.map((u) =>
+            successfulWallets.includes(u.walletAddress)
+              ? { ...u, isSybil: true, reviewedAt: now, reviewedBy: 'Hệ thống tự động', reviewNote: 'Tự động chặn do nguy cơ tìm ẩn cao' }
+              : u
+          )
+        );
+        pushToast(`Đã tự động đánh dấu ${successfulWallets.length} ví Sybil nghi ngờ.`, 'warning');
+      }
+    });
+  }, [sybilUserList, isLoading, hasError, getAutoMarkTargets, autoMarkSybil, pushToast]);
+
   /** Lọc danh sách theo search query, risk level và sybil status. */
   const filteredList = useMemo(() => {
     return sybilUserList.filter((user) => {
