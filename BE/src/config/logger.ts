@@ -22,7 +22,11 @@ type LogMetadata = {
   authenticatedUserId?: string;
   projectId?: string;
   performedBy?: string;
+  performedByRole?: string;
   reason?: string;
+  userId?: string;
+  walletAddress?: string;
+  action?: string;
 };
 
 /**

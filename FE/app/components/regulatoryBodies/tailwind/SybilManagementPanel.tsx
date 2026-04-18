@@ -193,36 +193,38 @@ function DetailModal({ user, onClose, onMarkSybil }: DetailModalProps) {
             </div>
           </div>
 
-          {/* Lịch sử donation */}
-          <div>
-            <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
-              Lịch sử Donation ({user.donationHistory.length} giao dịch)
-            </h3>
-            <div className="overflow-x-auto rounded-lg border border-slate-100">
-              <table className="min-w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2.5 font-semibold">Dự án</th>
-                    <th className="px-3 py-2.5 font-semibold">Số tiền</th>
-                    <th className="px-3 py-2.5 font-semibold">Thời gian</th>
-                    <th className="px-3 py-2.5 font-semibold">TX Hash</th>
-                    <th className="px-3 py-2.5 font-semibold">IP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {user.donationHistory.map((donation, idx) => (
-                    <tr key={donation.donationId} className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
-                      <td className="px-3 py-2 text-slate-700">{donation.projectName}</td>
-                      <td className="px-3 py-2 font-semibold text-slate-900">{formatVndAmount(donation.amount)}</td>
-                      <td className="px-3 py-2 text-slate-600">{formatVietnameseDateTime(donation.timestamp)}</td>
-                      <td className="px-3 py-2 font-mono text-cyan-600">{getShortWalletAddress(donation.txHash)}</td>
-                      <td className="px-3 py-2 font-mono text-slate-600">{donation.ipAddress}</td>
+          {/* Lịch sử donation — chỉ hiển thị khi có dữ liệu (từ detail endpoint) */}
+          {user.donationHistory && user.donationHistory.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-500">
+                Lịch sử Donation ({user.donationHistory.length} giao dịch)
+              </h3>
+              <div className="overflow-x-auto rounded-lg border border-slate-100">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2.5 font-semibold">Dự án</th>
+                      <th className="px-3 py-2.5 font-semibold">Số tiền</th>
+                      <th className="px-3 py-2.5 font-semibold">Thời gian</th>
+                      <th className="px-3 py-2.5 font-semibold">TX Hash</th>
+                      <th className="px-3 py-2.5 font-semibold">IP</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {user.donationHistory.map((donation, idx) => (
+                      <tr key={donation.donationId} className={`border-t border-slate-100 ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
+                        <td className="px-3 py-2 text-slate-700">{donation.projectName}</td>
+                        <td className="px-3 py-2 font-semibold text-slate-900">{formatVndAmount(donation.amount)}</td>
+                        <td className="px-3 py-2 text-slate-600">{formatVietnameseDateTime(donation.timestamp)}</td>
+                        <td className="px-3 py-2 font-mono text-cyan-600">{getShortWalletAddress(donation.txHash)}</td>
+                        <td className="px-3 py-2 font-mono text-slate-600">{donation.ipAddress}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Actions */}
           <div className="flex items-center justify-end gap-3 border-t border-emerald-900/15 pt-4">
@@ -351,6 +353,11 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
     totalAffectedAmount: 0
   });
 
+  // Pagination state — lưu trữ thông tin trang từ API response
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [pageSize, setPageSize] = useState(10); // Số bản ghi mỗi trang (5/10/20/50)
+
   // Search & filter
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRiskLevel, setFilterRiskLevel] = useState<SybilRiskLevel | 'all'>('all');
@@ -375,8 +382,8 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
     onPushToast?.(message, type);
   }, [onPushToast]);
 
-  /** Hàm load dữ liệu từ API thật — thay thế mock data. */
-  const loadData = useCallback(async () => {
+  /** Hàm load dữ liệu từ API thật — bao gồm query params page/limit. */
+  const loadData = useCallback(async (page = currentPage) => {
     setIsLoading(true);
     setHasError(false);
     try {
@@ -384,19 +391,24 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
       const authSession = readAuthSession();
       const authHeaders = { Authorization: `Bearer ${authSession.accessToken}` };
 
-      // Gọi song song 2 API để tối ưu thời gian tải
+      // Build URL với query params phân trang (buildApiUrl chỉ nhận pathname)
+      const apiUrl = buildApiUrl('/api/sybil/users');
+      const paginationUrl = `${apiUrl}?page=${page}&limit=${pageSize}`;
       const [userListResponse, metricsResponse] = await Promise.all([
-        fetchApi<SybilUserListApiResponse>(buildApiUrl('/api/sybil/users'), { headers: authHeaders }),
+        fetchApi<SybilUserListApiResponse>(paginationUrl, { headers: authHeaders }),
         fetchApi<SybilSummaryMetricsApiResponse>(buildApiUrl('/api/sybil/summary-metrics'), { headers: authHeaders })
       ]);
       setSybilUserList(userListResponse.data.users);
+      // Cập nhật pagination state từ response
+      setCurrentPage(userListResponse.data.pageNumber);
+      setTotalPages(userListResponse.data.totalPages);
       setMetrics(metricsResponse.data);
     } catch {
       setHasError(true);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [currentPage, pageSize]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -482,6 +494,32 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
   }, []);
 
   const hasActiveFilters = searchQuery !== '' || filterRiskLevel !== 'all' || filterSybilStatus !== 'all';
+
+  // ===== PAGINATION HANDLERS =====
+  /** Chuyển sang trang trước — disable khi đang ở trang 1. */
+  const handlePreviousPage = useCallback(() => {
+    if (currentPage <= 1) return;
+    loadData(currentPage - 1);
+  }, [currentPage, loadData]);
+
+  /** Chuyển sang trang sau — disable khi đang ở trang cuối. */
+  const handleNextPage = useCallback(() => {
+    if (currentPage >= totalPages) return;
+    loadData(currentPage + 1);
+  }, [currentPage, totalPages, loadData]);
+
+  /** Nhảy đến trang cụ thể. */
+  const handleGoToPage = useCallback((page: number) => {
+    if (page < 1 || page > totalPages || page === currentPage) return;
+    loadData(page);
+  }, [currentPage, totalPages, loadData]);
+
+  /** Thay đổi số bản ghi mỗi trang — reset về trang 1 và fetch lại. */
+  const handlePageSizeChange = useCallback((newSize: number) => {
+    setPageSize(newSize);
+    setCurrentPage(1); // Reset về trang 1 khi thay đổi page size
+    loadData(1);
+  }, [loadData]);
 
   return (
     <div className="space-y-4">
@@ -612,7 +650,7 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
                       <p className="text-xs text-slate-500">Đã xảy ra lỗi khi tải danh sách người dùng. Vui lòng thử lại.</p>
                       <button
                         type="button"
-                        onClick={loadData}
+                        onClick={() => loadData()}
                         className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-red-700"
                       >
                         Thử lại
@@ -715,13 +753,61 @@ export default function SybilManagementPanel({ onPushToast }: SybilManagementPan
         {/* Pagination footer */}
         {!isLoading && !hasError && filteredList.length > 0 && (
           <div className="flex items-center justify-between border-t border-emerald-900/15 bg-slate-50 px-5 py-3">
-            <span className="text-xs text-slate-500">
-              Hiển thị {filteredList.length} / {sybilUserList.length} người dùng
-            </span>
+            {/* Bộ chọn số bản ghi mỗi trang */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">Hiển thị</span>
+              <select
+                value={pageSize}
+                onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-[#1AAE97] focus:outline-none"
+                aria-label="Số bản ghi mỗi trang"
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+              <span className="text-xs text-slate-500">bản ghi / trang</span>
+            </div>
             <div className="flex items-center gap-1">
-              <button type="button" disabled className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-400" aria-label="Trang trước">‹</button>
-              <button type="button" className="h-7 w-7 rounded-md border border-[#0F2040] bg-[#0F2040] text-xs text-white" aria-current="page">1</button>
-              <button type="button" disabled className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-400" aria-label="Trang sau">›</button>
+              {/* Nút Previous — disable khi đang ở trang 1 */}
+              <button
+                type="button"
+                onClick={() => handlePreviousPage()}
+                disabled={currentPage <= 1}
+                className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Trang trước"
+              >
+                ‹
+              </button>
+
+              {/* Danh sách số trang */}
+              {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((page) => (
+                <button
+                  key={page}
+                  type="button"
+                  onClick={() => handleGoToPage(page)}
+                  className={`h-7 min-w-7 rounded-md border text-xs font-medium transition ${page === currentPage
+                    ? 'border-[#0F2040] bg-[#0F2040] text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                    }`}
+                  aria-label={`Trang ${page}`}
+                  aria-current={page === currentPage ? 'page' : undefined}
+                >
+                  {page}
+                </button>
+              ))}
+
+              {/* Nút Next — disable khi đang ở trang cuối */}
+              <button
+                type="button"
+                onClick={() => handleNextPage()}
+                disabled={currentPage >= totalPages}
+                className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Trang sau"
+              >
+                ›
+              </button>
             </div>
           </div>
         )}

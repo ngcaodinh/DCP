@@ -85,7 +85,8 @@ export type SybilUser = {
   ipAddresses: string[];
   deviceFingerprint: string | null;
   riskFactors: SybilRiskFactor[];
-  donationHistory: UserDonationHistory[];
+  /** donationHistory chỉ có khi xem chi tiết (từ /api/sybil/users/:userId), không có trong list endpoint. */
+  donationHistory?: UserDonationHistory[];
   createdAt: string;
   reviewedAt: string | null;
   reviewedBy: string | null;

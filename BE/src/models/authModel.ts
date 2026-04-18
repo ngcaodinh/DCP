@@ -285,15 +285,20 @@ const sybilAuditLogSchema = new Schema<SybilAuditLogEntry>({
   createdAt: { type: Date, required: true }
 });
 
-const SybilAuditLogModel = mongoose.model<SybilAuditLogEntry>('SybilAuditLog', sybilAuditLogSchema);
+export const SybilAuditLogModel = mongoose.model<SybilAuditLogEntry>('SybilAuditLog', sybilAuditLogSchema);
 
 /**
  * Hàm ghi log thay đổi trạng thái Sybil.
  * Mục đích: lưu audit trail bắt buộc theo FR5/UC5.1 — mọi quyết định đánh dấu hoặc bỏ đánh dấu
  * Sybil đều phải được ghi nhận kèm lý do, người thực hiện và thời gian.
+ *
+ * Lưu ý: Dùng toObject() để chuyển thành plain object thuần túy, tránh Mongoose document
+ * wrapper gây schema validation lỗi khi create().
  */
 export async function addSybilAuditLog(entry: SybilAuditLogEntry): Promise<SybilAuditLogEntry> {
-  const createdEntry = await SybilAuditLogModel.create(entry);
+  // Chuyển thành plain object thuần túy — đảm bảo tất cả required fields không bị undefined
+  const plainEntry = { ...entry };
+  const createdEntry = await SybilAuditLogModel.create(plainEntry);
   return createdEntry.toObject() as SybilAuditLogEntry;
 }
 

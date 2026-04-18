@@ -169,7 +169,7 @@ export async function handleToggleSybilStatus(
     walletAddress,
     action: action as 'mark' | 'unmark',
     reason,
-    performedBy: request.authenticatedUser.id,
+    performedBy: request.authenticatedUser.userId,
     performedByRole: request.authenticatedUser.role,
     ipAddress: (request as AuthenticatedRequest & { ipMetadata?: { ipAddress: string } }).ipMetadata?.ipAddress || 'unknown',
     userAgent: (request.headers['user-agent'] as string) || 'unknown'
@@ -179,12 +179,12 @@ export async function handleToggleSybilStatus(
     const result = await toggleSybilStatus(payload);
 
     // Log thành công cho OWASP A07: security logging — mọi thao tác nhạy cảm đều phải được ghi nhận.
-    logger.info(`[SYBIL-TOGGLE] ${request.authenticatedUser.role} ${request.authenticatedUser.id} đã ${action === 'mark' ? 'đánh dấu' : 'bỏ đánh dấu'} Sybil cho ${walletAddress || userId}.`, {
+    logger.info(`[SYBIL-TOGGLE] ${request.authenticatedUser.role} ${request.authenticatedUser.userId} đã ${action === 'mark' ? 'đánh dấu' : 'bỏ đánh dấu'} Sybil cho ${walletAddress || userId}.`, {
       userId,
       walletAddress,
       action,
       reason,
-      performedBy: request.authenticatedUser.id,
+      performedBy: request.authenticatedUser.userId,
       performedByRole: request.authenticatedUser.role
     });
 

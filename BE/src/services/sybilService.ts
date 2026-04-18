@@ -10,7 +10,8 @@ import {
   type AuthUser
 } from '../models/authModel';
 import { findDonationsByDonorAddress, type DonationRecord } from '../models/donationModel';
-import { sendErrorResponse } from '../utils/apiResponse';
+import { recalculateRankingSnapshot } from './rankingService';
+import { invalidateRankingCache } from './rankingCacheService';
 
 const logger = getLogger();
 
@@ -391,10 +392,12 @@ export async function getSybilUserList(
     userRecordList.map(user => buildSybilUserRecord(user))
   );
 
+  // Lọc bỏ những ví không có điểm rủi ro (totalRiskScore === 0) — không cần hiển thị
+  let filteredRecords = sybilUserRecordList.filter(record => record.totalRiskScore > 0);
+
   // Apply risk level filter sau khi đã tính toán
-  let filteredRecords = sybilUserRecordList;
   if (filterRiskLevel && filterRiskLevel !== 'all') {
-    filteredRecords = sybilUserRecordList.filter(
+    filteredRecords = filteredRecords.filter(
       record => record.riskLevel === filterRiskLevel
     );
   }
@@ -539,11 +542,27 @@ export async function toggleSybilStatus(payload: SybilTogglePayload): Promise<Sy
   };
   await addSybilAuditLog(auditLogEntry);
 
-  // Log thành công
+  // Ghi log thành công
   logger.info(`Sybil status changed for user ${user.walletAddress}: ${previousValue} -> ${newIsSybilValue} by ${performedBy}`, {
     performedBy,
     reason,
     correlationId: user.correlationId
+  });
+
+  // Tự động tính lại bảng xếp hạng QF sau khi thay đổi trạng thái Sybil.
+  // Điều này đảm bảo donation của ví Sybil được loại/bỏ loại khỏi QF ngay lập tức,
+  // không phụ thuộc cron job hoặc thao tác thủ công.
+  recalculateRankingSnapshot(24).catch((error) => {
+    logger.error('Tự động recalculate ranking thất bại sau khi toggle Sybil.', {
+      walletAddress: user.walletAddress,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+  });
+  invalidateRankingCache().catch((error) => {
+    logger.error('Xoá ranking cache thất bại sau khi toggle Sybil.', {
+      walletAddress: user.walletAddress,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
   });
 
   return {
