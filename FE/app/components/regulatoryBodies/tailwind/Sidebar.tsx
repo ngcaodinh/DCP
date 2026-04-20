@@ -46,26 +46,7 @@ export default function Sidebar({ selectedPageKey, navigationItemList, onSelectP
         ))}
       </nav>
 
-      <div className="mt-auto border-t border-white/10 px-3 py-3.5">
-        <div className="flex items-center gap-2.5 rounded-xl bg-white/[0.06] px-2.5 py-2 ring-1 ring-white/10">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-cyan-300 text-xs font-bold text-[#08473F]">BTC</div>
-          <div>
-            <p className="text-[12px] font-semibold leading-none">Bộ Tài chính</p>
-            <p className="mt-1 text-[10px] text-white/55">Cơ quan giám sát</p>
-          </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md border border-white/20 text-white/70 transition hover:bg-white/10 hover:text-white"
-            aria-label="Đăng xuất"
-            title="Đăng xuất"
-          >
-            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
-              <path d="M6 2h4v2H6zm0 10h4v2H6zM2 5h2v6H2zm10 0h2v6h-2zM5 4h6v1H5zm0 7h6v1H5z" />
-            </svg>
-          </button>
-        </div>
-      </div>
+
     </aside>
   );
 }
