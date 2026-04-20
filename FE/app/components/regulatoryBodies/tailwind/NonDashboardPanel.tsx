@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchApi } from '@/app/utils/apiClient';
+import type { ApiErrorResponse } from '@/app/utils/apiClient';
 import { readAuthSession } from '../../../utils/authSession';
 import { getPageTitle } from './helpers';
 import type { PageKey, UrgentRequestItem } from './types';
@@ -423,7 +424,7 @@ function KycPanel() {
     <div className="space-y-4">
       <div className="rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
         <h2 className="text-lg font-bold text-slate-900">Duyệt Hồ sơ KYC</h2>
-        <p className="mt-1 text-xs text-slate-500">Danh sách hồ sơ chờ duyệt (PENDING_REVIEW) từ backend</p>
+        <p className="mt-1 text-xs text-slate-500">Danh sách hồ sơ chờ duyệt </p>
       </div>
       {errorMessage ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs text-red-700">{errorMessage}</div> : null}
       {successMessage ? <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">{successMessage}</div> : null}

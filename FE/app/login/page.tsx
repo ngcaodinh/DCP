@@ -219,9 +219,11 @@ export default function LoginPage() {
         const redirectPath =
           userRole === 'regulatory'
             ? '/regulatory-bodies'
-            : userRole === 'organization' || userRole === 'organizations'
+            : userRole === 'organizations'
               ? '/organizations'
-              : '/';
+              : userRole === 'admin'
+              ? '/admin'
+                : '/';
         router.push(redirectPath);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';

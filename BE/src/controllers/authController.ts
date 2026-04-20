@@ -250,9 +250,9 @@ export async function handleGetPendingOrganizationKycSubmissions(request: Reques
     return;
   }
 
-  if (authenticatedRequest.authenticatedUser.role !== 'regulatory') {
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
     response.status(403).json({
-      message: 'Bạn không có quyền xem danh sách hồ sơ KYC chờ duyệt. Chỉ cơ quan regulatory được phép.'
+      message: 'Bạn không có quyền xem danh sách hồ sơ KYC chờ duyệt. Chỉ cơ quan regulatory hoặc admin được phép.'
     });
     return;
   }
@@ -279,9 +279,9 @@ export async function handleReviewOrganizationKycSubmission(request: Request, re
     return;
   }
 
-  if (authenticatedRequest.authenticatedUser.role !== 'regulatory') {
+  if (authenticatedRequest.authenticatedUser.role !== 'regulatory' && authenticatedRequest.authenticatedUser.role !== 'admin') {
     response.status(403).json({
-      message: 'Bạn không có quyền duyệt hồ sơ KYC. Chỉ cơ quan regulatory được phép.'
+      message: 'Bạn không có quyền duyệt hồ sơ KYC. Chỉ cơ quan regulatory hoặc admin được phép.'
     });
     return;
   }
