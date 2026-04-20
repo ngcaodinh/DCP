@@ -22,8 +22,9 @@ type HomeSupportProjectDetail = {
   description: string;
   goalAmount: number;
   status: string;
-  updatedAt: string;
+  lastDonationAt: string | null;
   evidenceCids: string[];
+  creatorName: string | null;
 };
 
 type HomeDonationCampaignDetail = {
@@ -1324,7 +1325,6 @@ export default function HomePage() {
                     </div>
                     <div className="pcard-meta">
                       <span>Trạng thái: {getPublicProjectStatusLabel(project.status)}</span>
-                      <span>Cập nhật: {formatUpdatedTime(project.updatedAt)}</span>
                     </div>
                     <div className="pcard-actions">
                       <button className="btn-donate" type="button" onClick={() => void handleOpenDonationModal(project.projectId, project)}>
@@ -1612,9 +1612,19 @@ export default function HomePage() {
                         <p className="mt-1 text-sm font-semibold text-[#111827]">{formatCurrencyVnd(selectedProjectDetail.goalAmount)}₫</p>
                       </div>
                       <div className="rounded-lg bg-white p-2.5">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Cập nhật</p>
-                        <p className="mt-1 text-sm font-semibold text-[#111827]">{formatUpdatedTime(selectedProjectDetail.updatedAt)}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Quyên góp gần nhất</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">
+                          {selectedProjectDetail.lastDonationAt
+                            ? formatUpdatedTime(selectedProjectDetail.lastDonationAt)
+                            : 'Chưa có donation'}
+                        </p>
                       </div>
+                      {selectedProjectDetail.creatorName && (
+                        <div className="rounded-lg bg-white p-2.5">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Người tạo dự án</p>
+                          <p className="mt-1 text-sm font-semibold text-[#111827]">{selectedProjectDetail.creatorName}</p>
+                        </div>
+                      )}
                     </div>
                     <div className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-3">
                       <h5 className="text-sm font-semibold text-[#0e7c6b]">Mô tả dự án</h5>
