@@ -52,24 +52,28 @@ function createDeployerSigner(networkName) {
 }
 
 /**
+ * Hàm lấy địa chỉ signer từ biến môi trường, dùng chung cho các vai trò multisig.
+ * Mục đích: đảm bảo đủ 3 signer khi deploy MultisigDisbursement.
+ */
+function getMultisigSignerAddress(envVarName, fallbackVarName) {
+  return getRequiredEnvironmentVariable(envVarName) || process.env[fallbackVarName] || '';
+}
+
+/**
  * Hàm deploy toàn bộ contract cốt lõi của DCP lên network được cấu hình.
- * Mục đích: triển khai token và contract ghi nhận donation cho môi trường Amoy tối thiểu.
+ * Mục đích: triển khai token, contract ghi nhận donation và giải ngân multisig.
  */
 async function deployContracts() {
   const hardhatRuntime = getHardhatRuntime();
-  // Logic phức tạp: Hardhat 3 có thể không expose network.name trực tiếp trong một số ngữ cảnh ESM.
   const networkName =
     process.env.HARDHAT_NETWORK ?? hardhatRuntime.network?.name ?? 'unknown';
   const deployerSigner = createDeployerSigner(networkName);
   const deployerAddress = await deployerSigner.getAddress();
 
+  // --- Deploy DcpCharityToken ---
   const charityTokenArtifact = await hardhatRuntime.artifacts.readArtifact(
     'DcpCharityToken'
   );
-  const donationRankingArtifact = await hardhatRuntime.artifacts.readArtifact(
-    'DcpDonationRanking'
-  );
-
   const charityTokenFactory = new ethers.ContractFactory(
     charityTokenArtifact.abi,
     charityTokenArtifact.bytecode,
@@ -77,9 +81,12 @@ async function deployContracts() {
   );
   const charityTokenContract = await charityTokenFactory.deploy(deployerAddress);
   await charityTokenContract.waitForDeployment();
-
   const charityTokenAddress = await charityTokenContract.getAddress();
 
+  // --- Deploy DcpDonationRanking ---
+  const donationRankingArtifact = await hardhatRuntime.artifacts.readArtifact(
+    'DcpDonationRanking'
+  );
   const donationRankingFactory = new ethers.ContractFactory(
     donationRankingArtifact.abi,
     donationRankingArtifact.bytecode,
@@ -90,18 +97,64 @@ async function deployContracts() {
     deployerAddress
   );
   await donationRankingContract.waitForDeployment();
-
   const donationRankingAddress = await donationRankingContract.getAddress();
+
+  // --- Deploy MultisigDisbursement ---
+  const multisigArtifact = await hardhatRuntime.artifacts.readArtifact(
+    'MultisigDisbursement'
+  );
+  const multisigFactory = new ethers.ContractFactory(
+    multisigArtifact.abi,
+    multisigArtifact.bytecode,
+    deployerSigner
+  );
+
+  // Lấy 3 signer addresses từ env; fallback về deployer nếu chưa cấu hình riêng.
+  const adminSignerAddress = getMultisigSignerAddress('MULTISIG_ADMIN_SIGNER_ADDRESS') || deployerAddress;
+  const orgSignerAddress = getMultisigSignerAddress('MULTISIG_ORG_SIGNER_ADDRESS') || deployerAddress;
+  const regulatorySignerAddress = getMultisigSignerAddress('MULTISIG_REGULATORY_SIGNER_ADDRESS') || deployerAddress;
+
+  const multisigContract = await multisigFactory.deploy(
+    charityTokenAddress,
+    donationRankingAddress,
+    adminSignerAddress,
+    orgSignerAddress,
+    regulatorySignerAddress
+  );
+  await multisigContract.waitForDeployment();
+  const multisigAddress = await multisigContract.getAddress();
+
+  // --- Cấp quyền cần thiết ---
+  const minterRole = await charityTokenContract.minterRole();
+  const disbursementRole = await charityTokenContract.disbursementRole();
+  const projectManagerRole = await donationRankingContract.projectManagerRole();
+
+  // Backend (deployer) được quyền mint token khi nhận thanh toán PayOS.
+  const grantMinterTx = await charityTokenContract.grantMinterRole(deployerAddress);
+  await grantMinterTx.wait();
+
+  // Multisig contract được quyền burn token khi giải ngân thành công.
+  const grantDisbursementTx = await charityTokenContract.grantDisbursementRole(multisigAddress);
+  await grantDisbursementTx.wait();
+
+  // Org signer được quyền quản lý dự án.
+  const grantProjectManagerTx = await donationRankingContract.grantProjectManagerRole(orgSignerAddress);
+  await grantProjectManagerTx.wait();
 
   const deploymentOutput = {
     network: networkName,
     deployedAt: new Date().toISOString(),
     deployerAddress,
     charityTokenAddress,
-    donationRankingAddress
+    donationRankingAddress,
+    multisigDisbursementAddress: multisigAddress,
+    signerRoles: {
+      adminSigner: adminSignerAddress,
+      orgSigner: orgSignerAddress,
+      regulatorySigner: regulatorySignerAddress
+    }
   };
 
-  // Logic phức tạp: tạo thư mục nếu chưa có và ghi đè file theo từng network để dễ tra cứu địa chỉ.
   const deploymentFilePath = path.join(
     process.cwd(),
     'deployments',
@@ -114,9 +167,10 @@ async function deployContracts() {
     'utf-8'
   );
 
-  console.log(`DcpCharityToken deployed to: ${charityTokenAddress}`);
-  console.log(`DcpDonationRanking deployed to: ${donationRankingAddress}`);
-  console.log(`Deployment info saved to: ${deploymentFilePath}`);
+  console.log(`DcpCharityToken deployed to:      ${charityTokenAddress}`);
+  console.log(`DcpDonationRanking deployed to:    ${donationRankingAddress}`);
+  console.log(`MultisigDisbursement deployed to:  ${multisigAddress}`);
+  console.log(`Deployment info saved to:         ${deploymentFilePath}`);
 }
 
 deployContracts().catch((errorObject) => {

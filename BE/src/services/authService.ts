@@ -134,8 +134,9 @@ async function createSmartAccountWithFallback(): Promise<SmartAccountCreationRes
 /**
  * Hàm đảm bảo user đã có smart account one-click.
  * Mục đích: tự động cấp bổ sung cho user cũ đăng nhập từ trước khi hệ thống lưu owner key mã hóa.
+ * Được export để disbursementService gọi khi user chưa có Smart Account.
  */
-async function ensureSmartAccountProvisioned(existingUser: AuthUser): Promise<AuthUser> {
+export async function ensureSmartAccountProvisioned(existingUser: AuthUser): Promise<AuthUser> {
   const hasOneClickSmartAccount = Boolean(existingUser.smartAccountOwnerEncryptedPrivateKey);
   if (hasOneClickSmartAccount) {
     return existingUser;

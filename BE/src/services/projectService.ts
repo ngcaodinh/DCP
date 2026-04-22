@@ -15,6 +15,7 @@ import {
   findPublicSupportProjectsFromRepository,
   updateProject
 } from '../repositories/projectRepository';
+import { findLatestDonationTimestampByProjectIdFromRepository } from '../repositories/donationRepository';
 import { ApplicationError } from '../utils/applicationError';
 import { createInMemoryCache } from '../utils/inMemoryCache';
 
@@ -82,8 +83,9 @@ export type PublicSupportProjectDetailResult = {
   description: string;
   goalAmount: number;
   status: ProjectStatus;
-  updatedAt: Date;
+  lastDonationAt: Date | null;
   evidenceCids: string[];
+  creatorName: string | null;
 };
 
 const logger = getLogger();
@@ -623,14 +625,37 @@ export async function getPublicSupportProjectDetail(projectId: string): Promise<
     return null;
   }
 
+  // Lookup tên người tạo dự án từ bảng AuthUser dựa trên organizationId.
+  // Ưu tiên fullName, fallback về organizationName nếu fullName trống.
+  let creatorName: string | null = null;
+  try {
+    const creatorUser = await findUserById(projectRecord.organizationId);
+    if (creatorUser) {
+      creatorName = creatorUser.fullName?.trim() || creatorUser.organizationName || null;
+    }
+  } catch {
+    // Lookup thất bại không làm fail request — log và tiếp tục trả dữ liệu project.
+    logger.warn(`Không tìm được thông tin người tạo dự án. projectId=${sanitizedProjectId} organizationId=${projectRecord.organizationId}`);
+  }
+
+  // Lookup thời gian donation gần nhất từ bảng Donation thay vì updatedAt của project record.
+  // Nếu chưa có donation nào, trả về null và frontend sẽ hiển thị "Chưa có donation".
+  let lastDonationAt: Date | null = null;
+  try {
+    lastDonationAt = await findLatestDonationTimestampByProjectIdFromRepository(sanitizedProjectId);
+  } catch {
+    logger.warn(`Không tìm được thời gian donation gần nhất. projectId=${sanitizedProjectId}`);
+  }
+
   return {
     projectId: projectRecord.projectId,
     name: projectRecord.name,
     description: projectRecord.description,
     goalAmount: projectRecord.goalAmount,
     status: projectRecord.status,
-    updatedAt: projectRecord.updatedAt,
-    evidenceCids: projectRecord.evidenceCids
+    lastDonationAt,
+    evidenceCids: projectRecord.evidenceCids,
+    creatorName
   };
 }
 

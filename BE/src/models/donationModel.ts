@@ -106,6 +106,16 @@ export async function findLatestIndexedBlockNumber(): Promise<number> {
   return latestRecord?.blockNumber || 0;
 }
 
+/** Hàm lấy timestamp donation gần nhất của một dự án. Mục đích: trả thời gian quyên góp cuối cùng thay vì updatedAt của project record. */
+export async function findLatestDonationTimestampByProjectId(projectId: string): Promise<Date | null> {
+  const latestDonationRecord = await DonationMongoModel.findOne({ projectId })
+    .sort({ timestamp: -1 })
+    .select('timestamp')
+    .lean<{ timestamp: Date } | null>()
+    .exec();
+  return latestDonationRecord?.timestamp || null;
+}
+
 /** Hàm lấy donation trong khoảng thời gian. Mục đích: cung cấp tập đóng góp cho job tính bảng xếp hạng QF. */
 export async function findDonationsInTimeRange(startedAt: Date, endedAt: Date): Promise<DonationRecord[]> {
   return DonationMongoModel.find({

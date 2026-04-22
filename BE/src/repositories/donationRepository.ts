@@ -4,6 +4,7 @@ import {
   findDonationsByProjectId,
   findDonationsByProjectIdPaginated,
   findDonationsPaginated,
+  findLatestDonationTimestampByProjectId,
   findLatestIndexedBlockNumber,
   upsertDonationByTransactionHash,
   DonationRecord
@@ -28,6 +29,8 @@ export async function findPublicCampaignByProjectId(projectId: string): Promise<
 export async function findDonationHistoryByProjectId(projectId: string, limitCount: number): Promise<DonationRecord[]> { return findDonationsByProjectId(projectId, limitCount); }
 /** Hàm lấy tổng hợp donation theo projectId. Mục đích: trả tổng số tiền và số lượt donate cho card thống kê chiến dịch. */
 export async function findDonationSummaryByProjectId(projectId: string): Promise<{ totalAmount: number; donationCount: number }> { return aggregateDonationSummaryByProjectId(projectId); }
+/** Hàm lấy thời gian donation gần nhất theo projectId. Mục đích: trả lastDonationAt thay vì updatedAt của project record cho modal chi tiết. */
+export async function findLatestDonationTimestampByProjectIdFromRepository(projectId: string): Promise<Date | null> { return findLatestDonationTimestampByProjectId(projectId); }
 
 /** Hàm lấy danh sách nhà hảo tâm công khai có phân trang. Mục đích: trả dữ liệu theo page/limit và metadata cho frontend. */
 export async function findPublicDonorListPaginated(pageNumber: number, limitCount: number, projectId?: string): Promise<DonorPublicPaginationResult> {
