@@ -1,4 +1,4 @@
-import { getMetricItemList, getUrgentRequestItemList } from '../regulatoryBodiesData';
+﻿import { getMetricItemList, getUrgentRequestItemList } from '../regulatoryBodiesData';
 import type { AuditLogItem, NavigationItem, SybilUser, TimelineItem, UrgentRequestItem } from './types';
 
 export const navigationItemList: NavigationItem[] = [
@@ -26,7 +26,7 @@ export const timelineItemList: TimelineItem[] = [
   { actionText: 'Đăng nhập hệ thống', detailText: 'Thiết bị Chrome · Hà Nội', timeText: '42 phút trước', type: 'login' }
 ];
 
-/** Hàm trả về dữ liệu metric gốc để dùng lại trong UI tổng quan. */
+/** Hàm trả về dữ liệu metric gốc để dùng lại trong UI Tổng quan. */
 export function getDashboardMetricItemList() {
   return getMetricItemList();
 }
@@ -40,14 +40,15 @@ export function getDashboardUrgentRequestItemList(): UrgentRequestItem[] {
     amountText: item.amountText,
     signatureState: item.signatureState,
     deadlineText: item.deadlineText,
-    deadlineLevel: item.deadlineClassName
+    deadlineLevel: item.deadlineClassName,
+    ipfsCid: item.ipfsCid,
+    fileName: item.fileName
   }));
 }
-
 /** Mock data cho 5 tiêu chí phát hiện Sybil theo document.md. */
 export const sybilRiskCriteriaMockData = [
   { criteriaKey: 'ipCorrelation', labelText: 'Tương quan IP', descriptionText: 'Nhiều ví (>5) quyên góp từ cùng IP trong 1 giờ → +30 điểm risk', maxScore: 30, weight: 0.30 },
-  { criteriaKey: 'timePattern', labelText: 'Mẫu thời gian', descriptionText: 'Donations diễn ra cùng lúc (±5 giây) từ nhiều ví → +25 điểm risk', maxScore: 25, weight: 0.25 },
+  { criteriaKey: 'timePattern', labelText: 'Mẫu thời gian', descriptionText: 'Donations diễn ra cùng lúc (±5 giây) t? Nhiều ví → +25 điểm risk', maxScore: 25, weight: 0.25 },
   { criteriaKey: 'amountPattern', labelText: 'Cấu trúc số tiền', descriptionText: 'Các ví quyên góp số tiền giống hệt nhau → +20 điểm risk', maxScore: 20, weight: 0.20 },
   { criteriaKey: 'deviceFingerprint', labelText: 'Device Fingerprint', descriptionText: 'Nhiều ví dùng chung browser fingerprint → +15 điểm risk', maxScore: 15, weight: 0.15 },
   { criteriaKey: 'socialVerification', labelText: 'Xác minh Social', descriptionText: 'Ví không có Social Login backing → +10 điểm risk', maxScore: 10, weight: 0.10 }
@@ -165,7 +166,7 @@ export const sybilUserMockData = [
     ipAddresses: ['118.70.45.123'],
     deviceFingerprint: 'chrome_120_win11',
     riskFactors: [
-      { factorName: 'Xác minh Social', factorKey: 'socialVerification' as const, score: 5, maxScore: 10, description: 'Google OAuth nhưng không xác minh đầy đủ' }
+      { factorName: 'Xác minh Social', factorKey: 'socialVerification' as const, score: 5, maxScore: 10, description: 'Google OAuth nhung không xác minh đầy đủ' }
     ],
     donationHistory: [
       { donationId: 'DN-009-FR5', projectId: 'PRJ-2026-001', projectName: 'Xây trường học Tây Nguyên', amount: 5000000, amountText: '₫5,000,000', timestamp: '2026-03-18T08:30:00Z', txHash: '0xBI7L9K8L2M4567F8A9B0C1D2E3F4A5B6C7D8E9F0', walletAddress: '0xD4E5F6A7B8C901234567890123456789012CDEFG', isAnonymous: false, ipAddress: '118.70.45.123' }
@@ -219,4 +220,5 @@ export const sybilSummaryMetricsMockData = [
 export function getSybilUserList(): SybilUser[] {
   return sybilUserMockData;
 }
+
 

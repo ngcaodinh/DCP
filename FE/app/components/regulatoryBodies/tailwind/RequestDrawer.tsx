@@ -1,4 +1,5 @@
-import type { DrawerTabKey, UrgentRequestItem } from './types';
+﻿import type { DrawerTabKey, UrgentRequestItem } from './types';
+import IpfsEvidencePreviewCard from '../../common/IpfsEvidencePreviewCard';
 
 type RequestDrawerProps = {
   selectedUrgentRequestItem: UrgentRequestItem | null;
@@ -56,7 +57,19 @@ export default function RequestDrawer({
 
         <div className="flex-1 overflow-y-auto p-6">
           {selectedDrawerTabKey === 'overview' ? <div className="grid gap-3 sm:grid-cols-2"><div className="rounded-lg bg-slate-50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Tổ chức</p><p className="mt-1 text-sm font-semibold">{selectedUrgentRequestItem.organizationName}</p></div><div className="rounded-lg bg-slate-50 p-3"><p className="text-[10px] uppercase tracking-wider text-slate-500">Số tiền</p><p className="mt-1 font-mono text-base font-semibold text-[#0A5C50]">{selectedUrgentRequestItem.amountText}</p></div></div> : null}
-          {selectedDrawerTabKey === 'evidence' ? <div className="space-y-2"><div className="rounded-lg border border-slate-200 p-3 text-sm">Biên bản nghiệm thu.pdf</div><div className="rounded-lg border border-slate-200 p-3 text-sm">Ảnh hiện trường.jpg</div></div> : null}
+          {selectedDrawerTabKey === 'evidence' ? <div className="space-y-4">
+            {selectedUrgentRequestItem.ipfsCid ? (
+              <IpfsEvidencePreviewCard
+                cid={selectedUrgentRequestItem.ipfsCid}
+                fileName={selectedUrgentRequestItem.fileName}
+                documentTypeLabel="Tài liệu minh chứng"
+              />
+            ) : (
+              <div className="rounded-lg border border-slate-200 p-3 text-sm text-slate-500 text-center">
+                Không có tài liệu minh chứng
+              </div>
+            )}
+          </div> : null}
           {selectedDrawerTabKey === 'signature' ? <div className="space-y-2"><div className="rounded-lg border border-slate-200 p-3 text-sm">Bộ Y tế · Đã ký</div><div className="rounded-lg border border-cyan-300 bg-cyan-50 p-3 text-sm">Bộ Tài chính · Chờ bạn ký</div><div className="rounded-lg border border-slate-200 p-3 text-sm">Ngân hàng liên kết · Chờ ký</div></div> : null}
           {selectedDrawerTabKey === 'history' ? <div className="space-y-2"><div className="rounded-lg border border-slate-200 p-3 text-sm">13:55:47 · Tạo yêu cầu giải ngân</div><div className="rounded-lg border border-slate-200 p-3 text-sm">14:12:02 · Bổ sung chứng từ đợt 2</div></div> : null}
         </div>
@@ -69,4 +82,5 @@ export default function RequestDrawer({
     </>
   );
 }
+
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+﻿import { useCallback, useEffect, useState } from "react";
 
 import { fetchApi } from "@/app/utils/apiClient";
 
@@ -7,6 +7,7 @@ import type { ApiErrorResponse } from "@/app/utils/apiClient";
 import { readAuthSession } from "../../../utils/authSession";
 
 import { getPageTitle } from "./helpers";
+import IpfsEvidencePreviewCard from "../../common/IpfsEvidencePreviewCard";
 
 import type { PageKey, UrgentRequestItem } from "./types";
 
@@ -1372,27 +1373,13 @@ function ProjectReviewPanel() {
                   <div className="mt-2 space-y-2">
                     {selectedProject.evidenceCids.map(
                       (cidItem, evidenceIndex) => (
-                        <div
-                          key={`${selectedProject.projectId}-${cidItem}`}
-                          className="rounded border border-slate-200 p-2"
-                        >
-                          <p className="text-[11px] text-slate-700">
-                            Minh chứng #{evidenceIndex + 1}
-                          </p>
-
-                          <p className="mt-1 break-all font-mono text-[11px] text-cyan-700">
-                            {cidItem}
-                          </p>
-
-                          <a
-                            href={`https://gateway.pinata.cloud/ipfs/${cidItem}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-2 inline-flex rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100"
-                          >
-                            Mở tài liệu IPFS
-                          </a>
-                        </div>
+                        <IpfsEvidencePreviewCard
+                          key={`${selectedProject.projectId}-${evidenceIndex}`}
+                          cid={cidItem}
+                          fileName={`Minh chứng #${evidenceIndex + 1}`}
+                          documentTypeLabel="Tài liệu dự án"
+                          compact={true}
+                        />
                       ),
                     )}
                   </div>

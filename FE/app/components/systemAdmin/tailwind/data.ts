@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // Cấu hình Navigation cho System Admin Page
 // Clone from: FE/app/components/regulatoryBodies/tailwind/data.ts
 // Mục đích: Cung cấp cấu hình điều hướng cho trang Admin (không còn mock data — chuyển sang real API)
@@ -60,3 +60,4 @@ export function getNavigationItems(): NavigationItem[] {
     },
   ];
 }
+

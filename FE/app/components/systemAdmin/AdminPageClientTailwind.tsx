@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 // =============================================================================
 // AdminPageClientTailwind — Trang Admin chính
@@ -35,7 +35,7 @@ type MetricCardData = {
   valueText: string;
   labelText: string;
   trendText: string;
-  trendClassName: string;
+  trendClassName: 'trend-up' | 'trend-dn';
   colorVariant: 'amber' | 'cyan' | 'green' | 'teal';
 };
 
@@ -87,7 +87,7 @@ export default function AdminPageClientTailwind() {
         return;
       }
 
-      // Kiểm tra quyền admin (chuẩn OWASP A01: Access Control)
+      // Kiểm tra quyền admin (chu?n OWASP A01: Access Control)
       if (session.userRole !== 'admin') {
         router.push('/unauthorized');
         return;
@@ -120,17 +120,17 @@ export default function AdminPageClientTailwind() {
     return `${diffDays} ngày`;
   };
 
-  /** Hàm chuẩn hóa deadline level từ timestamp để hiển thị màu sắc phù hợp trên bảng urgent. */
+  /** Hàm Chuẩn hóa deadline level từ timestamp để hiển thị màu s?c phù h?p trên bảng urgent. */
   const normalizeDeadlineLevel = (deadlineTimestamp: number): 'urgent' | 'normal' | 'ok' => {
     const now = Date.now();
     const diffMs = deadlineTimestamp - now;
     if (diffMs <= 0) return 'ok';
-    if (diffMs <= 60 * 60 * 1000) return 'urgent'; // Dưới 1 giờ: khẩn cấp
-    if (diffMs <= 24 * 60 * 60 * 1000) return 'normal'; // Dưới 24 giờ: bình thường
+    if (diffMs <= 60 * 60 * 1000) return 'urgent'; // Du?i 1 giờ: kh?n c?p
+    if (diffMs <= 24 * 60 * 60 * 1000) return 'normal'; // Du?i 24 giờ: b́nh thu?ng
     return 'ok';
   };
 
-  /** Hàm gọi API dashboard tổng hợp cho Admin — lấy metrics, urgent requests, timeline, audit logs. */
+  /** Hàm gọi API dashboard từng h?p cho Admin — lấy metrics, urgent requests, timeline, audit logs. */
   const loadDashboardData = useCallback(async () => {
     setDashboardLoading(true);
     setDashboardError(false);
@@ -138,7 +138,7 @@ export default function AdminPageClientTailwind() {
     const authHeaders = { Authorization: `Bearer ${session.accessToken}` };
 
     try {
-      // Gọi song song 4 API endpoint để tối ưu thời gian tải dashboard
+      // Gọi song song 4 API endpoint d? từi uu th?i gian từi dashboard
       const [metricsResp, urgentResp, timelineResp, auditResp] = await Promise.allSettled([
         fetchApi<{
           pendingProjects: number;
@@ -190,10 +190,12 @@ export default function AdminPageClientTailwind() {
           id: r.id,
           projectName: r.projectName,
           organizationName: r.organizationName,
-          amountText: new Intl.NumberFormat('vi-VN').format(r.amount) + '₫',
+          amountText: new Intl.NumberFormat('vi-VN').format(r.amount) + '?',
           signatureState: `${r.currentSignatures}/${r.requiredSignatures}`,
           deadlineText: normalizeDeadlineText(r.deadlineTimestamp),
           deadlineLevel: normalizeDeadlineLevel(r.deadlineTimestamp),
+          ipfsCid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+          fileName: 'Biên bản nghiệm thu.pdf',
         })));
       } else {
         setDashboardUrgentRequests([]);
@@ -240,7 +242,7 @@ export default function AdminPageClientTailwind() {
     }
   }, []);
 
-  // Tải dashboard data khi auth đã xác thực thành công
+  // từi dashboard data khi auth dă xác thực thành công
   useEffect(() => {
     if (authVerified) {
       loadDashboardData();
@@ -285,11 +287,11 @@ export default function AdminPageClientTailwind() {
     addToast({ titleText: 'Ký duyệt thành công', bodyText: `Đã ký duyệt yêu cầu ${itemId}`, tone: 'success' });
   }, [addToast, selectedUrgentRequestItem]);
 
-  /** Từ chối từ drawer — đóng drawer + hiện toast cảnh báo. */
+  /** từ ch?i từ drawer — đóng drawer + hiện toast cảnh báo. */
   const handleRejectFromDrawer = useCallback(() => {
     const itemId = selectedUrgentRequestItem?.id ?? '';
     setSelectedUrgentRequestItem(null);
-    addToast({ titleText: 'Từ chối yêu cầu', bodyText: `Đã từ chối yêu cầu ${itemId}`, tone: 'warning' });
+    addToast({ titleText: 'từ ch?i yêu cầu', bodyText: `Đã từ ch?i yêu cầu ${itemId}`, tone: 'warning' });
   }, [addToast, selectedUrgentRequestItem]);
 
   // =============================================================================
@@ -318,7 +320,7 @@ export default function AdminPageClientTailwind() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#0E7C6B] border-t-transparent" />
-          <p className="text-sm text-slate-500">Đang xác thực quyền truy cập...</p>
+          <p className="text-sm text-slate-500">Đang xác thực quy?n truy c?p...</p>
         </div>
       </div>
     );
@@ -335,8 +337,8 @@ export default function AdminPageClientTailwind() {
           <svg className="text-red-400" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <p className="text-base font-semibold text-red-700">Không có quyền truy cập</p>
-          <p className="text-sm text-slate-500">Bạn cần đăng nhập với tài khoản Admin để truy cập trang này.</p>
+          <p className="text-base font-semibold text-red-700">Không có quy?n truy c?p</p>
+          <p className="text-sm text-slate-500">Bạn cần Đãng nhập với tài khoản Admin d? truy c?p trang này.</p>
         </div>
       </div>
     );
@@ -370,10 +372,10 @@ export default function AdminPageClientTailwind() {
           <div className="space-y-5 p-4 lg:p-7">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">{getPageTitle(activePage)}</h1>
-              <p className="mt-1 text-xs text-slate-500">Tổng quan hệ thống</p>
+              <p className="mt-1 text-xs text-slate-500">từng quan h? th?ng</p>
             </div>
 
-            {/* Metric cards — từ API thật */}
+            {/* Metric cards — từ API th?t */}
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               {dashboardLoading ? (
                 Array.from({ length: 4 }).map((_, idx) => (
@@ -388,7 +390,7 @@ export default function AdminPageClientTailwind() {
                 ))
               ) : (
                 <div className="col-span-4 overflow-hidden rounded-xl border border-red-200 bg-red-50 px-6 py-8 text-center text-sm text-red-700">
-                  Không thể tải metric. Vui lòng thử lại.
+                  Không thể tải metric. Vui ḷng thử lại.
                 </div>
               )}
             </div>
@@ -404,7 +406,7 @@ export default function AdminPageClientTailwind() {
 
               {/* Right: Disbursement status + Timeline */}
               <div className="space-y-4">
-                <DisbursementStatusCard />
+                <DisbursementStatusCard completedCount={dashboardUrgentRequests.filter(r => r.signatureState === "3/3" || r.signatureState === "2/3").length} pendingCount={dashboardUrgentRequests.filter(r => r.signatureState !== "3/3" && r.signatureState !== "2/3").length} totalCount={dashboardUrgentRequests.length} />
                 {dashboardLoading ? (
                   <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white p-5">
                     <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
@@ -442,7 +444,7 @@ export default function AdminPageClientTailwind() {
                   onClick={() => loadDashboardData()}
                   className="rounded-lg border border-emerald-900/15 bg-[#0E7C6B] px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-[#0d6b5c]"
                 >
-                  ↺ Tải lại dữ liệu tổng quan
+                  ? từi l?i d? li?u từng quan
                 </button>
               </div>
             )}

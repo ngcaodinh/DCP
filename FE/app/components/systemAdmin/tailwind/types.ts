@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // Types cho System Admin Page
 // Clone from: FE/app/components/regulatoryBodies/tailwind/types.ts
 // Mục đích: Định nghĩa các kiểu dữ liệu dùng chung cho trang Admin
@@ -32,6 +32,8 @@ export type UrgentRequestItem = {
   signatureState: string;        // Ví dụ: '1/3', '2/3', '3/3' — chuỗi linh hoạt từ API
   deadlineText: string;
   deadlineLevel: 'urgent' | 'normal' | 'ok';
+  ipfsCid?: string;
+  fileName?: string;
 };
 
 /** Một dòng trong bảng audit log. */
@@ -124,3 +126,4 @@ export type SybilToggleResult = {
   message: string;
   timestamp?: string;
 };
+

@@ -1,4 +1,4 @@
-export type PageKey = 'dashboard' | 'projectReview' | 'disbursement' | 'kyc' | 'bankAccountApproval' | 'report' | 'transparency' | 'sybilManagement';
+﻿export type PageKey = 'dashboard' | 'projectReview' | 'disbursement' | 'kyc' | 'bankAccountApproval' | 'report' | 'transparency' | 'sybilManagement';
 
 export type NavigationItem = {
   key: PageKey;
@@ -15,6 +15,8 @@ export type UrgentRequestItem = {
   signatureState: string;
   deadlineText: string;
   deadlineLevel: 'urgent' | 'normal' | 'ok';
+  ipfsCid?: string;
+  fileName?: string;
 };
 
 export type AuditLogItem = {
@@ -111,4 +113,5 @@ export type SybilToggleResult = {
   updatedAt: string;
   updatedBy: string;
 };
+
 

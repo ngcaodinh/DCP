@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 // =============================================================================
 
@@ -17,6 +17,7 @@ import SybilManagementPanel from "./SybilManagementPanel";
 import { fetchApi, buildApiUrl } from "@/app/utils/apiClient";
 
 import { readAuthSession } from "@/app/utils/authSession";
+import IpfsEvidencePreviewCard from "../../common/IpfsEvidencePreviewCard";
 
 import type { PageKey, ToastItem, UrgentRequestItem } from "./types";
 
@@ -664,37 +665,19 @@ function KycPanel() {
                   Tài liệu KYC (CID/IPFS)
                 </p>
 
-                <div className="space-y-3">
-                  {selectedSubmission.files.map((fileItem, fi) => (
-                    <div
-                      key={`${selectedSubmission.submissionId}-${fileItem.cid}-${fileItem.fileName}`}
-                      className="rounded-lg border border-slate-200 p-3"
-                    >
-                      <p className="text-xs font-semibold text-slate-900">
-                        Tài liệu #{fi + 1}: {fileItem.fileName}
-                      </p>
-
-                      <p className="mt-1 text-[11px] text-slate-600">
-                        {resolveDocumentTypeLabel(fileItem.documentType)} ·{" "}
-                        {fileItem.mimeType} ·{" "}
-                        {formatFileSize(fileItem.fileSize)}
-                      </p>
-
-                      <p className="mt-2 break-all font-mono text-[11px] text-cyan-700">
-                        CID: {fileItem.cid}
-                      </p>
-
-                      <a
-                        href={`https://gateway.pinata.cloud/ipfs/${fileItem.cid}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-2 inline-flex rounded-md border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100"
-                      >
-                        Mở tài liệu IPFS
-                      </a>
-                    </div>
-                  ))}
-                </div>
+                <div className="space-y-4">
+                    {selectedSubmission.files.map((fileItem, fi) => (
+                      <IpfsEvidencePreviewCard
+                        key={`${selectedSubmission.submissionId}-${fi}`}
+                        cid={fileItem.cid}
+                        fileName={`Tài liệu #${fi}: ${fileItem.cid}`}
+                        documentTypeLabel={resolveDocumentTypeLabel(fileItem.documentType)}
+                        mimeType={fileItem.mimeType}
+                        fileSizeLabel={formatFileSize(fileItem.fileSize)}
+                        compact={true}
+                      />
+                    ))}
+                  </div>
               </div>
 
               <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1071,27 +1054,19 @@ function ProjectReviewPanel() {
                     Minh chứng (IPFS)
                   </p>
 
-                  <div className="space-y-2">
-                    {selectedProject.evidenceCids.map((cid, ci) => (
-                      <div
-                        key={ci}
-                        className="flex items-center justify-between gap-2 rounded border border-slate-100 p-2"
-                      >
-                        <p className="break-all font-mono text-[11px] text-cyan-700">
-                          #{ci + 1}: {cid}
-                        </p>
-
-                        <a
-                          href={`https://gateway.pinata.cloud/ipfs/${cid}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="shrink-0 rounded border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-700 hover:bg-cyan-100"
-                        >
-                          Mở
-                        </a>
-                      </div>
-                    ))}
-                  </div>
+                  <div className="mt-2 space-y-4">
+                      {selectedProject.evidenceCids.map(
+                        (cid, idx) => (
+                          <IpfsEvidencePreviewCard
+                            key={`${selectedProject.projectId}-${idx}`}
+                            cid={cid}
+                            fileName={`Minh chứng #${idx}`}
+                            documentTypeLabel="Tài liệu dự án"
+                            compact={true}
+                          />
+                        ),
+                      )}
+                    </div>
                 </div>
               )}
 
@@ -1710,3 +1685,6 @@ export default function NonDashboardPanel({
       return null;
   }
 }
+
+
+

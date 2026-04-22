@@ -1,4 +1,4 @@
-export type MetricItem = {
+﻿export type MetricItem = {
   colorVariant: 'amber' | 'cyan' | 'green' | 'navy';
   value: string;
   label: string;
@@ -14,6 +14,8 @@ export type UrgentRequestItem = {
   signatureState: '1/3' | '2/3';
   deadlineText: string;
   deadlineClassName: 'urgent' | 'normal' | 'ok';
+  ipfsCid?: string;
+  fileName?: string;
 };
 
 /**
@@ -66,7 +68,9 @@ export function getUrgentRequestItemList(): UrgentRequestItem[] {
       amountText: '450,000,000₫',
       signatureState: '1/3',
       deadlineText: '08:32:11',
-      deadlineClassName: 'urgent'
+      deadlineClassName: 'urgent',
+      ipfsCid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
+      fileName: 'Biên bản nghiệm thu.pdf'
     },
     {
       id: 'REQ-2026-028',
@@ -75,7 +79,9 @@ export function getUrgentRequestItemList(): UrgentRequestItem[] {
       amountText: '320,000,000₫',
       signatureState: '2/3',
       deadlineText: '18:24:40',
-      deadlineClassName: 'normal'
+      deadlineClassName: 'normal',
+      ipfsCid: 'bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354',
+      fileName: 'Hình ảnh hiện trường.jpg'
     },
     {
       id: 'REQ-2026-025',
@@ -84,8 +90,9 @@ export function getUrgentRequestItemList(): UrgentRequestItem[] {
       amountText: '150,000,000₫',
       signatureState: '2/3',
       deadlineText: '02 ngày',
-      deadlineClassName: 'ok'
+      deadlineClassName: 'ok',
+      ipfsCid: 'bafybeia2v2ktdrt7y7wtsg7oobfntmng2rpx6x53wftndx3hck6563snnq',
+      fileName: 'Hợp đồng liên kết.pdf'
     }
   ];
 }
-

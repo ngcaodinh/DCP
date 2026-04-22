@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 // =============================================================================
 // RequestDrawer cho System Admin Page
@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import type { DrawerTabKey } from './types';
+import IpfsEvidencePreviewCard from '../../common/IpfsEvidencePreviewCard';
 
 type RequestDrawerProps = {
   selectedUrgentRequestItem: import('./types').UrgentRequestItem | null;
@@ -33,9 +34,11 @@ export default function RequestDrawer({
   onApprove,
   onReject,
 }: RequestDrawerProps) {
-  if (!selectedUrgentRequestItem) return null;
+  
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (!selectedUrgentRequestItem) return null;
 
   const handleApprove = async () => {
     setIsSubmitting(true);
@@ -77,7 +80,7 @@ export default function RequestDrawer({
             className="rounded-lg border border-emerald-900/15 px-2.5 py-1 text-sm text-slate-700 transition hover:bg-slate-50"
             aria-label="Đóng drawer"
           >
-            ✕
+            ?
           </button>
         </div>
 
@@ -117,24 +120,33 @@ export default function RequestDrawer({
           )}
 
           {selectedDrawerTabKey === 'evidence' && (
-            <div className="space-y-2">
-              <div className="rounded-lg border border-slate-200 p-3 text-sm">Biên bản nghiệm thu.pdf</div>
-              <div className="rounded-lg border border-slate-200 p-3 text-sm">Ảnh hiện trường.jpg</div>
-            </div>
+            <div className="space-y-4">
+            {selectedUrgentRequestItem.ipfsCid ? (
+              <IpfsEvidencePreviewCard
+                cid={selectedUrgentRequestItem.ipfsCid}
+                fileName={selectedUrgentRequestItem.fileName}
+                documentTypeLabel="Tài liệu minh chứng"
+              />
+            ) : (
+              <div className="rounded-lg border border-slate-200 p-3 text-sm text-slate-500 text-center">
+                Không có Tài liệu minh chứng
+              </div>
+            )}
+          </div>
           )}
 
           {selectedDrawerTabKey === 'signature' && (
             <div className="space-y-2">
               <div className="rounded-lg border border-slate-200 p-3 text-sm">Bộ Y tế · Đã ký</div>
               <div className="rounded-lg border border-cyan-300 bg-cyan-50 p-3 text-sm">Bộ Tài chính · Chờ bạn ký</div>
-              <div className="rounded-lg border border-slate-200 p-3 text-sm">Ngân hàng liên kết · Chờ ký</div>
+              <div className="rounded-lg border border-slate-200 p-3 text-sm">Ngân hàng liên k?t · Chữ ký</div>
             </div>
           )}
 
           {selectedDrawerTabKey === 'history' && (
             <div className="space-y-2">
               <div className="rounded-lg border border-slate-200 p-3 text-sm">13:55:47 · Tạo yêu cầu giải ngân</div>
-              <div className="rounded-lg border border-slate-200 p-3 text-sm">14:12:02 · Bổ sung chứng từ đợt 2</div>
+              <div className="rounded-lg border border-slate-200 p-3 text-sm">14:12:02 · B? sung Chứng từ d?t 2</div>
             </div>
           )}
         </div>
@@ -162,3 +174,4 @@ export default function RequestDrawer({
     </>
   );
 }
+
