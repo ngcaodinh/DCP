@@ -1083,6 +1083,8 @@ function ProjectReviewPanel() {
 
   const [rejectReason, setRejectReason] = useState("");
 
+  const [isRejectFormVisible, setIsRejectFormVisible] = useState(false);
+
   const [isApproveConfirmModalVisible, setIsApproveConfirmModalVisible] =
     useState(false);
 
@@ -1293,7 +1295,7 @@ function ProjectReviewPanel() {
             <button
               key={projectItem.projectId}
               type="button"
-              onClick={() => setSelectedProjectId(projectItem.projectId)}
+              onClick={() => { setSelectedProjectId(projectItem.projectId); setIsRejectFormVisible(false); setRejectReason(""); }}
               className={`mb-2 w-full rounded-lg border px-3 py-2 text-left ${selectedProjectId === projectItem.projectId ? "border-cyan-500 bg-cyan-50" : "border-slate-200 bg-white"}`}
             >
               <p className="text-xs font-semibold text-slate-900">
@@ -1370,7 +1372,7 @@ function ProjectReviewPanel() {
                     Dự án chưa có CID minh chứng.
                   </p>
                 ) : (
-                  <div className="mt-2 space-y-2">
+                  <div className="mt-2 grid gap-4 grid-cols-1 xl:grid-cols-2">
                     {selectedProject.evidenceCids.map(
                       (cidItem, evidenceIndex) => (
                         <IpfsEvidencePreviewCard
@@ -1386,39 +1388,66 @@ function ProjectReviewPanel() {
                 )}
               </div>
 
-              <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <label className="block text-xs font-semibold text-amber-800">
-                  Lý do từ chối (bắt buộc khi từ chối)
-                </label>
+              {isRejectFormVisible ? (
+                <>
+                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <label className="block text-xs font-semibold text-amber-800">
+                      Lý do từ chối (bắt buộc khi từ chối)
+                    </label>
 
-                <textarea
-                  value={rejectReason}
-                  onChange={(event) => setRejectReason(event.target.value)}
-                  rows={3}
-                  className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
-                  placeholder="Nhập lý do từ chối dự án..."
-                />
-              </div>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(event) => setRejectReason(event.target.value)}
+                      rows={3}
+                      className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
+                      placeholder="Nhập lý do từ chối dự án..."
+                    />
+                  </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={isSubmittingReview}
-                  onClick={() => submitProjectReview("REJECT")}
-                  className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                >
-                  Từ chối
-                </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={isSubmittingReview}
+                      onClick={() => submitProjectReview("REJECT")}
+                      className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      Xác nhận từ chối
+                    </button>
+                    
+                    <button
+                      type="button"
+                      disabled={isSubmittingReview}
+                      onClick={() => {
+                        setIsRejectFormVisible(false);
+                        setRejectReason("");
+                      }}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmittingReview}
+                    onClick={() => setIsRejectFormVisible(true)}
+                    className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    Từ chối
+                  </button>
 
-                <button
-                  type="button"
-                  disabled={isSubmittingReview}
-                  onClick={openApproveConfirmModal}
-                  className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                >
-                  Chấp nhận
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    disabled={isSubmittingReview}
+                    onClick={openApproveConfirmModal}
+                    className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    Chấp nhận
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-xs text-slate-500">
@@ -2627,3 +2656,4 @@ export default function NonDashboardPanel({
     </div>
   );
 }
+
