@@ -3,6 +3,7 @@ import { ProgressBar, SectionCard, StatusBadge } from './OrganizationUiParts';
 import { dashboardTimelineItems, statisticItems, transparencyTransactionRows } from './mockData';
 import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { readAuthSession } from '@/app/utils/authSession';
+import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
 import { ProjectSummary } from './types';
 
 type DisbursementSectionProps = {
@@ -97,6 +98,7 @@ type UploadEvidenceFilePayload = {
 
 type UploadEvidenceResponse = {
   evidenceCids: string[];
+  evidenceFiles: { cid: string; fileName: string; mimeType: string }[];
 };
 
 const createProjectDefaultFormState: CreateProjectFormData = {
@@ -719,11 +721,13 @@ export function ProjectsSection({
 
     try {
       let nextEvidenceCids = selectedProjectDetail.evidenceCids;
+      let nextEvidenceFiles = selectedProjectDetail.evidenceFiles ?? [];
 
       // Logic này chỉ thay CID khi người dùng thực sự upload file mới; nếu không thì giữ nguyên CID cũ.
       if (selectedUpdateEvidenceFiles.length > 0) {
         const uploadResult = await uploadUpdateEvidenceFiles(authSession.accessToken);
         nextEvidenceCids = uploadResult.evidenceCids;
+        nextEvidenceFiles = uploadResult.evidenceFiles;
       }
 
       const response = await fetchApi<ProjectSummary>(buildApiUrl('/projects'), {
@@ -735,7 +739,8 @@ export function ProjectsSection({
           description: updateFormData.description.trim(),
           goalAmount: Number(updateFormData.goalAmount),
           deadline: new Date(updateFormData.deadline).toISOString(),
-          evidenceCids: nextEvidenceCids
+          evidenceCids: nextEvidenceCids,
+          evidenceFiles: nextEvidenceFiles
         })
       });
 
@@ -933,9 +938,19 @@ export function ProjectsSection({
                 <div className="mt-3 rounded border border-[#E5E7EB] p-3">
                   <p className="text-sm font-semibold text-[#111827]">CID minh chứng (IPFS)</p>
                   {selectedProjectDetail.evidenceCids.length === 0 ? <p className="mt-1 text-xs text-[#6B7280]">Chưa có CID minh chứng.</p> : (
-                    <ul className="mt-2 space-y-2 text-xs text-[#0F766E]">{selectedProjectDetail.evidenceCids.map(cidItem => (
-                      <li key={cidItem} className="rounded border border-[#CCFBF1] bg-[#F0FDFA] p-2"><p className="break-all font-mono">{cidItem}</p><a href={`https://gateway.pinata.cloud/ipfs/${cidItem}`} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] font-semibold text-[#0E7490] underline">Mở CID trên IPFS</a></li>
-                    ))}</ul>
+                    <div className="mt-2 grid gap-3 sm:grid-cols-2">{selectedProjectDetail.evidenceCids.map((cidItem, evidenceIndex) => {
+                      const evidenceFileItem = selectedProjectDetail.evidenceFiles?.find(fileItem => fileItem.cid === cidItem);
+
+                      return (
+                      <IpfsEvidencePreviewCard
+                        key={`${selectedProjectDetail.projectId}-${cidItem}-${evidenceIndex}`}
+                        cid={cidItem}
+                        fileName={evidenceFileItem?.fileName || `Minh chứng #${evidenceIndex + 1}`}
+                        mimeType={evidenceFileItem?.mimeType}
+                        compact
+                      />
+                      );
+                    })}</div>
                   )}
                 </div>
                 {selectedProjectDetail.rejectionReason ? <div className="mt-3 rounded border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#B91C1C]"><span className="font-semibold">Lý do từ chối:</span> {selectedProjectDetail.rejectionReason}</div> : null}
@@ -1909,7 +1924,8 @@ export function CreateProjectModal({ onClose, onProjectCreated }: CreateProjectM
           description: formData.description.trim(),
           goalAmount: Number(formData.goalAmount),
           deadline: new Date(formData.deadline).toISOString(),
-          evidenceCids: uploadResult.evidenceCids
+          evidenceCids: uploadResult.evidenceCids,
+          evidenceFiles: uploadResult.evidenceFiles
         })
       });
 

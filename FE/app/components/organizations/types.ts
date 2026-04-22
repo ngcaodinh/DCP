@@ -61,6 +61,7 @@ export type ProjectSummary = {
   deadline: string;
   status: ProjectSummaryStatus;
   evidenceCids: string[];
+  evidenceFiles?: { cid: string; fileName: string; mimeType: string }[];
   submittedAt: string | null;
   reviewedAt: string | null;
   reviewedBy: string | null;

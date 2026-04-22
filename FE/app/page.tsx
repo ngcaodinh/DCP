@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
+import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
 
 
 type HomeSupportProject = {
@@ -24,6 +25,7 @@ type HomeSupportProjectDetail = {
   status: string;
   lastDonationAt: string | null;
   evidenceCids: string[];
+  evidenceFiles?: { cid: string; fileName: string; mimeType: string }[];
   creatorName: string | null;
 };
 
@@ -308,22 +310,6 @@ const getPublicProjectStatusLabel = (statusValue: string): string => {
 };
 
 /** Hàm kiểm tra CID IPFS cơ bản. Mục đích: chỉ cho phép render link với CID hợp lệ để tránh URL rác. */
-const isValidIpfsCid = (cidValue: string): boolean => {
-  const normalizedCidValue = cidValue.trim();
-  const cidVersionZeroRegex = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
-  const cidVersionOneRegex = /^b[a-z2-7]{20,}$/;
-  return cidVersionZeroRegex.test(normalizedCidValue) || cidVersionOneRegex.test(normalizedCidValue);
-};
-
-/** Hàm tạo URL gateway IPFS an toàn. Mục đích: chỉ trả link khi CID hợp lệ, ngược lại trả chuỗi rỗng. */
-const buildIpfsGatewayUrl = (cidValue: string): string => {
-  if (!isValidIpfsCid(cidValue)) {
-    return '';
-  }
-
-  return `https://gateway.pinata.cloud/ipfs/${cidValue}`;
-};
-
 
 /** Hàm lấy icon và nền card theo vị trí. Mục đích: giữ giao diện đồng nhất khi dữ liệu dự án đến từ API thật. */
 const getProjectVisualByIndex = (indexNumber: number): { icon: string; background: string } => {
@@ -1652,33 +1638,21 @@ export default function HomePage() {
                     {selectedProjectDetail.evidenceCids.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-[#d1d5db] bg-white p-3 text-sm text-[#6b7280]">Chưa có bằng chứng IPFS.</p>
                     ) : (
-                      <ul className="space-y-2">
-                        {selectedProjectDetail.evidenceCids.slice(0, 4).map(evidenceCid => {
-                          const ipfsGatewayUrl = buildIpfsGatewayUrl(evidenceCid);
-
-                          // Ghi chú logic phức tạp: chỉ render link khi CID hợp lệ, CID không hợp lệ sẽ hiển thị dạng cảnh báo để không phá layout.
-                          if (!ipfsGatewayUrl) {
-                            return (
-                              <li key={`invalid-${evidenceCid}`} className="rounded-lg border border-[#fecaca] bg-[#fff1f2] p-2.5 text-xs text-[#b91c1c]">
-                                CID không hợp lệ: {evidenceCid}
-                              </li>
-                            );
-                          }
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {selectedProjectDetail.evidenceCids.slice(0, 4).map((evidenceCid, evidenceIndex) => {
+                          const evidenceFileItem = selectedProjectDetail.evidenceFiles?.find(fileItem => fileItem.cid === evidenceCid);
 
                           return (
-                            <li key={evidenceCid} className="rounded-lg border border-[#dbe4f0] bg-white p-2.5">
-                              <a
-                                href={ipfsGatewayUrl}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                                className="block truncate text-xs font-medium text-[#1d4ed8] hover:underline"
-                              >
-                                {evidenceCid}
-                              </a>
-                            </li>
+                            <IpfsEvidencePreviewCard
+                              key={`${selectedProjectDetail.projectId}-${evidenceCid}-${evidenceIndex}`}
+                              cid={evidenceCid}
+                              fileName={evidenceFileItem?.fileName || `Bằng chứng #${evidenceIndex + 1}`}
+                              mimeType={evidenceFileItem?.mimeType}
+                              compact
+                            />
                           );
                         })}
-                      </ul>
+                      </div>
                     )}
                     {selectedProjectDetail.evidenceCids.length > 4 && (
                       <p className="mt-2 text-xs text-[#6b7280]">+{selectedProjectDetail.evidenceCids.length - 4} CID khác.</p>

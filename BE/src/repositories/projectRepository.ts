@@ -7,6 +7,7 @@ import {
   findProjectsByStatus,
   findPublicSupportProjectByProjectId,
   findPublicSupportProjects,
+  ProjectEvidenceFileRecord,
   ProjectRecord,
   ProjectStatus,
   updateProjectByProjectId
@@ -21,6 +22,7 @@ export type CreateProjectDataAccessPayload = {
   deadline: Date;
   status: ProjectStatus;
   evidenceCids: string[];
+  evidenceFiles: ProjectEvidenceFileRecord[];
   submittedAt: Date | null;
   reviewedAt: Date | null;
   reviewedBy: string | null;
@@ -76,4 +78,3 @@ export async function updateProject(
 ): Promise<ProjectRecord | null> {
   return updateProjectByProjectId(projectId, payload);
 }
-

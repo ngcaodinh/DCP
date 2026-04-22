@@ -3,6 +3,7 @@ import { getLogger } from '../config/logger';
 import { findUserById } from '../models/authModel';
 import { findSubmissionsByOrganizationId } from '../models/organizationKycModel';
 import { ProjectStatus } from '../models/projectModel';
+import type { ProjectEvidenceFileRecord } from '../models/projectModel';
 import {
   countActiveProjectsByOrganizationIdFromRepository,
   createProject,
@@ -25,6 +26,7 @@ export type CreateProjectPayload = {
   goalAmount: number;
   deadline: string;
   evidenceCids: string[];
+  evidenceFiles?: ProjectEvidenceFileRecord[];
 };
 
 export type CreateProjectResult = {
@@ -36,6 +38,7 @@ export type CreateProjectResult = {
   deadline: Date;
   status: ProjectStatus;
   evidenceCids: string[];
+  evidenceFiles: ProjectEvidenceFileRecord[];
   submittedAt: Date | null;
   reviewedAt: Date | null;
   reviewedBy: string | null;
@@ -60,6 +63,7 @@ export type UpdateProjectPayload = {
   goalAmount: number;
   deadline: string;
   evidenceCids: string[];
+  evidenceFiles?: ProjectEvidenceFileRecord[];
 };
 
 export type CreateProjectEligibilityResult = {
@@ -85,8 +89,11 @@ export type PublicSupportProjectDetailResult = {
   status: ProjectStatus;
   lastDonationAt: Date | null;
   evidenceCids: string[];
+  evidenceFiles: ProjectEvidenceFileRecord[];
   creatorName: string | null;
 };
+
+type UploadedProjectEvidenceItem = ProjectEvidenceFileRecord;
 
 const logger = getLogger();
 const pinataPinFileEndpoint = 'https://api.pinata.cloud/pinning/pinFileToIPFS';
@@ -135,6 +142,27 @@ function sanitizeTextInput(inputText: string): string {
   return inputText.replace(/<[^>]*>/g, '').replace(/[\u0000-\u001F]/g, '').trim();
 }
 
+/** Hàm làm sạch metadata file minh chứng IPFS. Mục đích: giữ đồng bộ cid-fileName-mimeType và chặn text bẩn trước khi lưu DB. */
+function sanitizeProjectEvidenceFiles(
+  evidenceFiles: ProjectEvidenceFileRecord[] | undefined,
+  evidenceCids: string[]
+): ProjectEvidenceFileRecord[] {
+  if (!Array.isArray(evidenceFiles) || evidenceFiles.length === 0) {
+    return evidenceCids.map(cid => ({ cid, fileName: '', mimeType: '' }));
+  }
+
+  // Ghi chú logic phức tạp: map theo CID giúp tương thích payload cũ/mới và tránh lệch thứ tự khi FE xử lý lại danh sách.
+  const evidenceFileByCidMap = new Map(
+    evidenceFiles.map(fileItem => [sanitizeTextInput(fileItem.cid), {
+      cid: sanitizeTextInput(fileItem.cid),
+      fileName: sanitizeTextInput(fileItem.fileName),
+      mimeType: sanitizeTextInput(fileItem.mimeType).toLowerCase()
+    }])
+  );
+
+  return evidenceCids.map(cid => evidenceFileByCidMap.get(cid) || { cid, fileName: '', mimeType: '' });
+}
+
 /** Hàm map project record về output. Mục đích: tái sử dụng format response giữa các API project. */
 function mapProjectRecordToResult(projectRecord: CreateProjectDataAccessPayload): CreateProjectResult {
   return {
@@ -146,6 +174,7 @@ function mapProjectRecordToResult(projectRecord: CreateProjectDataAccessPayload)
     deadline: projectRecord.deadline,
     status: projectRecord.status,
     evidenceCids: projectRecord.evidenceCids,
+    evidenceFiles: projectRecord.evidenceFiles || [],
     submittedAt: projectRecord.submittedAt,
     reviewedAt: projectRecord.reviewedAt,
     reviewedBy: projectRecord.reviewedBy,
@@ -315,7 +344,7 @@ function validateUploadProjectEvidencesPayload(payload: UploadProjectEvidencesPa
 }
 
 /** Hàm upload một file minh chứng lên Pinata. Mục đích: nhận CID IPFS để đưa vào payload tạo dự án. */
-async function uploadProjectEvidenceFileToPinata(file: UploadProjectEvidenceFilePayload): Promise<string> {
+async function uploadProjectEvidenceFileToPinata(file: UploadProjectEvidenceFilePayload): Promise<UploadedProjectEvidenceItem> {
   const pinataJsonWebToken = getPinataJsonWebToken();
   const binaryBuffer = Buffer.from(file.contentBase64, 'base64');
 
@@ -349,11 +378,15 @@ async function uploadProjectEvidenceFileToPinata(file: UploadProjectEvidenceFile
     throw new ApplicationError(pinataResponseData.error || `Upload Pinata thất bại: ${file.fileName}`, 502, 'INTERNAL_ERROR');
   }
 
-  return pinataResponseData.IpfsHash;
+  return {
+    cid: pinataResponseData.IpfsHash,
+    fileName: sanitizeTextInput(file.fileName),
+    mimeType: sanitizeTextInput(file.mimeType).toLowerCase()
+  };
 }
 
 /** Hàm upload file với retry giới hạn. Mục đích: tăng ổn định khi Pinata lỗi tạm thời hoặc timeout. */
-async function uploadProjectEvidenceFileToPinataWithRetry(file: UploadProjectEvidenceFilePayload): Promise<string> {
+async function uploadProjectEvidenceFileToPinataWithRetry(file: UploadProjectEvidenceFilePayload): Promise<UploadedProjectEvidenceItem> {
   let latestUploadError: unknown = null;
 
   for (let retryAttempt = 1; retryAttempt <= pinataMaximumRetryCount; retryAttempt += 1) {
@@ -431,11 +464,19 @@ function validateProjectPayload(
 /** Hàm validate payload tạo dự án. Mục đích: chặn dữ liệu sai chuẩn ngay tại service cho luồng tạo mới. */
 function validateCreateProjectPayload(payload: CreateProjectPayload): void {
   validateProjectPayload(payload, 3);
+
+  if (payload.evidenceFiles && payload.evidenceFiles.length !== payload.evidenceCids.length) {
+    throw new ApplicationError('Danh sách metadata minh chứng không khớp với số lượng CID.', 400, 'VALIDATION_ERROR');
+  }
 }
 
 /** Hàm validate payload cập nhật dự án. Mục đích: chặn dữ liệu sai chuẩn ngay tại service cho luồng cập nhật. */
 function validateUpdateProjectPayload(payload: UpdateProjectPayload): void {
   validateProjectPayload(payload, 1);
+
+  if (payload.evidenceFiles && payload.evidenceFiles.length !== payload.evidenceCids.length) {
+    throw new ApplicationError('Danh sách metadata minh chứng không khớp với số lượng CID.', 400, 'VALIDATION_ERROR');
+  }
 }
 
 /** Hàm kiểm tra quyền tổ chức hợp lệ. Mục đích: tái sử dụng cho các API thao tác project. */
@@ -503,6 +544,7 @@ export async function createProjectForOrganization(organizationUserId: string, p
   const sanitizedName = sanitizeTextInput(payload.name);
   const sanitizedDescription = sanitizeTextInput(payload.description);
   const sanitizedEvidenceCids = payload.evidenceCids.map(cid => sanitizeTextInput(cid));
+  const sanitizedEvidenceFiles = sanitizeProjectEvidenceFiles(payload.evidenceFiles, sanitizedEvidenceCids);
 
   const existingProject = await findProjectByOrganizationAndName(organizationUser.id, sanitizedName);
   if (existingProject) {
@@ -520,6 +562,7 @@ export async function createProjectForOrganization(organizationUserId: string, p
     deadline: parsedDeadline,
     status: 'DRAFT',
     evidenceCids: sanitizedEvidenceCids,
+    evidenceFiles: sanitizedEvidenceFiles,
     submittedAt: null,
     reviewedAt: null,
     reviewedBy: null,
@@ -558,13 +601,16 @@ export async function getCreateProjectEligibilityForOrganization(organizationUse
 export async function uploadProjectEvidencesForOrganization(
   organizationUserId: string,
   payload: UploadProjectEvidencesPayload
-): Promise<{ evidenceCids: string[] }> {
+): Promise<{ evidenceCids: string[]; evidenceFiles: UploadedProjectEvidenceItem[] }> {
   await ensureOrganizationUser(organizationUserId);
   validateUploadProjectEvidencesPayload(payload);
 
   // Logic này upload song song nhiều file để giảm thời gian chờ cho người dùng khi chọn nhiều minh chứng.
-  const evidenceCids = await Promise.all(payload.files.map(fileItem => uploadProjectEvidenceFileToPinataWithRetry(fileItem)));
-  return { evidenceCids };
+  const evidenceFiles = await Promise.all(payload.files.map(fileItem => uploadProjectEvidenceFileToPinataWithRetry(fileItem)));
+  return {
+    evidenceCids: evidenceFiles.map(fileItem => fileItem.cid),
+    evidenceFiles
+  };
 }
 
 /** Hàm lấy danh sách dự án của tổ chức. Mục đích: trả dữ liệu thật cho trang "Dự án của tôi" theo user đăng nhập. */
@@ -655,6 +701,7 @@ export async function getPublicSupportProjectDetail(projectId: string): Promise<
     status: projectRecord.status,
     lastDonationAt,
     evidenceCids: projectRecord.evidenceCids,
+    evidenceFiles: projectRecord.evidenceFiles || [],
     creatorName
   };
 }
@@ -683,6 +730,7 @@ export async function updateProjectForOrganization(organizationUserId: string, p
   const sanitizedName = sanitizeTextInput(payload.name);
   const sanitizedDescription = sanitizeTextInput(payload.description);
   const sanitizedEvidenceCids = payload.evidenceCids.map(cid => sanitizeTextInput(cid));
+  const sanitizedEvidenceFiles = sanitizeProjectEvidenceFiles(payload.evidenceFiles, sanitizedEvidenceCids);
 
   const existingProjectWithSameName = await findProjectByOrganizationAndName(organizationUser.id, sanitizedName);
   if (existingProjectWithSameName && existingProjectWithSameName.projectId !== payload.projectId) {
@@ -701,6 +749,7 @@ export async function updateProjectForOrganization(organizationUserId: string, p
     goalAmount: payload.goalAmount,
     deadline: new Date(payload.deadline),
     evidenceCids: sanitizedEvidenceCids,
+    evidenceFiles: sanitizedEvidenceFiles,
     submittedAt: existingProject.status === 'PENDING_APPROVAL' ? null : existingProject.submittedAt,
     status: existingProject.status === 'PENDING_APPROVAL' ? 'DRAFT' : existingProject.status,
     reviewedAt: null,
@@ -801,4 +850,3 @@ export async function reviewProjectByReviewer(
 
   return mapProjectRecordToResult(updatedProject);
 }
-

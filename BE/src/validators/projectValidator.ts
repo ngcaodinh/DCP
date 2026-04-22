@@ -1,6 +1,12 @@
-import { z } from 'zod';
+﻿import { z } from 'zod';
 
 const ipfsCidPattern = /^(Qm[1-9A-HJ-NP-Za-km-z]{44}|bafy[1-9A-HJ-NP-Za-km-z]{20,})$/;
+
+const projectEvidenceFileSchema = z.object({
+  cid: z.string().trim().regex(ipfsCidPattern, 'CID minh chứng không đúng định dạng IPFS.'),
+  fileName: z.string().trim().max(255),
+  mimeType: z.string().trim().max(100)
+});
 
 export const createProjectSchema = z.object({
   name: z.string({ required_error: 'Tên dự án là bắt buộc.' }).trim().min(3).max(120),
@@ -10,7 +16,8 @@ export const createProjectSchema = z.object({
   evidenceCids: z
     .array(z.string().trim().regex(ipfsCidPattern, 'CID bằng chứng không đúng định dạng IPFS.'))
     .min(3, 'Dự án phải có tối thiểu 3 ảnh bằng chứng trên IPFS.')
-    .max(10, 'Dự án chỉ được tối đa 10 ảnh bằng chứng trên IPFS.')
+    .max(10, 'Dự án chỉ được tối đa 10 ảnh bằng chứng trên IPFS.'),
+  evidenceFiles: z.array(projectEvidenceFileSchema).max(10).optional()
 });
 
 export const uploadProjectEvidencesSchema = z.object({
@@ -35,7 +42,8 @@ export const updateProjectSchema = z.object({
   evidenceCids: z
     .array(z.string().trim().regex(ipfsCidPattern, 'CID bằng chứng không đúng định dạng IPFS.'))
     .min(1, 'Dự án phải có ít nhất 1 CID bằng chứng IPFS.')
-    .max(10, 'Dự án chỉ được tối đa 10 CID bằng chứng IPFS.')
+    .max(10, 'Dự án chỉ được tối đa 10 CID bằng chứng IPFS.'),
+  evidenceFiles: z.array(projectEvidenceFileSchema).max(10).optional()
 });
 
 export const submitProjectSchema = z.object({
@@ -100,4 +108,3 @@ export function validateSubmitProjectRequestBody(payload: unknown) {
 export function validateReviewProjectRequestBody(payload: unknown) {
   return formatZodValidationResult(reviewProjectSchema.safeParse(payload));
 }
-

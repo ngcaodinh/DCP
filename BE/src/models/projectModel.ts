@@ -2,6 +2,12 @@ import mongoose, { Schema } from 'mongoose';
 
 export type ProjectStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'ACTIVE' | 'COMPLETED' | 'CLOSED' | 'REJECTED';
 
+export type ProjectEvidenceFileRecord = {
+  cid: string;
+  fileName: string;
+  mimeType: string;
+};
+
 export type ProjectRecord = {
   projectId: string;
   organizationId: string;
@@ -11,6 +17,7 @@ export type ProjectRecord = {
   deadline: Date;
   status: ProjectStatus;
   evidenceCids: string[];
+  evidenceFiles: ProjectEvidenceFileRecord[];
   submittedAt: Date | null;
   reviewedAt: Date | null;
   reviewedBy: string | null;
@@ -28,6 +35,16 @@ const projectSchema = new Schema<ProjectRecord>({
   deadline: { type: Date, required: true },
   status: { type: String, required: true, index: true },
   evidenceCids: { type: [String], required: true },
+  evidenceFiles: {
+    type: [
+      {
+        cid: { type: String, required: true },
+        fileName: { type: String, required: true },
+        mimeType: { type: String, required: true }
+      }
+    ],
+    default: []
+  },
   submittedAt: { type: Date, default: null },
   reviewedAt: { type: Date, default: null },
   reviewedBy: { type: String, default: null },
@@ -150,4 +167,3 @@ export async function updateProjectByProjectId(
   const updatedProject = await ProjectMongoModel.findOneAndUpdate({ projectId }, payload, { returnDocument: 'after' }).exec();
   return updatedProject ? (updatedProject.toObject() as ProjectRecord) : null;
 }
-
