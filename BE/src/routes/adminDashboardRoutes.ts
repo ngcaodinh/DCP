@@ -2,7 +2,9 @@ import { Router } from 'express';
 import {
   handleGetAdminDashboardAuditLogs,
   handleGetAdminDashboardMetrics,
-  handleGetAdminDashboardTimeline
+  handleGetAdminDashboardTimeline,
+  handleGetAdminSystemErrorLogs,
+  handleUpdateAdminSystemErrorLogReadState
 } from '../controllers/adminDashboardController';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
 import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
@@ -48,6 +50,23 @@ export function createAdminDashboardRoutes(): Router {
     handleGetAdminDashboardAuditLogs
   );
 
+  router.get(
+    '/system-error-logs',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    adminAuthorizationMiddleware,
+    dashboardRateLimitMiddleware,
+    handleGetAdminSystemErrorLogs
+  );
+
+  router.patch(
+    '/system-error-logs/:logId/read',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    adminAuthorizationMiddleware,
+    dashboardRateLimitMiddleware,
+    handleUpdateAdminSystemErrorLogReadState
+  );
+
   return router;
 }
-

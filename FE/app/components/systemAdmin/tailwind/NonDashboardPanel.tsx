@@ -13,6 +13,7 @@
 import { useState, useCallback, useEffect } from "react";
 
 import SybilManagementPanel from "./SybilManagementPanel";
+import SystemErrorLogPanel from "./SystemErrorLogPanel";
 
 import { fetchApi, buildApiUrl } from "@/app/utils/apiClient";
 
@@ -1727,6 +1728,9 @@ export default function NonDashboardPanel({
 
     case "bankAccountApproval":
       return <BankAccountApprovalPanel />;
+
+    case "systemErrorLog":
+      return <SystemErrorLogPanel onPushToast={onPushToast} />;
 
     case "report":
       return <ReportPanel />;
