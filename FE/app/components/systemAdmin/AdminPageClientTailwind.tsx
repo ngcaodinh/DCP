@@ -582,6 +582,17 @@ export default function AdminPageClientTailwind() {
         </div>
       </section>
 
+      {selectedUrgentRequestItem && (
+        <RequestDrawer
+          selectedUrgentRequestItem={selectedUrgentRequestItem}
+          selectedDrawerTabKey={drawerTabKey}
+          onClose={handleCloseDrawer}
+          onChangeTab={setDrawerTabKey}
+          onApprove={handleApproveFromDrawer}
+          onReject={handleRejectFromDrawer}
+        />
+      )}
+
       <ToastStack toastItemList={toasts} onCloseToast={removeToast} />
     </main>
   );

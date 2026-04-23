@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { useRouter } from 'next/navigation';
 import { financeNavigationItems, primaryNavigationItems, systemNavigationItems } from './mockData';
 import {
@@ -16,7 +16,17 @@ import {
 import { ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { clearAuthSession, readAuthSession } from '@/app/utils/authSession';
 import Topbar from '../regulatoryBodies/tailwind/Topbar';
-import { DisbursementResult, NavigationItem, OrganizationPageKey, ProjectSummary } from './types';
+import {
+  DashboardDonationHistoryItem,
+  DashboardFeaturedProject,
+  DisbursementResult,
+  NavigationItem,
+  OrganizationPageKey,
+  ProjectSummary,
+  StatisticItem,
+  TimelineItem
+} from './types';
+import type { ApiSuccessResponse } from '@/app/utils/apiClient';
 
 type CreateProjectEligibilityResponse = {
   isEligibleToCreateProject: boolean;
@@ -46,6 +56,77 @@ type ApprovedBeneficiaryBankAccount = {
   accountHolderName: string;
   branchName?: string | null;
 };
+
+type RankingItem = {
+  projectId: string;
+  projectName: string;
+  rankPosition: number;
+  totalRaisedAmount: number;
+  totalFundingScore: number;
+};
+
+type RankingSnapshotResponse = {
+  items: RankingItem[];
+  metadata?: {
+    totalItems?: number;
+    totalPages?: number;
+    currentPage?: number;
+    pageSize?: number;
+  };
+};
+
+type DonationHistoryApiItem = {
+  transactionHash: string;
+  projectId: string;
+  donorAddress: string;
+  amount: number;
+  timestamp: string;
+  isAnonymous: boolean;
+};
+
+/** Hàm định dạng số tiền rút gọn theo chuẩn Việt Nam. Mục đích: hiển thị nhanh số lớn trên thẻ thống kê Tổng quan. */
+function formatCompactCurrencyVietnamese(amountValue: number): string {
+  const safeAmountValue = Number.isFinite(amountValue) ? Math.max(0, amountValue) : 0;
+  return new Intl.NumberFormat('vi-VN', {
+    notation: 'compact',
+    compactDisplay: 'short',
+    maximumFractionDigits: 1
+  }).format(safeAmountValue);
+}
+
+/** Hàm định dạng số tiền đầy đủ theo chuẩn Việt Nam. Mục đích: hiển thị rõ ràng số tiền trên timeline và dự án nổi bật. */
+function formatCurrencyVietnamese(amountValue: number): string {
+  const safeAmountValue = Number.isFinite(amountValue) ? Math.max(0, amountValue) : 0;
+  return new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 }).format(safeAmountValue);
+}
+
+/** Hàm định dạng thời điểm cho timeline Tổng quan. Mục đích: hiển thị mốc thời gian ngắn gọn, dễ đọc theo ngữ cảnh Việt Nam. */
+function formatDashboardTimeLabel(timestampValue: number): string {
+  return new Date(timestampValue).toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit'
+  });
+}
+
+/** Hàm rút gọn địa chỉ ví donor. Mục đích: giữ thông tin nhận diện nhưng vẫn gọn khi hiển thị trong khối lịch sử quyên góp. */
+function formatDonorWalletAddress(donorWalletAddress: string): string {
+  if (!donorWalletAddress || donorWalletAddress.length < 10) {
+    return donorWalletAddress || 'Không xác định';
+  }
+
+  return `${donorWalletAddress.slice(0, 6)}...${donorWalletAddress.slice(-4)}`;
+}
+
+/** Hàm rút gọn transaction hash. Mục đích: tránh tràn layout ở màn hình Tổng quan nhưng vẫn tra cứu được giao dịch. */
+function formatTransactionHash(transactionHash: string): string {
+  if (!transactionHash || transactionHash.length < 14) {
+    return transactionHash || 'N/A';
+  }
+
+  return `${transactionHash.slice(0, 8)}...${transactionHash.slice(-6)}`;
+}
 
 type SidebarItemProps = {
   item: NavigationItem;
@@ -114,6 +195,13 @@ export default function OrganizationsPageView() {
   const [disbursements, setDisbursements] = useState<import('./types').DisbursementResult[]>([]);
   const [isDisbursementsLoading, setIsDisbursementsLoading] = useState(false);
   const [disbursementsErrorMessage, setDisbursementsErrorMessage] = useState<string | null>(null);
+  const [rankingItems, setRankingItems] = useState<RankingItem[]>([]);
+  const [rankingTotalItems, setRankingTotalItems] = useState(0);
+  const [isRankingLoading, setIsRankingLoading] = useState(false);
+  const [rankingErrorMessage, setRankingErrorMessage] = useState<string | null>(null);
+  const [dashboardDonationHistoryItemList, setDashboardDonationHistoryItemList] = useState<DashboardDonationHistoryItem[]>([]);
+  const [isDonationHistoryLoading, setIsDonationHistoryLoading] = useState(false);
+  const [donationHistoryErrorMessage, setDonationHistoryErrorMessage] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [projectsErrorMessage, setProjectsErrorMessage] = useState<string | null>(null);
   const [isCreateProjectAllowed, setIsCreateProjectAllowed] = useState(true);
@@ -296,6 +384,39 @@ export default function OrganizationsPageView() {
     }
   };
 
+  /** Hàm tải bảng xếp hạng QF từ backend. Mục đích: lấy dữ liệu thật để tính tổng quyên góp và thứ hạng trên tab Tổng quan. */
+  const loadRankingFromApi = async () => {
+    setIsRankingLoading(true);
+    setRankingErrorMessage(null);
+
+    try {
+      const response = await fetchApi<RankingSnapshotResponse>(
+        buildApiUrl('/rankings?page=1&limit=500&sortBy=rankPosition&sortDirection=asc'),
+        { method: 'GET' }
+      );
+
+      const nextRankingItems = Array.isArray(response.data?.items) ? response.data.items : [];
+      const nextTotalItems =
+        typeof response.data?.metadata?.totalItems === 'number' && Number.isFinite(response.data.metadata.totalItems)
+          ? response.data.metadata.totalItems
+          : nextRankingItems.length;
+
+      setRankingItems(nextRankingItems);
+      setRankingTotalItems(nextTotalItems);
+    } catch (error: unknown) {
+      const fallbackErrorMessage = 'Không thể tải bảng xếp hạng QF. Vui lòng thử lại sau.';
+      if (error && typeof error === 'object' && 'message' in error) {
+        setRankingErrorMessage((error as { message?: string }).message || fallbackErrorMessage);
+      } else {
+        setRankingErrorMessage(fallbackErrorMessage);
+      }
+      setRankingItems([]);
+      setRankingTotalItems(0);
+    } finally {
+      setIsRankingLoading(false);
+    }
+  };
+
   /** Hàm tải danh sách dự án từ backend. Mục đích: đồng bộ dữ liệu thật cho màn hình “Dự án của tôi”. */
   const loadProjectsFromApi = async () => {
     const authSession = readAuthSession();
@@ -324,6 +445,98 @@ export default function OrganizationsPageView() {
       setIsProjectsLoading(false);
     }
   };
+
+  /** Hàm tải lịch sử quyên góp cho Dashboard. Mục đích: gộp giao dịch donation thật từ tất cả dự án của tổ chức để hiển thị tại tab Tổng quan. */
+  const loadDashboardDonationHistory = useCallback(async (projectList: ProjectSummary[]) => {
+    const fallbackErrorMessage = 'Không thể tải lịch sử quyên góp. Vui lòng thử lại sau.';
+    const validProjectList = projectList.filter(projectItem => typeof projectItem.projectId === 'string' && projectItem.projectId.trim().length > 0);
+
+    if (validProjectList.length === 0) {
+      setDashboardDonationHistoryItemList([]);
+      setDonationHistoryErrorMessage(null);
+      setIsDonationHistoryLoading(false);
+      return;
+    }
+
+    setIsDonationHistoryLoading(true);
+    setDonationHistoryErrorMessage(null);
+
+    const projectNameByProjectIdMap = new Map(
+      validProjectList.map(projectItem => [projectItem.projectId, projectItem.name])
+    );
+
+    try {
+      /** Hằng số giới hạn số bản ghi lịch sử lấy theo mỗi dự án. Mục đích: đủ dữ liệu để lọc theo ngày/tuần/tháng ở UI. */
+      const donationHistoryFetchLimitCount = 50;
+
+      const donationHistoryResultList = await Promise.allSettled(
+        validProjectList.map(projectItem =>
+          fetchApi<DonationHistoryApiItem[]>(
+            buildApiUrl(
+              `/donations/campaigns/${encodeURIComponent(projectItem.projectId)}/history?limit=${donationHistoryFetchLimitCount}`
+            ),
+            {
+              method: 'GET',
+              cache: 'no-store'
+            }
+          )
+        )
+      );
+
+      const rawDashboardDonationHistoryItemList = donationHistoryResultList
+        .filter(
+          (resultItem): resultItem is PromiseFulfilledResult<ApiSuccessResponse<DonationHistoryApiItem[]>> =>
+            resultItem.status === 'fulfilled'
+        )
+        .flatMap(resultItem => (Array.isArray(resultItem.value.data) ? resultItem.value.data : []))
+        .map(historyItem => {
+          const parsedTimestampValue = Date.parse(historyItem.timestamp);
+          const isValidTimestamp = !Number.isNaN(parsedTimestampValue);
+          return {
+            transactionHash: historyItem.transactionHash,
+            projectName: projectNameByProjectIdMap.get(historyItem.projectId) || historyItem.projectId,
+            donorLabel: historyItem.isAnonymous ? 'Ẩn danh' : formatDonorWalletAddress(historyItem.donorAddress),
+            amount: Number.isFinite(historyItem.amount) ? historyItem.amount : 0,
+            timestamp: isValidTimestamp ? new Date(parsedTimestampValue).toLocaleString('vi-VN') : 'Không xác định',
+            timestampValue: isValidTimestamp ? parsedTimestampValue : 0,
+            transactionHashDisplayText: formatTransactionHash(historyItem.transactionHash)
+          };
+        })
+        .sort((leftHistoryItem, rightHistoryItem) => rightHistoryItem.timestampValue - leftHistoryItem.timestampValue);
+
+      const usedTransactionHashSet = new Set<string>();
+      const nextDashboardDonationHistoryItemList: DashboardDonationHistoryItem[] = [];
+
+      // Logic này loại trùng transactionHash khi cùng giao dịch xuất hiện từ nhiều nguồn, giúp danh sách lịch sử không lặp bản ghi.
+      rawDashboardDonationHistoryItemList.forEach(historyItem => {
+        if (usedTransactionHashSet.has(historyItem.transactionHash)) {
+          return;
+        }
+
+        usedTransactionHashSet.add(historyItem.transactionHash);
+        nextDashboardDonationHistoryItemList.push({
+          transactionHash: historyItem.transactionHashDisplayText,
+          projectName: historyItem.projectName,
+          donorLabel: historyItem.donorLabel,
+          amount: historyItem.amount,
+          timestamp: historyItem.timestamp,
+          timestampIso: historyItem.timestampValue > 0 ? new Date(historyItem.timestampValue).toISOString() : ''
+        });
+      });
+
+      setDashboardDonationHistoryItemList(nextDashboardDonationHistoryItemList);
+
+      const hasAnySuccessfulResult = donationHistoryResultList.some(resultItem => resultItem.status === 'fulfilled');
+      if (!hasAnySuccessfulResult) {
+        setDonationHistoryErrorMessage(fallbackErrorMessage);
+      }
+    } catch (_error) {
+      setDashboardDonationHistoryItemList([]);
+      setDonationHistoryErrorMessage(fallbackErrorMessage);
+    } finally {
+      setIsDonationHistoryLoading(false);
+    }
+  }, []);
 
   /** Hàm nhận dự án vừa tạo. Mục đích: thêm dự án mới vào đầu danh sách để hiển thị ngay. */
   const handleProjectCreated = (project: ProjectSummary) => {
@@ -374,6 +587,239 @@ export default function OrganizationsPageView() {
   };
 
   /** Hàm tạo danh sách menu hệ thống. Mục đích: đồng bộ badge thông báo theo trạng thái đã đọc/chưa đọc. */
+  const rankingItemByProjectIdMap = useMemo(() => {
+    return new Map(rankingItems.map(rankingItem => [rankingItem.projectId, rankingItem]));
+  }, [rankingItems]);
+
+  const dashboardStatisticItemList = useMemo<StatisticItem[]>(() => {
+    const totalProjectCount = createdProjects.length;
+    const activeProjectCount = createdProjects.filter(projectItem => projectItem.status === 'ACTIVE').length;
+    const completedProjectCount = createdProjects.filter(projectItem => projectItem.status === 'COMPLETED').length;
+    const pendingProjectCount = createdProjects.filter(
+      projectItem => projectItem.status === 'DRAFT' || projectItem.status === 'PENDING_APPROVAL'
+    ).length;
+
+    const totalDonationAmount = createdProjects.reduce((accumulator, projectItem) => {
+      return accumulator + (rankingItemByProjectIdMap.get(projectItem.projectId)?.totalRaisedAmount || 0);
+    }, 0);
+
+    const projectWithDonationCount = createdProjects.filter(projectItem => {
+      return (rankingItemByProjectIdMap.get(projectItem.projectId)?.totalRaisedAmount || 0) > 0;
+    }).length;
+
+    const pendingDisbursementList = disbursements.filter(disbursementItem => {
+      return ['PENDING', 'APPROVED', 'EXECUTING'].includes(disbursementItem.status);
+    });
+    const pendingDisbursementAmount = pendingDisbursementList.reduce(
+      (accumulator, disbursementItem) => accumulator + disbursementItem.amount,
+      0
+    );
+    const disbursementNeedSignatureCount = pendingDisbursementList.filter(disbursementItem => {
+      return disbursementItem.approvals.length < disbursementItem.requiredApprovals;
+    }).length;
+
+    const rankedOrganizationProjectList = createdProjects
+      .map(projectItem => rankingItemByProjectIdMap.get(projectItem.projectId) || null)
+      .filter((rankingItem): rankingItem is RankingItem => rankingItem !== null);
+    const bestRankedProjectItem = rankedOrganizationProjectList.reduce<RankingItem | null>((bestItem, currentItem) => {
+      if (!bestItem || currentItem.rankPosition < bestItem.rankPosition) {
+        return currentItem;
+      }
+      return bestItem;
+    }, null);
+    const effectiveRankingTotalItems = rankingTotalItems > 0 ? rankingTotalItems : rankingItems.length;
+
+    return [
+      {
+        color: 'emerald',
+        icon: '💎',
+        label: 'Tổng quyên góp nhận',
+        value: formatCompactCurrencyVietnamese(totalDonationAmount),
+        subtitle: '₫ từ dữ liệu xếp hạng QF',
+        change: `${projectWithDonationCount} dự án đã có quyên góp`,
+        changeStyle: 'up'
+      },
+      {
+        color: 'blue',
+        icon: '📋',
+        label: 'Dự án đang hoạt động',
+        value: `${activeProjectCount} / ${totalProjectCount}`,
+        subtitle: `${pendingProjectCount} dự án đang chờ duyệt`,
+        change: `${completedProjectCount} dự án đã hoàn thành`,
+        changeStyle: activeProjectCount > 0 ? 'up' : 'warn'
+      },
+      {
+        color: 'amber',
+        icon: '⏳',
+        label: 'Đang chờ giải ngân',
+        value: `${formatCompactCurrencyVietnamese(pendingDisbursementAmount)} ₫`,
+        subtitle: `${pendingDisbursementList.length} yêu cầu đang xử lý`,
+        change: `${disbursementNeedSignatureCount} yêu cầu chưa đủ chữ ký`,
+        changeStyle: pendingDisbursementList.length > 0 ? 'warn' : 'up'
+      },
+      {
+        color: 'gold',
+        icon: '🏆',
+        label: 'Xếp hạng QF tốt nhất',
+        value: bestRankedProjectItem ? `#${bestRankedProjectItem.rankPosition}/${effectiveRankingTotalItems}` : 'Chưa có',
+        subtitle: bestRankedProjectItem ? bestRankedProjectItem.projectName : 'Chưa có dự án vào bảng xếp hạng',
+        change: `${rankedOrganizationProjectList.length}/${totalProjectCount} dự án có điểm QF`,
+        changeStyle: rankedOrganizationProjectList.length > 0 ? 'up' : 'warn'
+      }
+    ];
+  }, [createdProjects, disbursements, rankingItemByProjectIdMap, rankingItems.length, rankingTotalItems]);
+
+  const dashboardFeaturedProject = useMemo<DashboardFeaturedProject | null>(() => {
+    if (createdProjects.length === 0) {
+      return null;
+    }
+
+    const sortedProjectList = [...createdProjects].sort((leftProjectItem, rightProjectItem) => {
+      const leftRaisedAmount = rankingItemByProjectIdMap.get(leftProjectItem.projectId)?.totalRaisedAmount || 0;
+      const rightRaisedAmount = rankingItemByProjectIdMap.get(rightProjectItem.projectId)?.totalRaisedAmount || 0;
+      if (leftRaisedAmount !== rightRaisedAmount) {
+        return rightRaisedAmount - leftRaisedAmount;
+      }
+      return new Date(rightProjectItem.createdAt).getTime() - new Date(leftProjectItem.createdAt).getTime();
+    });
+
+    const selectedProjectItem = sortedProjectList[0];
+    const raisedAmount = rankingItemByProjectIdMap.get(selectedProjectItem.projectId)?.totalRaisedAmount || 0;
+    const progressPercent =
+      selectedProjectItem.goalAmount > 0
+        ? Math.min(100, Math.round((raisedAmount / selectedProjectItem.goalAmount) * 100))
+        : 0;
+
+    return {
+      projectId: selectedProjectItem.projectId,
+      name: selectedProjectItem.name,
+      description: selectedProjectItem.description,
+      raisedAmount,
+      goalAmount: selectedProjectItem.goalAmount,
+      progressPercent
+    };
+  }, [createdProjects, rankingItemByProjectIdMap]);
+
+  const dashboardTimelineItemList = useMemo<TimelineItem[]>(() => {
+    const timelineEventItemList: Array<{ timestampValue: number; dotStyle: string; content: string }> = [];
+    const projectNameByProjectIdMap = new Map(createdProjects.map(projectItem => [projectItem.projectId, projectItem.name]));
+
+    createdProjects.forEach(projectItem => {
+      const createdTimestampValue = Date.parse(projectItem.createdAt);
+      if (!Number.isNaN(createdTimestampValue)) {
+        timelineEventItemList.push({
+          timestampValue: createdTimestampValue,
+          dotStyle: 'bg-[#2563EB] shadow-[0_0_0_3px_rgba(37,99,235,0.15)]',
+          content: `Đã tạo dự án "${projectItem.name}".`
+        });
+      }
+
+      if (projectItem.submittedAt) {
+        const submittedTimestampValue = Date.parse(projectItem.submittedAt);
+        if (!Number.isNaN(submittedTimestampValue)) {
+          timelineEventItemList.push({
+            timestampValue: submittedTimestampValue,
+            dotStyle: 'bg-[#F59E0B] shadow-[0_0_0_3px_rgba(245,158,11,0.15)]',
+            content: `Đã gửi dự án "${projectItem.name}" để phê duyệt.`
+          });
+        }
+      }
+
+      if (projectItem.reviewedAt) {
+        const reviewedTimestampValue = Date.parse(projectItem.reviewedAt);
+        if (!Number.isNaN(reviewedTimestampValue)) {
+          if (projectItem.status === 'ACTIVE') {
+            timelineEventItemList.push({
+              timestampValue: reviewedTimestampValue,
+              dotStyle: 'bg-[#16A34A] shadow-[0_0_0_3px_rgba(22,163,74,0.15)]',
+              content: `Dự án "${projectItem.name}" đã được phê duyệt và kích hoạt.`
+            });
+          }
+
+          if (projectItem.status === 'REJECTED') {
+            timelineEventItemList.push({
+              timestampValue: reviewedTimestampValue,
+              dotStyle: 'bg-[#DC2626] shadow-[0_0_0_3px_rgba(220,38,38,0.15)]',
+              content: `Dự án "${projectItem.name}" đã bị từ chối duyệt.`
+            });
+          }
+        }
+      }
+    });
+
+    disbursements.forEach(disbursementItem => {
+      const createdTimestampValue = Date.parse(disbursementItem.createdAt);
+      const projectName = projectNameByProjectIdMap.get(disbursementItem.projectId) || disbursementItem.projectId;
+      if (!Number.isNaN(createdTimestampValue)) {
+        timelineEventItemList.push({
+          timestampValue: createdTimestampValue,
+          dotStyle: 'bg-[#2563EB] shadow-[0_0_0_3px_rgba(37,99,235,0.15)]',
+          content: `Tạo yêu cầu giải ngân ${formatCurrencyVietnamese(disbursementItem.amount)} ₫ cho dự án "${projectName}".`
+        });
+      }
+
+      if (disbursementItem.status !== 'PENDING') {
+        let statusTimestampValue = Date.parse(disbursementItem.updatedAt);
+        if (disbursementItem.status === 'COMPLETED' && disbursementItem.completedAt) {
+          statusTimestampValue = Date.parse(disbursementItem.completedAt);
+        }
+        if (disbursementItem.status === 'REJECTED' && disbursementItem.rejection?.rejectedAt) {
+          statusTimestampValue = Date.parse(disbursementItem.rejection.rejectedAt);
+        }
+
+        if (!Number.isNaN(statusTimestampValue)) {
+          if (disbursementItem.status === 'COMPLETED') {
+            timelineEventItemList.push({
+              timestampValue: statusTimestampValue,
+              dotStyle: 'bg-[#16A34A] shadow-[0_0_0_3px_rgba(22,163,74,0.15)]',
+              content: `Giải ngân ${formatCurrencyVietnamese(disbursementItem.amount)} ₫ đã hoàn tất cho dự án "${projectName}".`
+            });
+          } else if (disbursementItem.status === 'REJECTED') {
+            timelineEventItemList.push({
+              timestampValue: statusTimestampValue,
+              dotStyle: 'bg-[#DC2626] shadow-[0_0_0_3px_rgba(220,38,38,0.15)]',
+              content: `Yêu cầu giải ngân của dự án "${projectName}" đã bị từ chối.`
+            });
+          } else if (disbursementItem.status === 'APPROVED' || disbursementItem.status === 'EXECUTING') {
+            timelineEventItemList.push({
+              timestampValue: statusTimestampValue,
+              dotStyle: 'bg-[#F59E0B] shadow-[0_0_0_3px_rgba(245,158,11,0.15)]',
+              content: `Yêu cầu giải ngân của dự án "${projectName}" đang được xử lý.`
+            });
+          } else if (disbursementItem.status === 'EXPIRED' || disbursementItem.status === 'CANCELLED') {
+            timelineEventItemList.push({
+              timestampValue: statusTimestampValue,
+              dotStyle: 'bg-[#DC2626] shadow-[0_0_0_3px_rgba(220,38,38,0.15)]',
+              content: `Yêu cầu giải ngân của dự án "${projectName}" đã kết thúc với trạng thái ${disbursementItem.status}.`
+            });
+          }
+        }
+      }
+    });
+
+    return timelineEventItemList
+      .sort((leftTimelineEventItem, rightTimelineEventItem) => rightTimelineEventItem.timestampValue - leftTimelineEventItem.timestampValue)
+      .slice(0, 6)
+      .map(timelineEventItem => ({
+        dotStyle: timelineEventItem.dotStyle,
+        content: timelineEventItem.content,
+        time: formatDashboardTimeLabel(timelineEventItem.timestampValue)
+      }));
+  }, [createdProjects, disbursements]);
+
+  const isDashboardLoading = isProjectsLoading || isDisbursementsLoading || isRankingLoading;
+  const dashboardErrorMessage = projectsErrorMessage || disbursementsErrorMessage || rankingErrorMessage;
+
+  /** Hàm tải lại dữ liệu thật cho tab Tổng quan. Mục đích: đồng bộ lại Projects, Disbursements và Ranking khi người dùng bấm retry. */
+  const handleRetryLoadDashboardData = () => {
+    void Promise.all([loadProjectsFromApi(), loadDisbursementsFromApi(), loadRankingFromApi()]);
+  };
+
+  /** Hàm tải lại lịch sử quyên góp của Dashboard. Mục đích: cho phép người dùng retry riêng khối “Lịch sử quyên góp”. */
+  const handleRetryLoadDonationHistory = () => {
+    void loadDashboardDonationHistory(createdProjects);
+  };
+
   const systemNavigationItemsWithNotificationState = useMemo(() => {
     return systemNavigationItems.map(item => {
       if (item.action !== 'toggleNotification') {
@@ -531,8 +977,22 @@ export default function OrganizationsPageView() {
       return;
     }
 
-    void Promise.all([loadProjectsFromApi(), loadCreateProjectEligibility(), loadOrganizationKycSubmissions(), loadDisbursementsFromApi()]);
+    void Promise.all([
+      loadProjectsFromApi(),
+      loadCreateProjectEligibility(),
+      loadOrganizationKycSubmissions(),
+      loadDisbursementsFromApi(),
+      loadRankingFromApi()
+    ]);
   }, [isAccessChecking]);
+
+  useEffect(() => {
+    if (isAccessChecking) {
+      return;
+    }
+
+    void loadDashboardDonationHistory(createdProjects);
+  }, [createdProjects, isAccessChecking, loadDashboardDonationHistory]);
 
   useEffect(() => {
     if (activePage !== 'projects') {
@@ -550,6 +1010,21 @@ export default function OrganizationsPageView() {
       </main>
     );
   }
+
+  const dashboardSectionProps: ComponentProps<typeof DashboardSection> = {
+    onLinkBankAccount: handleLinkBankAccount,
+    hasApprovedBeneficiaryBankAccount: isCreateProjectAllowed,
+    statisticItemList: dashboardStatisticItemList,
+    dashboardTimelineItemList,
+    dashboardDonationHistoryItemList,
+    featuredProject: dashboardFeaturedProject,
+    isDashboardLoading,
+    isDonationHistoryLoading,
+    dashboardErrorMessage,
+    donationHistoryErrorMessage,
+    onRetryLoadDashboardData: handleRetryLoadDashboardData,
+    onRetryLoadDonationHistory: handleRetryLoadDonationHistory
+  };
 
   return (
     <main className="min-h-screen bg-[#F8FAFB] text-[#0D1117]">
@@ -642,10 +1117,7 @@ export default function OrganizationsPageView() {
 
           <div className="p-7">
             {activePage === 'dashboard' ? (
-              <DashboardSection
-                onLinkBankAccount={handleLinkBankAccount}
-                hasApprovedBeneficiaryBankAccount={isCreateProjectAllowed}
-              />
+              <DashboardSection {...dashboardSectionProps} />
             ) : null}
             {activePage === 'projects' ? (
               <ProjectsSection
@@ -714,4 +1186,3 @@ export default function OrganizationsPageView() {
     </main>
   );
 }
-

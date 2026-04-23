@@ -39,6 +39,24 @@ export type TimelineItem = {
   time: string;
 };
 
+export type DashboardFeaturedProject = {
+  projectId: string;
+  name: string;
+  description: string;
+  raisedAmount: number;
+  goalAmount: number;
+  progressPercent: number;
+};
+
+export type DashboardDonationHistoryItem = {
+  transactionHash: string;
+  projectName: string;
+  donorLabel: string;
+  amount: number;
+  timestamp: string;
+  timestampIso: string;
+};
+
 export type TransactionRow = {
   time: string;
   type: string;

@@ -1,10 +1,10 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProgressBar, SectionCard, StatusBadge } from './OrganizationUiParts';
-import { dashboardTimelineItems, statisticItems, transparencyTransactionRows } from './mockData';
+import { transparencyTransactionRows } from './mockData';
 import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { readAuthSession } from '@/app/utils/authSession';
 import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
-import { ProjectSummary } from './types';
+import { DashboardDonationHistoryItem, DashboardFeaturedProject, ProjectSummary, StatisticItem, TimelineItem } from './types';
 
 type DisbursementSectionProps = {
   activeDisbursementTab: 'eligible' | 'pending' | 'history';
@@ -56,6 +56,16 @@ type NotificationDropdownProps = {
 type DashboardSectionProps = {
   onLinkBankAccount: () => void;
   hasApprovedBeneficiaryBankAccount: boolean;
+  statisticItemList: StatisticItem[];
+  dashboardTimelineItemList: TimelineItem[];
+  dashboardDonationHistoryItemList?: DashboardDonationHistoryItem[];
+  featuredProject: DashboardFeaturedProject | null;
+  isDashboardLoading: boolean;
+  isDonationHistoryLoading?: boolean;
+  dashboardErrorMessage: string | null;
+  donationHistoryErrorMessage?: string | null;
+  onRetryLoadDashboardData: () => void;
+  onRetryLoadDonationHistory?: () => void;
 };
 
 type ProjectCardView = {
@@ -488,7 +498,64 @@ function resolveApiErrorMessage(error: unknown, fallbackErrorMessage: string): s
 }
 
 /** Hàm render section Dashboard. Mục đích: hiển thị cảnh báo, thống kê, biểu đồ mô phỏng và timeline. */
-export function DashboardSection({ onLinkBankAccount, hasApprovedBeneficiaryBankAccount }: DashboardSectionProps) {
+export function DashboardSection({
+  onLinkBankAccount,
+  hasApprovedBeneficiaryBankAccount,
+  statisticItemList,
+  dashboardTimelineItemList,
+  dashboardDonationHistoryItemList = [],
+  featuredProject,
+  isDashboardLoading,
+  isDonationHistoryLoading = false,
+  dashboardErrorMessage,
+  donationHistoryErrorMessage = null,
+  onRetryLoadDashboardData,
+  onRetryLoadDonationHistory = () => undefined
+}: DashboardSectionProps) {
+  const [selectedDonationHistoryFilter, setSelectedDonationHistoryFilter] = useState<'day' | 'week' | 'month'>('day');
+
+  const filteredDashboardDonationHistoryItemList = useMemo(() => {
+    const nowTimestampValue = Date.now();
+    const filterRangeMillisecondsMap: Record<'day' | 'week' | 'month', number> = {
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000
+    };
+    const minAcceptedTimestampValue = nowTimestampValue - filterRangeMillisecondsMap[selectedDonationHistoryFilter];
+
+    // Logic này ưu tiên timestampIso để lọc chính xác theo mốc thời gian, đồng thời fallback timestamp text để tránh mất dữ liệu cũ.
+    return dashboardDonationHistoryItemList.filter(historyItem => {
+      const parsedTimestampValue = Date.parse(historyItem.timestampIso || historyItem.timestamp);
+      if (Number.isNaN(parsedTimestampValue)) {
+        return false;
+      }
+
+      return parsedTimestampValue >= minAcceptedTimestampValue;
+    });
+  }, [dashboardDonationHistoryItemList, selectedDonationHistoryFilter]);
+
+  /** Hàm giới hạn số bản ghi hiển thị sau khi đã lọc. Mục đích: giữ giao diện gọn và vẫn phản ánh đúng kết quả theo mốc thời gian. */
+  const displayedDashboardDonationHistoryItemList = useMemo(() => {
+    return filteredDashboardDonationHistoryItemList.slice(0, 8);
+  }, [filteredDashboardDonationHistoryItemList]);
+
+  /** Hàm xử lý chọn bộ lọc thời gian lịch sử quyên góp. Mục đích: cập nhật mốc thời gian để danh sách hiển thị theo Ngày/Tuần/Tháng. */
+  const handleSelectDonationHistoryFilter = (nextFilter: 'day' | 'week' | 'month') => {
+    setSelectedDonationHistoryFilter(nextFilter);
+  };
+
+  const donationHistoryEmptyMessage = useMemo(() => {
+    if (selectedDonationHistoryFilter === 'day') {
+      return 'Chưa có giao dịch quyên góp trong 24 giờ gần nhất.';
+    }
+
+    if (selectedDonationHistoryFilter === 'week') {
+      return 'Chưa có giao dịch quyên góp trong 7 ngày gần nhất.';
+    }
+
+    return 'Chưa có giao dịch quyên góp trong 30 ngày gần nhất.';
+  }, [selectedDonationHistoryFilter]);
+
   return (
     <div className="space-y-6">
       {!hasApprovedBeneficiaryBankAccount ? (
@@ -508,8 +575,21 @@ export function DashboardSection({ onLinkBankAccount, hasApprovedBeneficiaryBank
         </div>
       ) : null}
 
+      {dashboardErrorMessage ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3">
+          <p className="text-sm text-[#B91C1C]">{dashboardErrorMessage}</p>
+          <button
+            type="button"
+            onClick={onRetryLoadDashboardData}
+            className="rounded bg-[#B91C1C] px-3 py-1.5 text-xs font-semibold text-white"
+          >
+            Tải lại dữ liệu
+          </button>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
-        {statisticItems.map(item => (
+        {statisticItemList.map(item => (
           <SectionCard key={item.label} title={item.label} bodyClassName="space-y-2 p-4">
             <p className="text-2xl font-bold">{item.icon} {item.value}</p>
             <p className="text-xs text-[#6B7280]">{item.subtitle}</p>
@@ -521,31 +601,101 @@ export function DashboardSection({ onLinkBankAccount, hasApprovedBeneficiaryBank
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
         <SectionCard
           title="Lịch sử quyên góp"
-          rightSlot={<div className="flex gap-1 text-xs"><button type="button" className="rounded border border-[#0E7C6B] bg-[#0E7C6B] px-2 py-1 text-white">Ngày</button><button type="button" className="rounded border border-[#E5E7EB] px-2 py-1">Tuần</button><button type="button" className="rounded border border-[#E5E7EB] px-2 py-1">Tháng</button></div>}
+          rightSlot={
+            <div className="flex gap-1 text-xs">
+              <button
+                type="button"
+                onClick={() => handleSelectDonationHistoryFilter('day')}
+                className={`rounded border px-2 py-1 ${selectedDonationHistoryFilter === 'day' ? 'border-[#0E7C6B] bg-[#0E7C6B] text-white' : 'border-[#E5E7EB]'}`}
+              >
+                Ngày
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectDonationHistoryFilter('week')}
+                className={`rounded border px-2 py-1 ${selectedDonationHistoryFilter === 'week' ? 'border-[#0E7C6B] bg-[#0E7C6B] text-white' : 'border-[#E5E7EB]'}`}
+              >
+                Tuần
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSelectDonationHistoryFilter('month')}
+                className={`rounded border px-2 py-1 ${selectedDonationHistoryFilter === 'month' ? 'border-[#0E7C6B] bg-[#0E7C6B] text-white' : 'border-[#E5E7EB]'}`}
+              >
+                Tháng
+              </button>
+            </div>
+          }
         >
-          <div className="h-[180px] rounded-[10px] border border-dashed border-[#D1D5DB] bg-[#F8FAFB] p-3 text-xs text-[#6B7280]">Khu vực biểu đồ line chart tĩnh theo bản HTML.</div>
+          {donationHistoryErrorMessage ? (
+            <div className="rounded-[10px] border border-[#FECACA] bg-[#FEF2F2] p-3 text-xs text-[#B91C1C]">
+              <p>{donationHistoryErrorMessage}</p>
+              <button
+                type="button"
+                onClick={onRetryLoadDonationHistory}
+                className="mt-2 rounded bg-[#B91C1C] px-2.5 py-1 text-[11px] font-semibold text-white"
+              >
+                Tải lại lịch sử
+              </button>
+            </div>
+          ) : displayedDashboardDonationHistoryItemList.length > 0 ? (
+            <div className="space-y-2">
+              {displayedDashboardDonationHistoryItemList.map(historyItem => (
+                <div key={historyItem.transactionHash} className="flex items-center justify-between gap-2 rounded-[10px] border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-semibold text-[#111827]">{historyItem.projectName}</p>
+                    <p className="truncate text-[11px] text-[#6B7280]">{`${historyItem.donorLabel} · ${historyItem.timestamp}`}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[12px] font-semibold text-[#0E7C6B]">{`${formatCurrencyFromNumber(historyItem.amount)} ₫`}</p>
+                    <p className="text-[10px] text-[#9CA3AF]">{historyItem.transactionHash}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-[10px] border border-dashed border-[#D1D5DB] bg-[#F8FAFB] p-3 text-xs text-[#6B7280]">
+              {isDonationHistoryLoading ? 'Đang tải lịch sử quyên góp thực tế...' : donationHistoryEmptyMessage}
+            </div>
+          )}
         </SectionCard>
 
         <SectionCard title="Dự án nổi bật">
-          <div className="mb-3 flex h-[130px] items-center justify-center rounded-[10px] bg-gradient-to-br from-[#E6F7F4] to-[#BAE6FD] text-4xl">📚</div>
-          <p className="font-semibold">Học bổng vùng cao Tây Bắc</p>
-          <p className="mt-1 text-xs text-[#6B7280]">Hỗ trợ 200 học sinh dân tộc thiểu số tiếp cận giáo dục.</p>
-          <ProgressBar progressPercent={72} className="mt-3 h-[7px] rounded bg-[#F3F4F6]" />
-          <div className="mt-1 flex justify-between text-[11px] text-[#6B7280]"><span>36,000,000 ₫</span><span>50,000,000 ₫</span></div>
-          <button type="button" className="mt-3 w-full rounded-[9px] bg-[#0E7C6B] py-2 text-sm font-medium text-white">Xem chi tiết dự án</button>
+          {featuredProject ? (
+            <>
+              <div className="mb-3 flex h-[130px] items-center justify-center rounded-[10px] bg-gradient-to-br from-[#E6F7F4] to-[#BAE6FD] text-4xl">📚</div>
+              <p className="font-semibold">{featuredProject.name}</p>
+              <p className="mt-1 text-xs text-[#6B7280]">{featuredProject.description}</p>
+              <ProgressBar progressPercent={featuredProject.progressPercent} className="mt-3 h-[7px] rounded bg-[#F3F4F6]" />
+              <div className="mt-1 flex justify-between text-[11px] text-[#6B7280]">
+                <span>{`${formatCurrencyFromNumber(featuredProject.raisedAmount)} ₫`}</span>
+                <span>{`${formatCurrencyFromNumber(featuredProject.goalAmount)} ₫`}</span>
+              </div>
+            </>
+          ) : (
+            <div className="rounded-[10px] border border-dashed border-[#D1D5DB] bg-[#F8FAFB] p-4 text-xs text-[#6B7280]">
+              Chưa có dự án nào để hiển thị nổi bật.
+            </div>
+          )}
         </SectionCard>
       </div>
 
       <SectionCard title="Hoạt động gần đây" actionText="Xem tất cả">
-        <div className="space-y-3">
-          {dashboardTimelineItems.map(item => (
-            <div key={item.content} className="flex gap-3 border-b border-[#F3F4F6] pb-2 last:border-none">
-              <span className={`mt-1 h-2.5 w-2.5 rounded-full ${item.dotStyle}`} />
-              <p className="flex-1 text-sm">{item.content}</p>
-              <span className="text-xs text-[#9CA3AF]">{item.time}</span>
-            </div>
-          ))}
-        </div>
+        {dashboardTimelineItemList.length > 0 ? (
+          <div className="space-y-3">
+            {dashboardTimelineItemList.map(item => (
+              <div key={`${item.content}-${item.time}`} className="flex gap-3 border-b border-[#F3F4F6] pb-2 last:border-none">
+                <span className={`mt-1 h-2.5 w-2.5 rounded-full ${item.dotStyle}`} />
+                <p className="flex-1 text-sm">{item.content}</p>
+                <span className="text-xs text-[#9CA3AF]">{item.time}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[#6B7280]">
+            {isDashboardLoading ? 'Đang tải hoạt động gần đây...' : 'Chưa có hoạt động nào để hiển thị.'}
+          </p>
+        )}
       </SectionCard>
     </div>
   );
