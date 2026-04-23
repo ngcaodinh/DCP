@@ -24,8 +24,9 @@ const formatDateTime = (dateTimeValue: string): string => {
 const shortenTransactionHash = (transactionHashValue: string): string => (transactionHashValue.length <= 16 ? transactionHashValue : `${transactionHashValue.slice(0, 10)}...${transactionHashValue.slice(-8)}`);
 /** Hàm tạo link explorer cho transaction hash. Mục đích: mở block explorer khi hệ thống có cấu hình URL. */
 const buildTransactionExplorerUrl = (transactionHashValue: string): string => {
-  const blockchainExplorerTxBaseUrl = String(process.env.NEXT_PUBLIC_BLOCKCHAIN_EXPLORER_TX_BASE_URL || '').trim();
-  return blockchainExplorerTxBaseUrl ? `${blockchainExplorerTxBaseUrl.replace(/\/$/, '')}/${transactionHashValue}` : '';
+  if (!transactionHashValue) return '';
+  const blockchainExplorerTxBaseUrl = String(process.env.NEXT_PUBLIC_BLOCKCHAIN_EXPLORER_TX_BASE_URL || 'https://amoy.polygonscan.com/tx').trim();
+  return `${blockchainExplorerTxBaseUrl.replace(/\/$/, '')}/${transactionHashValue}`;
 };
 
 export default function DonorsPage() {
@@ -39,7 +40,6 @@ export default function DonorsPage() {
   const [isPageLoading, setIsPageLoading] = useState(true);
   const [pageErrorMessage, setPageErrorMessage] = useState('');
   const [lastUpdatedAt, setLastUpdatedAt] = useState('');
-  const [copiedTransactionHash, setCopiedTransactionHash] = useState('');
 
   // === State cho tìm kiếm ===
   /** Từ khóa tìm kiếm theo tên donor. Hỗ trợ partial match, không phân biệt hoa thường. */
@@ -111,10 +111,6 @@ export default function DonorsPage() {
   };
 
   /** Hàm sao chép transaction hash. Mục đích: cho phép người dùng copy nhanh mã giao dịch. */
-  const handleCopyTransactionHash = async (transactionHashValue: string): Promise<void> => {
-    try { await navigator.clipboard.writeText(transactionHashValue); setCopiedTransactionHash(transactionHashValue); window.setTimeout(() => setCopiedTransactionHash(''), 1600); }
-    catch (_error) { setCopiedTransactionHash(''); }
-  };
 
   /**
    * Hàm xử lý thay đổi input tìm kiếm tên (có debounce 300ms).
@@ -285,35 +281,31 @@ export default function DonorsPage() {
                       <span className="block text-xs leading-relaxed sm:text-sm">{formatDateTime(donorItem.donatedAt)}</span>
                     </td>
                     {/* Transaction Hash */}
-                    <td className="px-3 py-2.5 font-mono text-xs sm:px-4 sm:py-3">
-                      <div className="flex items-start gap-1.5 sm:items-center">
-                        {explorerTransactionUrl ? (
-                          <a
-                            href={explorerTransactionUrl}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            className="inline-flex items-center gap-1 truncate text-[#1d4ed8] hover:underline max-w-[80px] sm:max-w-none"
-                            title={donorItem.transactionHash}
-                          >
-                            <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-                            <span>{shortenTransactionHash(donorItem.transactionHash)}</span>
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[#475569] max-w-[80px] truncate sm:max-w-none" title={donorItem.transactionHash}>
-                            <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
-                            <span>{shortenTransactionHash(donorItem.transactionHash)}</span>
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => void handleCopyTransactionHash(donorItem.transactionHash)}
-                          className="flex-shrink-0 rounded border border-[#e2e8f0] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[#64748b] shadow-sm transition hover:border-[#10b981] hover:bg-[#ecfdf5] hover:text-[#047857] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#10b981] disabled:cursor-not-allowed disabled:opacity-50"
-                          title="Copy transaction hash"
-                        >
-                          {copiedTransactionHash === donorItem.transactionHash ? '✓ Đã copy' : 'Copy'}
-                        </button>
-                      </div>
-                    </td>
+                      <td className="px-3 py-2.5 font-mono text-xs sm:px-4 sm:py-3">
+                        <div className="flex items-start gap-1.5 sm:items-center">
+                          {explorerTransactionUrl ? (
+                            <a
+                              href={explorerTransactionUrl}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                              className="inline-flex items-center gap-1 truncate text-[#1d4ed8] hover:underline max-w-[80px] sm:max-w-none"
+                              title={donorItem.transactionHash}
+                            >
+                              <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                              </svg>
+                              <span>{shortenTransactionHash(donorItem.transactionHash)}</span>
+                            </a>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[#475569] max-w-[80px] truncate sm:max-w-none" title={donorItem.transactionHash}>
+                              <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                              </svg>
+                              <span>{shortenTransactionHash(donorItem.transactionHash)}</span>
+                            </span>
+                          )}
+                        </div>
+                      </td>
                   </tr>
                 );
               })}
@@ -379,7 +371,7 @@ export default function DonorsPage() {
         </div>
       </>
     );
-  }, [copiedTransactionHash, currentPage, filteredDonorList, hasActiveFilter, isPageLoading, noFilterMatchMessage, pageErrorMessage, selectedPageSize, totalPages]);
+  }, [currentPage, filteredDonorList, hasActiveFilter, isPageLoading, noFilterMatchMessage, pageErrorMessage, selectedPageSize, totalPages]);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-[#f0fdf4] to-[#f8fafc] px-4 py-6 md:px-8">
