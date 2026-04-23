@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProgressBar, SectionCard, StatusBadge } from './OrganizationUiParts';
 import { dashboardTimelineItems, statisticItems, transparencyTransactionRows } from './mockData';
 import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
@@ -14,6 +14,19 @@ type DisbursementSectionProps = {
   disbursementsErrorMessage?: string | null;
   onRetryLoadDisbursements?: () => void;
   createdProjects?: import('./types').ProjectSummary[];
+  onOpenCreateDisbursementModal?: (project: import('./types').ProjectSummary) => void;
+};
+
+type CreateDisbursementModalProps = {
+  project: ProjectSummary;
+  beneficiaryBankAccount: {
+    bankName: string;
+    bankAccountNumber: string;
+    accountHolderName: string;
+    branchName?: string | null;
+  };
+  onClose: () => void;
+  onCreated: (disbursement: import('./types').DisbursementResult) => void;
 };
 
 type CreateProjectModalProps = {
@@ -106,11 +119,33 @@ type UploadEvidenceResponse = {
   evidenceFiles: { cid: string; fileName: string; mimeType: string }[];
 };
 
+type MaxWithdrawableResponse = {
+  projectId: string;
+  maxAmount: string;
+  reserve: string;
+};
+
+type CreateDisbursementFormData = {
+  requestMode: 'NORMAL' | 'EMERGENCY';
+  emergencyReason: string;
+  amount: string;
+  usagePurpose: string;
+};
+
+type CreateDisbursementFormErrors = Partial<Record<keyof CreateDisbursementFormData | 'evidenceFiles', string>>;
+
 const createProjectDefaultFormState: CreateProjectFormData = {
   name: '',
   description: '',
   goalAmount: '',
   deadline: ''
+};
+
+const createDisbursementDefaultFormState: CreateDisbursementFormData = {
+  requestMode: 'NORMAL',
+  emergencyReason: '',
+  amount: '',
+  usagePurpose: ''
 };
 
 const createdProjectEmojis = ['🚀', '📌', '🎯', '✨', '🌱'];
@@ -983,7 +1018,8 @@ export function DisbursementSection({
   isDisbursementsLoading = false,
   disbursementsErrorMessage = null,
   onRetryLoadDisbursements,
-  createdProjects = []
+  createdProjects = [],
+  onOpenCreateDisbursementModal
 }: DisbursementSectionProps) {
   const tabItems = [
     { key: 'eligible', label: 'Đủ điều kiện' },
@@ -993,7 +1029,7 @@ export function DisbursementSection({
 
   const statusLabelMap = {
     eligible: '🟢 Sẵn sàng tạo yêu cầu',
-    pending: '⏳ Đang chờ 2/3 chữ ký',
+    pending: '⏳ Đang chờ đủ chữ ký theo policy request',
     history: '✅ Đã hoàn tất giải ngân'
   } as const;
 
@@ -1047,7 +1083,13 @@ export function DisbursementSection({
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-semibold text-[#0E7C6B]">{statusLabelMap['eligible']}</p>
-                    <button type="button" className="rounded-[8px] bg-[#0E7C6B] px-3 py-1.5 text-xs font-semibold text-white">Tạo yêu cầu giải ngân</button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCreateDisbursementModal?.(project)}
+                      className="rounded-[8px] bg-[#0E7C6B] px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      Tạo yêu cầu giải ngân
+                    </button>
                   </div>
                 </div>
               ))
@@ -1068,6 +1110,7 @@ export function DisbursementSection({
                       <div>
                         <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
                         <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền</p>
+                        <p className="mt-1 text-xs text-[#4B5563]">Mục đích: {disbursement.usagePurpose}</p>
                       </div>
                       <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
                     </div>
@@ -1092,6 +1135,7 @@ export function DisbursementSection({
 
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <p className="text-xs font-semibold text-[#B45309]">{statusLabelMap['pending']}</p>
+                      <p className="text-xs font-semibold text-[#92400E]">{`${disbursement.approvals.length}/${disbursement.requiredApprovals} chữ ký`}</p>
                     </div>
                   </div>
                 );
@@ -1109,6 +1153,7 @@ export function DisbursementSection({
                     <div>
                       <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
                       <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {disbursement.status}</p>
+                      <p className="mt-1 text-xs text-[#4B5563]">Mục đích: {disbursement.usagePurpose}</p>
                     </div>
                     <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
                   </div>
@@ -1119,6 +1164,309 @@ export function DisbursementSection({
         </div>
       )}
     </SectionCard>
+  );
+}
+
+/** Hàm kiểm tra dữ liệu form giải ngân. Mục đích: chặn submit sai trước khi upload minh chứng và gọi API. */
+function validateCreateDisbursementForm(
+  formData: CreateDisbursementFormData,
+  selectedEvidenceFiles: File[],
+  maxWithdrawableAmount: number | null
+): CreateDisbursementFormErrors {
+  const nextFormErrors: CreateDisbursementFormErrors = {};
+  const amountValue = Number(formData.amount);
+
+  if (!formData.amount.trim()) {
+    nextFormErrors.amount = 'Vui lòng nhập số tiền cần giải ngân.';
+  } else if (!Number.isFinite(amountValue) || amountValue <= 0) {
+    nextFormErrors.amount = 'Số tiền giải ngân phải lớn hơn 0.';
+  } else if (maxWithdrawableAmount !== null && amountValue > maxWithdrawableAmount) {
+    nextFormErrors.amount = 'Số tiền vượt quá hạn mức giải ngân khả dụng của dự án.';
+  }
+
+  if (!formData.usagePurpose.trim()) {
+    nextFormErrors.usagePurpose = 'Vui lòng nhập mục đích sử dụng tiền.';
+  } else if (formData.usagePurpose.trim().length < 10) {
+    nextFormErrors.usagePurpose = 'Mục đích sử dụng tiền phải tối thiểu 10 ký tự.';
+  }
+
+  if (formData.requestMode === 'EMERGENCY' && !formData.emergencyReason.trim()) {
+    nextFormErrors.emergencyReason = 'Vui lòng nhập lý do khẩn cấp cho chế độ Khẩn cấp.';
+  }
+
+  if (selectedEvidenceFiles.length === 0) {
+    nextFormErrors.evidenceFiles = 'Vui lòng tải lên ít nhất 1 tệp minh chứng.';
+  }
+
+  return nextFormErrors;
+}
+
+/** Hàm render modal tạo yêu cầu giải ngân. Mục đích: cho tổ chức nhập dữ liệu theo FR7 rồi tạo request. */
+export function CreateDisbursementModal({
+  project,
+  beneficiaryBankAccount,
+  onClose,
+  onCreated
+}: CreateDisbursementModalProps) {
+  const [formData, setFormData] = useState<CreateDisbursementFormData>(createDisbursementDefaultFormState);
+  const [formErrors, setFormErrors] = useState<CreateDisbursementFormErrors>({});
+  const [selectedEvidenceFiles, setSelectedEvidenceFiles] = useState<File[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingMaxWithdrawable, setIsLoadingMaxWithdrawable] = useState(true);
+  const [maxWithdrawableAmount, setMaxWithdrawableAmount] = useState<number | null>(null);
+  const [maxWithdrawableErrorMessage, setMaxWithdrawableErrorMessage] = useState<string | null>(null);
+  const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
+
+  /** Hàm cập nhật từng field form giải ngân. Mục đích: đồng bộ state và xóa lỗi field hiện tại khi người dùng sửa. */
+  const handleChangeFormField = (fieldName: keyof CreateDisbursementFormData, fieldValue: string) => {
+    setFormData(currentFormData => ({
+      ...currentFormData,
+      [fieldName]: fieldValue
+    }));
+    setFormErrors(currentFormErrors => ({
+      ...currentFormErrors,
+      [fieldName]: undefined
+    }));
+    setSubmitErrorMessage(null);
+  };
+
+  /** Hàm nhận danh sách file minh chứng. Mục đích: giữ file ở client để upload IPFS trước khi tạo request. */
+  const handleSelectEvidenceFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    const nextFileList = Array.from(event.target.files || []);
+    setSelectedEvidenceFiles(nextFileList);
+    setFormErrors(currentFormErrors => ({
+      ...currentFormErrors,
+      evidenceFiles: undefined
+    }));
+    setSubmitErrorMessage(null);
+  };
+
+  /** Hàm xóa một file minh chứng đã chọn. Mục đích: cho phép người dùng chỉnh lại file trước khi gửi yêu cầu. */
+  const handleRemoveEvidenceFile = (fileIndex: number) => {
+    setSelectedEvidenceFiles(currentFileList => currentFileList.filter((_fileItem, currentIndex) => currentIndex !== fileIndex));
+  };
+
+  useEffect(() => {
+    let isComponentMounted = true;
+
+    /** Hàm tải hạn mức giải ngân tối đa. Mục đích: hiển thị rule reserve 20% từ backend đúng với FR7. */
+    const loadMaxWithdrawableAmount = async () => {
+      const authSession = readAuthSession();
+      if (!authSession?.accessToken) {
+        if (isComponentMounted) {
+          setIsLoadingMaxWithdrawable(false);
+          setMaxWithdrawableErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+        }
+        return;
+      }
+
+      setIsLoadingMaxWithdrawable(true);
+      setMaxWithdrawableErrorMessage(null);
+
+      try {
+        const response = await fetchApi<MaxWithdrawableResponse>(buildApiUrl(`/api/disbursement/max-withdrawable/${project.projectId}`), {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authSession.accessToken}` }
+        });
+
+        if (!isComponentMounted) {
+          return;
+        }
+
+        setMaxWithdrawableAmount(Number(response.data.maxAmount));
+      } catch (error: unknown) {
+        if (!isComponentMounted) {
+          return;
+        }
+
+        setMaxWithdrawableErrorMessage(resolveApiErrorMessage(error, 'Không thể lấy hạn mức giải ngân tối đa. Vui lòng thử lại sau.'));
+      } finally {
+        if (isComponentMounted) {
+          setIsLoadingMaxWithdrawable(false);
+        }
+      }
+    };
+
+    void loadMaxWithdrawableAmount();
+
+    return () => {
+      isComponentMounted = false;
+    };
+  }, [project.projectId]);
+
+  /** Hàm submit form giải ngân. Mục đích: upload minh chứng rồi gọi API tạo yêu cầu giải ngân. */
+  const handleSubmitCreateDisbursement = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const nextFormErrors = validateCreateDisbursementForm(formData, selectedEvidenceFiles, maxWithdrawableAmount);
+    if (Object.keys(nextFormErrors).length > 0) {
+      setFormErrors(nextFormErrors);
+      setSubmitErrorMessage('Vui lòng kiểm tra lại các trường bắt buộc trước khi gửi yêu cầu giải ngân.');
+      return;
+    }
+
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setSubmitErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitErrorMessage(null);
+
+    try {
+      const uploadPayload: UploadEvidenceFilePayload[] = await Promise.all(
+        selectedEvidenceFiles.map(async fileItem => ({
+          fileName: fileItem.name,
+          mimeType: fileItem.type || 'application/octet-stream',
+          contentBase64: await convertFileToBase64(fileItem)
+        }))
+      );
+
+      const uploadResponse = await fetchApi<UploadEvidenceResponse>(buildApiUrl('/projects/evidences/upload'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        body: JSON.stringify({ files: uploadPayload })
+      });
+
+      const evidenceCid = uploadResponse.data.evidenceCids.join(',');
+
+      const createResponse = await fetchApi<import('./types').DisbursementResult>(buildApiUrl('/api/disbursement/create'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        body: JSON.stringify({
+          projectId: project.projectId,
+          amount: Number(formData.amount),
+          usagePurpose: formData.usagePurpose.trim(),
+          evidenceCid,
+          requestMode: formData.requestMode,
+          emergencyReason: formData.requestMode === 'EMERGENCY' ? formData.emergencyReason.trim() : undefined,
+          beneficiaryBankAccount: {
+            bankName: beneficiaryBankAccount.bankName,
+            bankAccountNumber: beneficiaryBankAccount.bankAccountNumber,
+            accountHolderName: beneficiaryBankAccount.accountHolderName,
+            branchName: beneficiaryBankAccount.branchName || undefined
+          }
+        })
+      });
+
+      onCreated(createResponse.data);
+      onClose();
+    } catch (error: unknown) {
+      setSubmitErrorMessage(resolveApiErrorMessage(error, 'Không thể tạo yêu cầu giải ngân. Vui lòng thử lại sau.'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="my-4 flex max-h-[calc(100vh-2rem)] w-full max-w-[720px] flex-col overflow-hidden rounded-[18px] bg-white shadow-2xl">
+        <div className="flex items-start justify-between border-b border-[#F3F4F6] p-5">
+          <div>
+            <p className="mb-1 text-2xl">🏦</p>
+            <p className="text-lg font-bold">Tạo yêu cầu giải ngân</p>
+            
+          </div>
+          <button type="button" onClick={onClose} className="h-8 w-8 rounded-full bg-[#F3F4F6]">✕</button>
+        </div>
+
+        <form className="min-h-0 space-y-4 overflow-y-auto p-5 text-sm" onSubmit={handleSubmitCreateDisbursement}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="md:col-span-2 rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
+              <p className="font-semibold text-[#111827]">{project.name}</p>
+              <p className="mt-1 text-xs text-[#6B7280]">Yêu cầu được duyệt theo ngưỡng chữ ký động của FR7 (2/3 hoặc 3/3).</p>
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-semibold text-[#374151]">Chế độ yêu cầu</p>
+              <select
+                className="w-full rounded border border-[#D1D5DB] px-3 py-2"
+                value={formData.requestMode}
+                onChange={event => handleChangeFormField('requestMode', event.target.value as 'NORMAL' | 'EMERGENCY')}
+              >
+                <option value="NORMAL">Thông thường</option>
+                <option value="EMERGENCY">Khẩn cấp</option>
+              </select>
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs font-semibold text-[#374151]">Số tiền yêu cầu giải ngân (VNĐ)</p>
+              <input className="w-full rounded border border-[#D1D5DB] px-3 py-2" placeholder="Ví dụ: 15000000" value={formData.amount} onChange={event => handleChangeFormField('amount', event.target.value)} />
+              {formErrors.amount ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.amount}</p> : null}
+              {isLoadingMaxWithdrawable ? (
+                <p className="mt-1 text-xs text-[#6B7280]">Đang tải hạn mức giải ngân tối đa...</p>
+              ) : maxWithdrawableErrorMessage ? (
+                <p className="mt-1 text-xs text-[#DC2626]">{maxWithdrawableErrorMessage}</p>
+              ) : (
+                <p className="mt-1 text-xs text-[#0E7C6B]">Hạn mức khả dụng tối đa: {maxWithdrawableAmount !== null ? `${formatCurrencyFromNumber(maxWithdrawableAmount)} ₫` : '--'} · Reserve: 20%</p>
+              )}
+            </div>
+
+            <div className="rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] p-4 text-xs text-[#374151]">
+              <p className="font-semibold">Tài khoản ngân hàng thụ hưởng</p>
+              <p className="mt-2">Ngân hàng: {beneficiaryBankAccount.bankName}</p>
+              <p>Số tài khoản: {beneficiaryBankAccount.bankAccountNumber}</p>
+              <p>Chủ tài khoản: {beneficiaryBankAccount.accountHolderName}</p>
+              {beneficiaryBankAccount.branchName ? <p>Chi nhánh: {beneficiaryBankAccount.branchName}</p> : null}
+            </div>
+
+            <div className="md:col-span-2">
+              <p className="mb-1 text-xs font-semibold text-[#374151]">Mục đích sử dụng tiền</p>
+              <textarea className="min-h-[96px] w-full rounded border border-[#D1D5DB] px-3 py-2" placeholder="Mô tả rõ mục đích sử dụng khoản giải ngân này" value={formData.usagePurpose} onChange={event => handleChangeFormField('usagePurpose', event.target.value)} />
+              {formErrors.usagePurpose ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.usagePurpose}</p> : null}
+            </div>
+
+            {formData.requestMode === 'EMERGENCY' ? (
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs font-semibold text-[#374151]">Lý do khẩn cấp</p>
+                <textarea
+                  className="min-h-[72px] w-full rounded border border-[#D1D5DB] px-3 py-2"
+                  placeholder="Mô tả lý do cần giải ngân khẩn cấp để phục vụ audit"
+                  value={formData.emergencyReason}
+                  onChange={event => handleChangeFormField('emergencyReason', event.target.value)}
+                />
+                {formErrors.emergencyReason ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.emergencyReason}</p> : null}
+              </div>
+            ) : null}
+
+            <div className="md:col-span-2">
+              <p className="mb-1 text-xs font-semibold text-[#374151]">Minh chứng sử dụng tiền</p>
+              <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={handleSelectEvidenceFiles} className="w-full rounded border border-[#D1D5DB] px-3 py-2" />
+              <p className="mt-1 text-xs text-[#6B7280]">Tải lên chứng từ, kế hoạch hoặc tài liệu liên quan để phục vụ ký duyệt 2/3.</p>
+              {formErrors.evidenceFiles ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.evidenceFiles}</p> : null}
+              {selectedEvidenceFiles.length > 0 ? (
+                <div className="mt-2 space-y-1">
+                  {selectedEvidenceFiles.map((fileItem, fileIndex) => (
+                    <div key={`${fileItem.name}-${fileIndex}`} className="flex items-center justify-between rounded border border-[#E5E7EB] bg-[#F9FAFB] px-2 py-1 text-xs">
+                      <span className="truncate">{fileItem.name}</span>
+                      <button type="button" onClick={() => handleRemoveEvidenceFile(fileIndex)} className="text-[#DC2626]">Xóa</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="rounded-[12px] border border-[#D1FAE5] bg-[#ECFDF5] px-3 py-2 text-xs text-[#065F46]">
+            Yêu cầu sau khi tạo sẽ ở trạng thái chờ ký duyệt. Ngưỡng chữ ký do contract tự xác định: 2/3 hoặc 3/3 theo mode và tỷ lệ raised/goal.
+          </div>
+
+          {submitErrorMessage ? <p className="rounded border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#B91C1C]">{submitErrorMessage}</p> : null}
+
+          {maxWithdrawableErrorMessage ? (
+            <p className="rounded border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2 text-xs text-[#92400E]">
+              Không thể tải hạn mức giải ngân tối đa từ blockchain. Bạn vẫn có thể gửi yêu cầu, hệ thống backend sẽ kiểm tra hạn mức trước khi tạo request.
+            </p>
+          ) : null}
+
+          <div className="flex gap-2 border-t border-[#F3F4F6] pt-4">
+            <button type="button" onClick={onClose} disabled={isSubmitting} className="flex-1 rounded bg-[#F3F4F6] py-2 text-sm">Hủy</button>
+            <button type="submit" disabled={isSubmitting} className="flex-1 rounded bg-[#0E7C6B] py-2 text-sm font-semibold text-white disabled:opacity-60">{isSubmitting ? 'Đang tạo yêu cầu...' : 'Tạo yêu cầu giải ngân'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

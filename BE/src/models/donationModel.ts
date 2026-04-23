@@ -75,6 +75,27 @@ export async function countDonations(projectId?: string): Promise<number> {
 }
 
 /**
+ * Hàm tính tổng giá trị donation toàn hệ thống.
+ * Mục đích: cung cấp số liệu giao dịch thật cho metric tổng quan của admin dashboard.
+ */
+export async function aggregateTotalDonationAmount(): Promise<number> {
+  const aggregateResult = await DonationMongoModel.aggregate<{ totalAmount: number }>([
+    {
+      $group: {
+        _id: null,
+        totalAmount: { $sum: '$amount' }
+      }
+    }
+  ]);
+
+  if (!aggregateResult.length) {
+    return 0;
+  }
+
+  return Number(aggregateResult[0].totalAmount || 0);
+}
+
+/**
  * Hàm lấy danh sách donation theo donor address.
  * Mục đích: phục vụ FR5/UC5.1 — truy xuất lịch sử donation của một ví để tính risk score.
  */
@@ -126,7 +147,6 @@ export async function findDonationsInTimeRange(startedAt: Date, endedAt: Date): 
     .lean<DonationRecord[]>()
     .exec();
 }
-
 
 
 

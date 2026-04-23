@@ -25,7 +25,6 @@ type LogMetadata = {
   performedByRole?: string;
   reason?: string;
   userId?: string;
-  walletAddress?: string;
   action?: string;
 };
 
@@ -87,4 +86,3 @@ const logger = {
 export function getLogger() {
   return logger;
 }
-

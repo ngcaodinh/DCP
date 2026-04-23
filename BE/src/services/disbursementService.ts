@@ -11,25 +11,28 @@ import {
   findDisbursementsByProjectId,
   findDisbursementsByStatus,
   findPendingDisbursementByBeneficiary,
-  updateDisbursementByRequestId
+  updateDisbursementByRequestId,
+  updateDisbursementByRequestIdWithCondition
 } from '../models/disbursementModel';
-import { AuthUser, findUserById } from '../models/authModel';
+import { AuthUser, findUserById, updateUser } from '../models/authModel';
 import { findProjectById } from '../repositories/projectRepository';
 import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
+import { createPayosTransfer } from './payosService';
 
-// ============ CONSTANTS ============
-// Ethers ABI cho read-only queries (view calls).
-const MULTISIG_CONTRACT_ABI_ETHER = [
-  'function createDisbursementRequest(uint256 projectId, address beneficiary, uint256 amount, uint256 projectGoalAmount, string evidenceCid) external returns (uint256 requestId)',
+// ============ ABI ============
+
+const multisigContractAbiEthers = [
+  'event RequestCreated(uint256 indexed requestId, uint256 indexed projectId, address indexed beneficiary, uint256 amount, string evidenceCid, uint256 createdAt, uint256 timeoutDeadline, uint8 requestMode, uint256 requiredApprovals, uint256 raisedRatioBpsAtCreation)',
+  'function createDisbursementRequest(uint256 projectId, address beneficiary, uint256 amount, uint256 projectGoalAmount, string evidenceCid, uint8 requestMode, string emergencyReason) external returns (uint256 requestId)',
   'function signRequest(uint256 requestId) external',
   'function rejectRequest(uint256 requestId, string reason) external',
-  'function getRequest(uint256 requestId) external view returns (uint256 existsFlag, uint256 requestIdOut, uint256 projectId, address beneficiaryAddress, uint256 amount, string memory evidenceCid, uint8 status, uint256 approvalCount, uint256 signedCount, uint256 createdAt, uint256 executedAt, uint256 cancelledAt, string memory rejectReason, bool adminSigned, bool orgSigned, bool regulatorySigned, uint256 timeoutDeadline, uint256 maxWithdrawable)',
-  'function getMaxWithdrawableAmount(uint256 projectId) external view returns (uint256 maxAmount)',
-  'function finalizeDisbursement(uint256 requestId, uint256 transactionId) external returns (uint256 burnedAmount)'
+  'function finalizeDisbursement(uint256 requestId, uint256 transactionId) external returns (uint256 burnedAmount)',
+  'function getRequest(uint256 requestId) external view returns (bool exists, uint256 requestIdOut, uint256 projectId, address beneficiaryAddress, uint256 amount, uint8 status, uint256 approvalCount, uint256 signedCount, uint256 createdAt, uint256 executedAt, uint256 cancelledAt, bool adminSigned, bool orgSigned, bool regulatorySigned, uint256 timeoutDeadline, uint256 maxWithdrawable, uint8 requestMode, uint256 requiredApprovals, uint256 raisedRatioBpsAtCreation, bool adminRoleSignatureCollected, bool orgRoleSignatureCollected, bool regulatoryRoleSignatureCollected)',
+  'function getRequestStrings(uint256 requestId) external view returns (string evidenceCid, string rejectReason)',
+  'function getMaxWithdrawableAmount(uint256 projectId) external view returns (uint256 maxAmount)'
 ] as const;
 
-// Viem ABI cho encodeFunctionData (type-safe với viem).
-const MULTISIG_VIEM_ABI = [
+const multisigContractAbiViem = [
   {
     name: 'createDisbursementRequest',
     type: 'function',
@@ -38,7 +41,9 @@ const MULTISIG_VIEM_ABI = [
       { name: 'beneficiary', type: 'address' },
       { name: 'amount', type: 'uint256' },
       { name: 'projectGoalAmount', type: 'uint256' },
-      { name: 'evidenceCid', type: 'string' }
+      { name: 'evidenceCid', type: 'string' },
+      { name: 'requestMode', type: 'uint8' },
+      { name: 'emergencyReason', type: 'string' }
     ],
     outputs: [{ name: 'requestId', type: 'uint256' }]
   },
@@ -59,11 +64,24 @@ const MULTISIG_VIEM_ABI = [
   }
 ] as const;
 
+const requestCreatedEventInterface = new ethers.Interface([
+  'event RequestCreated(uint256 indexed requestId, uint256 indexed projectId, address indexed beneficiary, uint256 amount, string evidenceCid, uint256 createdAt, uint256 timeoutDeadline, uint8 requestMode, uint256 requiredApprovals, uint256 raisedRatioBpsAtCreation)'
+]);
+
+const logger = getLogger();
+
+const maximumTransferRetryCount = 5;
+const transferRetryDelayMilliseconds = [2000, 4000, 8000, 16000, 32000] as const;
+
 // ============ TYPES ============
+
 export type CreateDisbursementPayload = {
   projectId: string;
   amount: number;
+  usagePurpose: string;
   evidenceCid: string;
+  requestMode: 'NORMAL' | 'EMERGENCY';
+  emergencyReason?: string;
   beneficiaryBankAccount: {
     bankName: string;
     bankAccountNumber: string;
@@ -83,7 +101,12 @@ export type DisbursementResult = {
     accountHolderName: string;
     branchName?: string;
   };
+  requestMode: 'NORMAL' | 'EMERGENCY';
+  emergencyReason: string | null;
+  requiredApprovals: number;
+  raisedRatioBpsAtCreation: number;
   amount: number;
+  usagePurpose: string;
   evidenceCid: string;
   status: DisbursementStatus;
   approvals: Array<{
@@ -94,112 +117,102 @@ export type DisbursementResult = {
     comment?: string;
   }>;
   rejection: { signerRole: string; signerUserId: string; signerAddress: string; reason: string; rejectedAt: Date } | null;
+  timeoutDeadline: Date | null;
+  payosTransferId: string | null;
+  payosTransferStatus: string | null;
   createdAt: Date;
   updatedAt: Date;
   expiredAt: Date | null;
   completedAt: Date | null;
 };
 
-// ============ LOGGER & CACHE ============
-const logger = getLogger();
+export type DisbursementRequestSummary = {
+  id: string;
+  projectName: string;
+  organizationName: string;
+  amount: number;
+  requiredSignatures: number;
+  currentSignatures: number;
+  deadlineTimestamp: number;
+  usagePurpose: string;
+  ipfsCid: string;
+  fileName: string;
+  requestMode: 'NORMAL' | 'EMERGENCY';
+};
+
+type KernelClientContext = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  kernelClient: any;
+  smartAccountAddress: `0x${string}`;
+  effectiveUser: AuthUser;
+};
+
+type RequestCreatedEventData = {
+  onChainRequestId: number;
+  timeoutDeadline: Date;
+  requiredApprovals: number;
+  requestMode: 'NORMAL' | 'EMERGENCY';
+  raisedRatioBpsAtCreation: number;
+};
 
 // ============ HELPERS ============
 
-/**
- * Ham lay Kernel client cho user cu the.
- * Muc dich: giai ma owner key tu DB roi tao Kernel client de gui UserOperation thay user ký.
- * Quy tac: user phai co encryptedOwnerPrivateKey trong MongoDB — neu chua co thi auto tao.
- */
-async function getKernelClientForUser(user: AuthUser) {
-  if (!user.smartAccountOwnerEncryptedPrivateKey) {
-    // Ghi chú logic phức tạp: user cũ có thể chưa có Smart Account, goi ensureSmartAccountProvisioned tu authService.
-    // Import lazy để tránh circular dependency giữa disbursementService và authService.
-    const { ensureSmartAccountProvisioned } = await import('./authService');
-    const userAfterProvision = await ensureSmartAccountProvisioned(user);
-    if (!userAfterProvision.smartAccountOwnerEncryptedPrivateKey) {
-      throw new ApplicationError('Khong the khoi tao Smart Account cho nguoi dung nay.', 500, 'INTERNAL_ERROR');
-    }
-    return createKernelClientFromEncryptedOwnerKey(userAfterProvision.smartAccountOwnerEncryptedPrivateKey);
-  }
-  return createKernelClientFromEncryptedOwnerKey(user.smartAccountOwnerEncryptedPrivateKey);
+/** Hàm tạm dừng bất đồng bộ theo mili giây. Mục đích: dùng cho retry backoff của FR8. */
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
-/**
- * Ham lay contract multisig chi doc (read-only).
- * Muc dich: truy van trang thai request tren chain khong can ký.
- */
-function getReadOnlyMultisigContract() {
-  const rpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
-  const contractAddr = process.env.MULTISIG_DISBURSEMENT_ADDRESS?.trim() || '';
-  if (!rpcUrl || !contractAddr) {
-    throw new ApplicationError('Thieu cau hinh BLOCKCHAIN_RPC_URL hoac MULTISIG_DISBURSEMENT_ADDRESS.', 500, 'INTERNAL_ERROR');
-  }
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
-  return { provider, contractAddress: contractAddr, contract: new ethers.Contract(contractAddr, MULTISIG_CONTRACT_ABI_ETHER, provider) };
+/** Hàm tạo idempotency key cố định cho mỗi request. Mục đích: chống tạo lệnh chuyển khoản trùng lặp. */
+function buildTransferIdempotencyKey(requestId: string): string {
+  return `disbursement:${requestId}`;
 }
 
-/** Ham validate payload tao disbursement. Muc dich: chan du lieu sai chuan truoc khi goi contract. */
-function validateCreateDisbursementPayload(payload: CreateDisbursementPayload): void {
-  if (!payload.projectId?.trim()) {
-    throw new ApplicationError('ProjectId khong hop le.', 400, 'VALIDATION_ERROR');
-  }
-
-  if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
-    throw new ApplicationError('So tien rut phai lon hon 0.', 400, 'VALIDATION_ERROR');
-  }
-
-  if (!payload.evidenceCid?.trim()) {
-    throw new ApplicationError('CID minh chung su dung tien khong duoc trong.', 400, 'VALIDATION_ERROR');
-  }
-
-  if (!payload.beneficiaryBankAccount?.bankName?.trim()) {
-    throw new ApplicationError('Ten ngan hang khong hop le.', 400, 'VALIDATION_ERROR');
-  }
-
-  const accNumber = payload.beneficiaryBankAccount.bankAccountNumber?.trim() || '';
-  if (accNumber.length < 8 || accNumber.length > 20 || !/^\d+$/.test(accNumber)) {
-    throw new ApplicationError('So tai khoan phai la chu so, dai 8-20 ky tu.', 400, 'VALIDATION_ERROR');
-  }
-
-  if (!payload.beneficiaryBankAccount.accountHolderName?.trim()) {
-    throw new ApplicationError('Ten chu tai khoan khong hop le.', 400, 'VALIDATION_ERROR');
-  }
+/** Hàm ánh xạ role user sang signer role. Mục đích: thống nhất role lưu trong mảng approvals. */
+function mapSignerRole(userRole: string): 'ADMIN_SIGNER' | 'ORG_SIGNER' | 'REGULATORY_SIGNER' | null {
+  if (userRole === 'admin') return 'ADMIN_SIGNER';
+  if (userRole === 'organizations') return 'ORG_SIGNER';
+  if (userRole === 'regulatory') return 'REGULATORY_SIGNER';
+  return null;
 }
 
-/** Ham kiem tra quyen tao disbursement. Muc dich: dam bao chi org da KYC duoc phep tao request. */
-async function ensureDisbursementCreator(userId: string) {
-  const user = await findUserById(userId);
-  if (!user) {
-    throw new ApplicationError('Khong tim thay tai khoan nguoi dung.', 401, 'UNAUTHENTICATED');
-  }
-
-  if (user.role !== 'organizations') {
-    throw new ApplicationError('Chi to chuc tu thien duoc phep tao yeu cau rut tien.', 403, 'FORBIDDEN');
-  }
-
-  if (user.accountStatus !== 'ACTIVE') {
-    throw new ApplicationError('Tai khoan chua duoc kich hoat.', 403, 'FORBIDDEN');
-  }
-
-  return user;
+/** Hàm ánh xạ trạng thái on-chain sang trạng thái MongoDB. Mục đích: đồng bộ lifecycle FR7/FR8 giữa các tầng. */
+function mapOnChainStatusToDisbursementStatus(onChainStatus: number): DisbursementStatus {
+  if (onChainStatus === 1) return 'PENDING';
+  if (onChainStatus === 2) return 'APPROVED';
+  if (onChainStatus === 3) return 'EXECUTING';
+  if (onChainStatus === 4) return 'COMPLETED';
+  if (onChainStatus === 5) return 'REJECTED';
+  if (onChainStatus === 6) return 'CANCELLED';
+  if (onChainStatus === 7) return 'EXPIRED';
+  return 'PENDING';
 }
 
-/** Ham kiem tra quyen ky duyet. Muc dich: dam bao chi admin/org/regulatory moi duoc ky. */
-async function ensureDisbursementSigner(userId: string) {
-  const user = await findUserById(userId);
-  if (!user) {
-    throw new ApplicationError('Khong tim thay tai khoan nguoi dung.', 401, 'UNAUTHENTICATED');
-  }
-
-  const validRoles = ['admin', 'organizations', 'regulatory'];
-  if (!validRoles.includes(user.role)) {
-    throw new ApplicationError('Ban khong co quyen ky duyet yeu cau rut tien.', 403, 'FORBIDDEN');
-  }
-
-  return user;
+/** Hàm ánh xạ request mode sang giá trị uint8 của contract. Mục đích: encode đúng ABI khi gọi create request. */
+function mapRequestModeToContractValue(requestMode: 'NORMAL' | 'EMERGENCY'): number {
+  return requestMode === 'EMERGENCY' ? 1 : 0;
 }
 
-/** Ham map record thanh response. Muc dich: format du lieu tra ve cho API. */
+/** Hàm chuẩn hóa mã ngân hàng từ tên ngân hàng. Mục đích: đảm bảo payload transfer đạt định dạng ổn định. */
+function normalizeBankCode(bankName: string): string {
+  return bankName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 32);
+}
+
+/** Hàm chuyển provider transaction id về uint256. Mục đích: truyền tham số finalizeDisbursement đúng kiểu on-chain. */
+function mapProviderTransactionIdToUint256(providerTransactionId: string): bigint {
+  const normalizedProviderTransactionId = providerTransactionId.trim();
+  const digitsOnlyValue = normalizedProviderTransactionId.replace(/\D/g, '');
+
+  if (digitsOnlyValue.length > 0) {
+    return BigInt(digitsOnlyValue.slice(0, 60));
+  }
+
+  // Ghi chú logic phức tạp: fallback sang keccak256 để luôn có giá trị deterministic
+  // ngay cả khi cổng thanh toán trả transaction id dạng chuỗi ký tự không phải số.
+  const hashedValue = ethers.keccak256(ethers.toUtf8Bytes(normalizedProviderTransactionId || String(Date.now())));
+  return BigInt(hashedValue);
+}
+
+/** Hàm ánh xạ record MongoDB sang response API. Mục đích: trả dữ liệu nhất quán cho FE. */
 function mapDisbursementRecordToResult(record: DisbursementRecord): DisbursementResult {
   return {
     requestId: record.requestId,
@@ -207,11 +220,19 @@ function mapDisbursementRecordToResult(record: DisbursementRecord): Disbursement
     projectId: record.projectId,
     beneficiaryWalletAddress: record.beneficiaryWalletAddress,
     beneficiaryBankAccount: record.beneficiaryBankAccount,
+    requestMode: record.requestMode,
+    emergencyReason: record.emergencyReason,
+    requiredApprovals: record.requiredApprovals,
+    raisedRatioBpsAtCreation: record.raisedRatioBpsAtCreation,
     amount: record.amount,
+    usagePurpose: record.usagePurpose,
     evidenceCid: record.evidenceCid,
     status: record.status,
     approvals: record.approvals,
     rejection: record.rejection,
+    timeoutDeadline: record.timeoutDeadline,
+    payosTransferId: record.payosTransferId,
+    payosTransferStatus: record.payosTransferStatus,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     expiredAt: record.expiredAt,
@@ -219,328 +240,735 @@ function mapDisbursementRecordToResult(record: DisbursementRecord): Disbursement
   };
 }
 
-// ============ UC7.1: TAO YEU CAU RUT TIEN ============
+/** Hàm lấy contract multisig ở chế độ read-only. Mục đích: truy vấn trạng thái on-chain không cần chữ ký. */
+function getReadOnlyMultisigContract() {
+  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
+  const multisigContractAddress = process.env.MULTISIG_DISBURSEMENT_ADDRESS?.trim() || '';
 
-/**
- * Ham tao yeu cau rut tien (UC7.1).
- * Thuc hien: validate quyen, kiem tra so du, tao request on-chain, luu MongoDB.
- * Quy tac: Project da raised >= 50% goal, amount <= 80% raised, chi 1 request pending mỗi beneficiary.
- */
+  if (!blockchainRpcUrl || !multisigContractAddress) {
+    throw new ApplicationError('Thiếu cấu hình BLOCKCHAIN_RPC_URL hoặc MULTISIG_DISBURSEMENT_ADDRESS.', 500, 'INTERNAL_ERROR');
+  }
+
+  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const contract = new ethers.Contract(multisigContractAddress, multisigContractAbiEthers, provider);
+  return { provider, contractAddress: multisigContractAddress, contract };
+}
+
+/** Hàm lấy contract multisig có quyền ghi bằng ví admin hệ thống. Mục đích: finalize disbursement ở luồng FR8. */
+function getAdminWritableMultisigContract() {
+  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
+  const multisigContractAddress = process.env.MULTISIG_DISBURSEMENT_ADDRESS?.trim() || '';
+  const adminPrivateKey = process.env.DONATION_ADMIN_PRIVATE_KEY?.trim() || '';
+
+  if (!blockchainRpcUrl || !multisigContractAddress || !adminPrivateKey) {
+    throw new ApplicationError(
+      'Thiếu cấu hình blockchain cho finalize disbursement. Cần BLOCKCHAIN_RPC_URL, MULTISIG_DISBURSEMENT_ADDRESS, DONATION_ADMIN_PRIVATE_KEY.',
+      500,
+      'INTERNAL_ERROR'
+    );
+  }
+
+  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const adminSigner = new ethers.Wallet(adminPrivateKey, provider);
+  const contract = new ethers.Contract(multisigContractAddress, multisigContractAbiEthers, adminSigner);
+  return { provider, contractAddress: multisigContractAddress, contract };
+}
+
+/** Hàm parse event RequestCreated từ receipt. Mục đích: lấy requestId và policy động trả về bởi contract. */
+function parseRequestCreatedEvent(receiptLogs: readonly ethers.Log[]): RequestCreatedEventData {
+  for (const eventLog of receiptLogs) {
+    try {
+      const parsedEventLog = requestCreatedEventInterface.parseLog(eventLog);
+      if (!parsedEventLog || parsedEventLog.name !== 'RequestCreated') {
+        continue;
+      }
+
+      const parsedRequestMode = Number(parsedEventLog.args[7]);
+      return {
+        onChainRequestId: Number(parsedEventLog.args[0]),
+        timeoutDeadline: new Date(Number(parsedEventLog.args[6]) * 1000),
+        requestMode: parsedRequestMode === 1 ? 'EMERGENCY' : 'NORMAL',
+        requiredApprovals: Number(parsedEventLog.args[8]),
+        raisedRatioBpsAtCreation: Number(parsedEventLog.args[9])
+      };
+    } catch {
+      // Bỏ qua log không thuộc event RequestCreated.
+    }
+  }
+
+  throw new ApplicationError('Không thể đọc RequestCreated event từ receipt.', 502, 'INTERNAL_ERROR');
+}
+
+/** Hàm validate payload tạo request. Mục đích: chặn dữ liệu sai trước khi gọi blockchain. */
+function validateCreateDisbursementPayload(payload: CreateDisbursementPayload): void {
+  if (!payload.projectId?.trim()) {
+    throw new ApplicationError('ProjectId không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+    throw new ApplicationError('Số tiền rút phải lớn hơn 0.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!payload.usagePurpose?.trim()) {
+    throw new ApplicationError('Mục đích sử dụng tiền không được trống.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (payload.usagePurpose.trim().length < 10) {
+    throw new ApplicationError('Mục đích sử dụng tiền phải tối thiểu 10 ký tự.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!payload.evidenceCid?.trim()) {
+    throw new ApplicationError('CID minh chứng sử dụng tiền không được trống.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (payload.requestMode !== 'NORMAL' && payload.requestMode !== 'EMERGENCY') {
+    throw new ApplicationError('requestMode chỉ chấp nhận NORMAL hoặc EMERGENCY.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (payload.requestMode === 'EMERGENCY' && !payload.emergencyReason?.trim()) {
+    throw new ApplicationError('Chế độ EMERGENCY bắt buộc có emergencyReason.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!payload.beneficiaryBankAccount?.bankName?.trim()) {
+    throw new ApplicationError('Tên ngân hàng không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
+
+  const beneficiaryAccountNumber = payload.beneficiaryBankAccount.bankAccountNumber?.trim() || '';
+  if (beneficiaryAccountNumber.length < 8 || beneficiaryAccountNumber.length > 20 || !/^\d+$/.test(beneficiaryAccountNumber)) {
+    throw new ApplicationError('Số tài khoản phải là chuỗi số dài 8-20 ký tự.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!payload.beneficiaryBankAccount.accountHolderName?.trim()) {
+    throw new ApplicationError('Tên chủ tài khoản không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
+}
+
+/** Hàm kiểm tra quyền tạo disbursement. Mục đích: chỉ organization active mới được tạo request. */
+async function ensureDisbursementCreator(userId: string): Promise<AuthUser> {
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new ApplicationError('Không tìm thấy tài khoản người dùng.', 401, 'UNAUTHENTICATED');
+  }
+
+  if (user.role !== 'organizations') {
+    throw new ApplicationError('Chỉ tổ chức từ thiện được phép tạo yêu cầu rút tiền.', 403, 'FORBIDDEN');
+  }
+
+  if (user.accountStatus !== 'ACTIVE') {
+    throw new ApplicationError('Tài khoản chưa được kích hoạt.', 403, 'FORBIDDEN');
+  }
+
+  return user;
+}
+
+/** Hàm kiểm tra quyền ký duyệt disbursement. Mục đích: giới hạn signer hợp lệ theo FR7. */
+async function ensureDisbursementSigner(userId: string): Promise<AuthUser> {
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new ApplicationError('Không tìm thấy tài khoản người dùng.', 401, 'UNAUTHENTICATED');
+  }
+
+  const allowedRoleList = ['admin', 'organizations', 'regulatory'];
+  if (!allowedRoleList.includes(user.role)) {
+    throw new ApplicationError('Bạn không có quyền ký duyệt yêu cầu rút tiền.', 403, 'FORBIDDEN');
+  }
+
+  return user;
+}
+
+/** Hàm tạo kernel client từ khóa owner đã mã hóa. Mục đích: gửi UserOperation đúng Smart Account của user. */
+async function getKernelClientForUser(user: AuthUser) {
+  const encryptedOwnerPrivateKey = user.smartAccountOwnerEncryptedPrivateKey;
+  if (!encryptedOwnerPrivateKey) {
+    throw new ApplicationError('Tài khoản chưa được cấu hình Smart Account owner key.', 500, 'INTERNAL_ERROR');
+  }
+
+  try {
+    return await createKernelClientFromEncryptedOwnerKey(encryptedOwnerPrivateKey);
+  } catch (error) {
+    logger.error(`Không thể tạo Kernel client cho userId=${user.id}. error=${(error as Error)?.message}`);
+    throw new ApplicationError('Không thể khởi tạo Smart Account để ký giao dịch.', 500, 'INTERNAL_ERROR');
+  }
+}
+
+/** Hàm đồng bộ walletAddress của user với Smart Account address. Mục đích: tránh mismatch dẫn đến lỗi phân quyền on-chain. */
+async function syncUserWalletAddressWithKernelAccount(
+  user: AuthUser,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  kernelClient: any
+): Promise<KernelClientContext> {
+  const kernelClientAccount = (kernelClient as { account?: { address?: `0x${string}` } }).account;
+  const kernelAccountAddress = kernelClientAccount?.address;
+  if (!kernelAccountAddress) {
+    throw new ApplicationError('Không thể lấy Smart Account address để gửi giao dịch.', 500, 'INTERNAL_ERROR');
+  }
+
+  const normalizedKernelAccountAddress = kernelAccountAddress.toLowerCase() as `0x${string}`;
+  const normalizedUserWalletAddress = String(user.walletAddress || '').trim().toLowerCase();
+
+  if (!normalizedUserWalletAddress || normalizedUserWalletAddress === normalizedKernelAccountAddress) {
+    return {
+      kernelClient,
+      smartAccountAddress: normalizedKernelAccountAddress,
+      effectiveUser: {
+        ...user,
+        walletAddress: normalizedKernelAccountAddress
+      }
+    };
+  }
+
+  const syncedUser = await updateUser({
+    ...user,
+    walletAddress: normalizedKernelAccountAddress,
+    updatedAt: new Date()
+  });
+
+  logger.warn(`Đồng bộ walletAddress do SMART_ACCOUNT_MISMATCH. userId=${user.id} old=${normalizedUserWalletAddress} new=${normalizedKernelAccountAddress}`);
+
+  return {
+    kernelClient,
+    smartAccountAddress: normalizedKernelAccountAddress,
+    effectiveUser: syncedUser
+  };
+}
+
+/** Hàm tạo context Kernel client cho user. Mục đích: gom logic provision + sync địa chỉ ví vào một điểm dùng chung. */
+async function getKernelClientContextForUser(user: AuthUser): Promise<KernelClientContext> {
+  let userForKernelContext = user;
+
+  if (!user.smartAccountOwnerEncryptedPrivateKey) {
+    const { ensureSmartAccountProvisioned } = await import('./authService');
+    const userAfterProvision = await ensureSmartAccountProvisioned(user);
+    if (!userAfterProvision.smartAccountOwnerEncryptedPrivateKey) {
+      throw new ApplicationError('Không thể khởi tạo Smart Account cho người dùng này.', 500, 'INTERNAL_ERROR');
+    }
+
+    userForKernelContext = userAfterProvision;
+  }
+
+  const kernelClient = await getKernelClientForUser(userForKernelContext);
+  return syncUserWalletAddressWithKernelAccount(userForKernelContext, kernelClient);
+}
+
+/** Hàm bảo đảm organization có ORG_SIGNER_ROLE. Mục đích: ngăn lỗi AccessControl khi ký/khởi tạo request. */
+async function ensureOrganizationSignerRoleOnChain(organizationWalletAddress: string): Promise<void> {
+  try {
+    const { ensureOrganizationWalletOrgSignerRole } = await import('./organizationKycService');
+    const orgSignerResult = await ensureOrganizationWalletOrgSignerRole(organizationWalletAddress);
+    if (!orgSignerResult.wasAlreadyGranted) {
+      logger.info(`Đã auto-grant ORG_SIGNER_ROLE. walletAddress=${organizationWalletAddress} txHash=${orgSignerResult.transactionHash}`);
+    }
+  } catch (error) {
+    logger.error(`Không thể cấp ORG_SIGNER_ROLE cho organization. walletAddress=${organizationWalletAddress} error=${(error as Error)?.message}`);
+    throw new ApplicationError('Không thể cấp quyền giải ngân trên blockchain. Vui lòng liên hệ quản trị viên.', 502, 'INTERNAL_ERROR');
+  }
+}
+
+/** Hàm map lỗi blockchain sang lỗi nghiệp vụ. Mục đích: trả thông báo rõ ràng cho FE thay vì lỗi kỹ thuật mơ hồ. */
+function mapBlockchainErrorToApplicationError(error: unknown): ApplicationError | null {
+  const errorMessage = String((error as Error)?.message || '').toLowerCase();
+
+  if (errorMessage.includes('normalmoderequiresemergency') || errorMessage.includes('minimumraisednotmet')) {
+    return new ApplicationError('Dự án chưa đạt ngưỡng tạo yêu cầu NORMAL. Vui lòng dùng chế độ EMERGENCY hoặc chờ thêm quyên góp.', 409, 'MINIMUM_RAISED_NOT_MET');
+  }
+
+  if (errorMessage.includes('emergencyreasonrequired')) {
+    return new ApplicationError('Yêu cầu EMERGENCY bắt buộc có lý do khẩn cấp.', 400, 'VALIDATION_ERROR');
+  }
+
+  if (errorMessage.includes('duplicatebeneficiarypending') || errorMessage.includes('duplicateprojectpending')) {
+    return new ApplicationError('Đã tồn tại yêu cầu giải ngân đang chờ duyệt cho dự án hoặc tài khoản thụ hưởng này.', 409, 'CONFLICT');
+  }
+
+  if (errorMessage.includes('maxwithdrawalexceeded')) {
+    return new ApplicationError('Số tiền rút vượt quá hạn mức khả dụng theo chính sách reserve 20%.', 409, 'MAX_WITHDRAWAL_EXCEEDED');
+  }
+
+  if (errorMessage.includes('alreadysigned') || errorMessage.includes('rolealreadysigned')) {
+    return new ApplicationError('Bạn đã ký hoặc vai trò này đã được ký trước đó.', 409, 'ALREADY_SIGNED');
+  }
+
+  if (errorMessage.includes('invalidrequeststate')) {
+    return new ApplicationError('Yêu cầu không còn ở trạng thái hợp lệ để thực hiện thao tác này.', 409, 'INVALID_STATUS_TRANSITION');
+  }
+
+  return null;
+}
+
+/** Hàm gọi finalizeDisbursement on-chain. Mục đích: chốt trạng thái COMPLETED và burn token sau khi chuyển khoản thành công. */
+async function finalizeDisbursementOnChain(onChainRequestId: number, providerTransactionId: string): Promise<string> {
+  const { contract } = getAdminWritableMultisigContract();
+  const transactionIdAsUint256 = mapProviderTransactionIdToUint256(providerTransactionId);
+
+  const finalizeTransaction = await contract.finalizeDisbursement(BigInt(onChainRequestId), transactionIdAsUint256);
+  const finalizeReceipt = await finalizeTransaction.wait();
+
+  if (finalizeReceipt && Number(finalizeReceipt.status) !== 1) {
+    throw new Error(`Finalize disbursement thất bại. txHash=${finalizeTransaction.hash}`);
+  }
+
+  return String(finalizeTransaction.hash);
+}
+
+/** Hàm trigger auto-transfer FR8 theo requestId. Mục đích: thực thi chuyển khoản có idempotency và retry giới hạn. */
+async function triggerAutoTransferForApprovedRequest(requestId: string): Promise<void> {
+  const currentRecord = await findDisbursementByRequestId(requestId);
+  if (!currentRecord) {
+    return;
+  }
+
+  if (currentRecord.status !== 'APPROVED') {
+    return;
+  }
+
+  if (currentRecord.payosTransferStatus === 'SUCCESS') {
+    return;
+  }
+
+  const idempotencyKey = currentRecord.transferIdempotencyKey || buildTransferIdempotencyKey(currentRecord.requestId);
+  const processingRecord = await updateDisbursementByRequestIdWithCondition(
+    currentRecord.requestId,
+    {
+      status: 'APPROVED',
+      $or: [
+        { payosTransferStatus: null },
+        { payosTransferStatus: 'FAILED' },
+        { payosTransferStatus: 'MANUAL_REVIEW' }
+      ]
+    },
+    {
+      status: 'EXECUTING',
+      payosTransferStatus: 'PROCESSING',
+      transferIdempotencyKey: idempotencyKey,
+      payosTransferLastError: null
+    }
+  );
+
+  if (!processingRecord) {
+    return;
+  }
+
+  const bankCode = normalizeBankCode(processingRecord.beneficiaryBankAccount.bankName);
+  if (!bankCode) {
+    await updateDisbursementByRequestId(processingRecord.requestId, {
+      status: 'APPROVED',
+      payosTransferStatus: 'MANUAL_REVIEW',
+      payosTransferLastError: 'Không thể chuẩn hóa mã ngân hàng từ bankName.'
+    });
+    return;
+  }
+
+  for (let transferAttemptIndex = 0; transferAttemptIndex < maximumTransferRetryCount; transferAttemptIndex += 1) {
+    const transferAttemptCount = transferAttemptIndex + 1;
+
+    try {
+      await updateDisbursementByRequestId(processingRecord.requestId, {
+        payosTransferAttemptCount: transferAttemptCount,
+        payosTransferStatus: 'PROCESSING',
+        payosTransferLastError: null
+      });
+
+      const transferResult = await createPayosTransfer({
+        requestId: processingRecord.requestId,
+        amountVnd: processingRecord.amount,
+        bankCode,
+        bankAccountNumber: processingRecord.beneficiaryBankAccount.bankAccountNumber,
+        accountHolderName: processingRecord.beneficiaryBankAccount.accountHolderName,
+        description: `DISBURSEMENT-${processingRecord.requestId}`,
+        idempotencyKey
+      });
+
+      await updateDisbursementByRequestId(processingRecord.requestId, {
+        payosTransferId: transferResult.transferId,
+        payosTransferStatus: transferResult.transferStatus,
+        transferIdempotencyKey: idempotencyKey,
+        payosTransferLastError: null
+      });
+
+      if (transferResult.transferStatus !== 'SUCCESS') {
+        logger.info(`PayOS transfer đang xử lý. requestId=${processingRecord.requestId} transferId=${transferResult.transferId}`);
+        return;
+      }
+
+      const finalizeTransactionHash = await finalizeDisbursementOnChain(
+        processingRecord.onChainRequestId,
+        transferResult.providerTransactionId
+      );
+
+      await updateDisbursementByRequestId(processingRecord.requestId, {
+        status: 'COMPLETED',
+        payosTransferStatus: 'SUCCESS',
+        payosTransferId: transferResult.transferId,
+        transferIdempotencyKey: idempotencyKey,
+        finalizeTransactionHash,
+        transactionHash: finalizeTransactionHash,
+        completedAt: new Date(),
+        payosTransferLastError: null
+      });
+
+      logger.info(`Auto-transfer thành công và đã finalize on-chain. requestId=${processingRecord.requestId} transferId=${transferResult.transferId} txHash=${finalizeTransactionHash}`);
+      return;
+    } catch (error) {
+      const errorMessage = (error as Error)?.message || 'Không xác định';
+      logger.error(`Auto-transfer thất bại. requestId=${processingRecord.requestId} attempt=${transferAttemptCount} error=${errorMessage}`);
+
+      const isLastTransferAttempt = transferAttemptCount >= maximumTransferRetryCount;
+      if (isLastTransferAttempt) {
+        await updateDisbursementByRequestId(processingRecord.requestId, {
+          status: 'APPROVED',
+          payosTransferStatus: 'MANUAL_REVIEW',
+          payosTransferLastError: errorMessage,
+          transferIdempotencyKey: idempotencyKey
+        });
+        return;
+      }
+
+      const delayMilliseconds = transferRetryDelayMilliseconds[transferAttemptIndex] || 32000;
+      await sleep(delayMilliseconds);
+    }
+  }
+}
+
+// ============ UC7.1: CREATE REQUEST ============
+
+/** Hàm tạo yêu cầu rút tiền FR7. Mục đích: validate, ghi on-chain theo ABI mới và lưu record off-chain đồng bộ. */
 export async function createDisbursementRequest(
   userId: string,
   payload: CreateDisbursementPayload
 ): Promise<DisbursementResult> {
   validateCreateDisbursementPayload(payload);
   const user = await ensureDisbursementCreator(userId);
+  const {
+    kernelClient,
+    smartAccountAddress: organizationSmartAccountAddress,
+    effectiveUser
+  } = await getKernelClientContextForUser(user);
 
-  // Lay project tu MongoDB de check organization.
   const project = await findProjectById(payload.projectId);
   if (!project) {
-    throw new ApplicationError('Khong tim thay du an.', 404, 'NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy dự án.', 404, 'NOT_FOUND');
   }
 
   if (project.organizationId !== user.id) {
-    throw new ApplicationError('Ban khong co quyen tao yeu cau cho du an nay.', 403, 'FORBIDDEN');
+    throw new ApplicationError('Bạn không có quyền tạo yêu cầu cho dự án này.', 403, 'FORBIDDEN');
   }
 
   if (project.status !== 'ACTIVE') {
-    throw new ApplicationError('Du an phai o trang thai ACTIVE moi duoc rut tien.', 409, 'INVALID_STATUS_TRANSITION');
+    throw new ApplicationError('Dự án phải ở trạng thái ACTIVE mới được rút tiền.', 409, 'INVALID_STATUS_TRANSITION');
   }
 
-  // Kiem tra so du kha dung tren blockchain (chi doc, khong can ký).
   const { contractAddress, contract: readOnlyContract } = getReadOnlyMultisigContract();
   const onChainProjectId = Number(project.projectId);
-  let maxWithdrawable: bigint;
+
+  let maxWithdrawableAmountAsBigInt: bigint;
   try {
-    maxWithdrawable = await readOnlyContract.getMaxWithdrawableAmount(onChainProjectId);
+    maxWithdrawableAmountAsBigInt = await readOnlyContract.getMaxWithdrawableAmount(onChainProjectId);
   } catch {
-    throw new ApplicationError('Khong the lay so du kha dung tu blockchain.', 502, 'INTERNAL_ERROR');
+    throw new ApplicationError('Không thể lấy số dư khả dụng từ blockchain.', 502, 'INTERNAL_ERROR');
   }
 
-  if (maxWithdrawable === 0n) {
-    throw new ApplicationError('Du an chua co so du de rut tien.', 409, 'MINIMUM_RAISED_NOT_MET');
-  }
-
-  if (BigInt(payload.amount) > maxWithdrawable) {
+  if (BigInt(payload.amount) > maxWithdrawableAmountAsBigInt) {
     throw new ApplicationError(
-      `So tien vuot qua kha dung. Toi da: ${maxWithdrawable.toString()} token.`,
+      `Số tiền vượt quá khả dụng. Tối đa: ${maxWithdrawableAmountAsBigInt.toString()} token.`,
       409,
       'MAX_WITHDRAWAL_EXCEEDED'
     );
   }
 
-  // Kiem tra khong co request PENDING nao cho beneficiary nay.
-  const existingPending = await findPendingDisbursementByBeneficiary(user.walletAddress);
-  if (existingPending) {
+  const existingPendingRecord = await findPendingDisbursementByBeneficiary(organizationSmartAccountAddress);
+  if (existingPendingRecord) {
     throw new ApplicationError(
-      `Tai khoan da co yeu cau rut tien dang cho duyet (${existingPending.requestId}). Vui long cho xu ly hoan tat.`,
+      `Tài khoản đã có yêu cầu rút tiền đang chờ duyệt (${existingPendingRecord.requestId}). Vui lòng chờ xử lý hoàn tất.`,
       409,
       'DUPLICATE_BENEFICIARY_PENDING'
     );
   }
 
-  // Tao request on-chain bang Smart Account (ZeroDev Kernel) — truyen them projectGoalAmount de kiem tra 50% goal tren chain.
-  // Muc dich: user Org ký bằng Smart Account riêng của họ, không dùng EOA private key từ env.
-  let onChainRequestId: number | undefined;
-  try {
-    const kernelClient = await getKernelClientForUser(user);
-    const projectGoalAmount = BigInt(project.goalAmount);
+  await ensureOrganizationSignerRoleOnChain(organizationSmartAccountAddress);
 
-    const callData = encodeFunctionData({
-      abi: MULTISIG_VIEM_ABI,
+  let requestCreatedEventData: RequestCreatedEventData;
+  try {
+    const encodedCallData = encodeFunctionData({
+      abi: multisigContractAbiViem,
       functionName: 'createDisbursementRequest',
-      args: [BigInt(onChainProjectId), user.walletAddress as `0x${string}`, BigInt(payload.amount), projectGoalAmount, payload.evidenceCid]
+      args: [
+        BigInt(onChainProjectId),
+        organizationSmartAccountAddress,
+        BigInt(payload.amount),
+        BigInt(project.goalAmount),
+        payload.evidenceCid,
+        mapRequestModeToContractValue(payload.requestMode),
+        (payload.emergencyReason || '').trim()
+      ]
     });
 
-    // Kernel account client gui UserOperation thay user — gas do ZeroDev Paymaster sponsor.
-    // Cast qua unknown de bypass type checking cua Kernel client (khong the infer type cua account).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const txHash = await (kernelClient as any).sendTransaction({
+    const transactionHash = await (kernelClient as any).sendTransaction({
       to: contractAddress as `0x${string}`,
-      data: callData,
+      data: encodedCallData,
       value: BigInt(0)
     }) as `0x${string}`;
-    logger.info(`Disbursement request created on-chain via Smart Account. txHash=${txHash} user=${user.walletAddress}`);
 
-    // Lay requestId tu event tren chain.
     const rpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const txReceipt = await provider.waitForTransaction(txHash);
-    if (!txReceipt) {
-      throw new Error('Khong nhan duoc receipt tu blockchain.');
-    }
-    // Cast ABI qua unknown de bypass ethers Interface type constraint.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const iface = new ethers.Interface(MULTISIG_CONTRACT_ABI_ETHER as unknown as any);
-    for (const log of txReceipt.logs) {
-      const parsed = iface.parseLog(log);
-      if (parsed?.name === 'RequestCreated') {
-        onChainRequestId = Number(parsed.args[0]);
-        break;
-      }
+    const receipt = await provider.waitForTransaction(transactionHash);
+
+    if (!receipt) {
+      throw new Error('Không nhận được receipt từ blockchain.');
     }
 
-    if (!onChainRequestId) {
-      throw new Error('Khong the doc requestId tu event.');
-    }
+    requestCreatedEventData = parseRequestCreatedEvent(receipt.logs);
   } catch (error) {
-    logger.error(`Create disbursement on-chain failed. error=${(error as Error)?.message}`);
-    throw new ApplicationError('Khong the tao yeu cau rut tien tren blockchain.', 502, 'INTERNAL_ERROR');
+    const mappedError = mapBlockchainErrorToApplicationError(error);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    logger.error(`Tạo disbursement on-chain thất bại. error=${(error as Error)?.message}`);
+    throw new ApplicationError('Không thể tạo yêu cầu rút tiền trên blockchain.', 502, 'INTERNAL_ERROR');
   }
 
-  // Luu vao MongoDB.
-  const now = new Date();
-  const expiredAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7 ngay
-  const record: DisbursementRecord = {
+  const currentTimestamp = new Date();
+  const newRecord: DisbursementRecord = {
     requestId: `DS-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
-    onChainRequestId,
+    onChainRequestId: requestCreatedEventData.onChainRequestId,
     projectId: payload.projectId,
     onChainProjectId,
-    organizationId: user.id,
-    beneficiaryWalletAddress: user.walletAddress,
+    organizationId: effectiveUser.id,
+    requestMode: requestCreatedEventData.requestMode,
+    emergencyReason: requestCreatedEventData.requestMode === 'EMERGENCY' ? (payload.emergencyReason || '').trim() || null : null,
+    requiredApprovals: requestCreatedEventData.requiredApprovals,
+    raisedRatioBpsAtCreation: requestCreatedEventData.raisedRatioBpsAtCreation,
+    beneficiaryWalletAddress: organizationSmartAccountAddress,
     beneficiaryBankAccount: payload.beneficiaryBankAccount,
     amount: payload.amount,
+    usagePurpose: payload.usagePurpose.trim(),
     evidenceCid: payload.evidenceCid,
     status: 'PENDING',
     approvals: [],
     rejection: null,
+    timeoutDeadline: requestCreatedEventData.timeoutDeadline,
     payosTransferId: null,
     payosTransferStatus: null,
+    payosTransferAttemptCount: 0,
+    payosTransferLastError: null,
+    transferIdempotencyKey: null,
     transactionHash: null,
-    createdAt: now,
-    updatedAt: now,
-    expiredAt,
+    finalizeTransactionHash: null,
+    createdAt: currentTimestamp,
+    updatedAt: currentTimestamp,
+    expiredAt: requestCreatedEventData.timeoutDeadline,
     completedAt: null
   };
 
-  const createdRecord = await createDisbursementRecord(record);
-  logger.info(`Disbursement record saved to MongoDB. requestId=${createdRecord.requestId}`);
-
+  const createdRecord = await createDisbursementRecord(newRecord);
+  logger.info(`Đã tạo disbursement record. requestId=${createdRecord.requestId} onChainRequestId=${createdRecord.onChainRequestId}`);
   return mapDisbursementRecordToResult(createdRecord);
 }
 
-// ============ UC7.2: KY DUYET YEU CAU RUT TIEN ============
+// ============ UC7.2: SIGN REQUEST ============
 
-/**
- * Ham ky duyet request (UC7.2).
- * Quy tac: chi signer hợp lệ (admin/org/regulatory), chua ký, request dang PENDING.
- * Khi đủ 2/3 chu ky → tu dong Approved → trigger auto-execute.
- */
+/** Hàm ký duyệt request FR7. Mục đích: ghi chữ ký on-chain, đồng bộ trạng thái, và trigger auto-transfer FR8 khi đủ ngưỡng. */
 export async function signDisbursementRequest(
   userId: string,
   requestId: string,
   comment?: string
 ): Promise<DisbursementResult> {
   const user = await ensureDisbursementSigner(userId);
+  const {
+    kernelClient,
+    smartAccountAddress: signerSmartAccountAddress,
+    effectiveUser
+  } = await getKernelClientContextForUser(user);
+
+  if (effectiveUser.role === 'organizations') {
+    await ensureOrganizationSignerRoleOnChain(signerSmartAccountAddress);
+  }
 
   const record = await findDisbursementByRequestId(requestId);
   if (!record) {
-    throw new ApplicationError('Khong tim thay yeu cau rut tien.', 404, 'NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy yêu cầu rút tiền.', 404, 'NOT_FOUND');
   }
 
   if (record.status !== 'PENDING') {
-    throw new ApplicationError('Yeu cau khong con o trang thai cho duyet.', 409, 'INVALID_STATUS_TRANSITION');
+    throw new ApplicationError('Yêu cầu không còn ở trạng thái chờ duyệt.', 409, 'INVALID_STATUS_TRANSITION');
   }
 
-  // Kiem tra da het han chua (7 ngay).
-  if (record.expiredAt && new Date() > record.expiredAt) {
-    await updateDisbursementByRequestId(requestId, { status: 'EXPIRED', updatedAt: new Date() });
-    throw new ApplicationError('Yeu cau da het han (7 ngay khong du ky).', 409, 'REQUEST_EXPIRED');
+  if (record.timeoutDeadline && new Date() > record.timeoutDeadline) {
+    await updateDisbursementByRequestId(requestId, { status: 'EXPIRED' });
+    throw new ApplicationError('Yêu cầu đã hết hạn (7 ngày không đủ chữ ký).', 409, 'REQUEST_EXPIRED');
   }
 
-  // Xac dinh signer role tu user.role.
-  const signerRoleMap: Record<string, string> = {
-    admin: 'ADMIN_SIGNER',
-    organizations: 'ORG_SIGNER',
-    regulatory: 'REGULATORY_SIGNER'
-  };
-  const signerRole = signerRoleMap[user.role];
+  const signerRole = mapSignerRole(effectiveUser.role);
   if (!signerRole) {
-    throw new ApplicationError('Vai tro khong hop le de ky duyet.', 403, 'FORBIDDEN');
+    throw new ApplicationError('Vai trò không hợp lệ để ký duyệt.', 403, 'FORBIDDEN');
   }
 
-  // Kiem tra da ky chua.
-  const alreadySigned = record.approvals.some(a => a.signerRole === signerRole);
-  if (alreadySigned) {
-    throw new ApplicationError('Ban da ky duyet yeu cau nay.', 409, 'ALREADY_SIGNED');
+  const wasRoleAlreadySigned = record.approvals.some(approvalItem => approvalItem.signerRole === signerRole);
+  if (wasRoleAlreadySigned) {
+    throw new ApplicationError('Vai trò của bạn đã ký duyệt yêu cầu này.', 409, 'ALREADY_SIGNED');
   }
 
-  // Ky request on-chain bang Smart Account (ZeroDev Kernel) — user ký bằng Smart Account riêng của họ.
-  // Muc dich: thay the EOA private key bang encrypted owner key tu MongoDB.
-  const { contractAddress } = getReadOnlyMultisigContract();
-  let txHash: string;
+  const { contractAddress, contract: readOnlyContract } = getReadOnlyMultisigContract();
+  let transactionHash: string;
+
   try {
-    const kernelClient = await getKernelClientForUser(user);
-    const callData = encodeFunctionData({
-      abi: MULTISIG_VIEM_ABI,
+    const encodedCallData = encodeFunctionData({
+      abi: multisigContractAbiViem,
       functionName: 'signRequest',
       args: [BigInt(record.onChainRequestId)]
     });
-    // Cast qua any de bypass type checking cua Kernel client.
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    txHash = await (kernelClient as any).sendTransaction({
+    transactionHash = await (kernelClient as any).sendTransaction({
       to: contractAddress as `0x${string}`,
-      data: callData,
+      data: encodedCallData,
       value: BigInt(0)
     }) as string;
-    logger.info(`Disbursement request signed on-chain via Smart Account. txHash=${txHash} signer=${user.walletAddress} role=${signerRole}`);
 
-    // Cho receipt xac nhan.
     const rpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    await provider.waitForTransaction(txHash);
+    await provider.waitForTransaction(transactionHash);
   } catch (error) {
-    logger.error(`Sign disbursement on-chain failed. error=${(error as Error)?.message}`);
-    throw new ApplicationError('Khong the ky duyet tren blockchain.', 502, 'INTERNAL_ERROR');
+    const mappedError = mapBlockchainErrorToApplicationError(error);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    logger.error(`Ký duyệt disbursement on-chain thất bại. error=${(error as Error)?.message}`);
+    throw new ApplicationError('Không thể ký duyệt trên blockchain.', 502, 'INTERNAL_ERROR');
   }
 
-  // Cap nhat MongoDB.
-  const now = new Date();
+  let syncedStatus: DisbursementStatus = record.status;
+  let syncedRequiredApprovals = record.requiredApprovals;
+  let syncedTimeoutDeadline = record.timeoutDeadline;
+
+  try {
+    const onChainRequestData = await readOnlyContract.getRequest(record.onChainRequestId) as unknown[];
+    syncedStatus = mapOnChainStatusToDisbursementStatus(Number(onChainRequestData[5]));
+    syncedRequiredApprovals = Number(onChainRequestData[17]);
+    syncedTimeoutDeadline = new Date(Number(onChainRequestData[14]) * 1000);
+  } catch {
+    logger.warn(`Không thể đọc trạng thái on-chain sau khi ký. requestId=${requestId}`);
+  }
+
   const updatedApprovals = [
     ...record.approvals,
-    { signerRole: signerRole as 'ADMIN_SIGNER' | 'ORG_SIGNER' | 'REGULATORY_SIGNER', signerUserId: user.id, signerAddress: user.walletAddress, signedAt: now, comment }
-  ];
-
-  // Kiem tra trang thai moi tren chain de sync.
-  let newStatus: DisbursementStatus = record.status;
-  try {
-    const { contract: readOnlyContract } = getReadOnlyMultisigContract();
-    const [, , , , , , onChainStatus] = await readOnlyContract.getRequest(record.onChainRequestId) as [unknown, unknown, unknown, unknown, unknown, unknown, number, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown, unknown];
-    if (onChainStatus === 3) { // Approved
-      newStatus = 'APPROVED';
+    {
+      signerRole,
+      signerUserId: effectiveUser.id,
+      signerAddress: signerSmartAccountAddress,
+      signedAt: new Date(),
+      comment
     }
-  } catch {
-    logger.warn(`Could not read on-chain status after signing. requestId=${requestId}`);
-  }
+  ];
 
   const updatedRecord = await updateDisbursementByRequestId(requestId, {
     approvals: updatedApprovals,
-    status: newStatus,
-    transactionHash: txHash,
-    updatedAt: now
+    status: syncedStatus,
+    requiredApprovals: syncedRequiredApprovals,
+    timeoutDeadline: syncedTimeoutDeadline,
+    transactionHash
   });
 
   if (!updatedRecord) {
-    throw new ApplicationError('Khong the cap nhat trang thai ky duyet.', 500, 'INTERNAL_ERROR');
+    throw new ApplicationError('Không thể cập nhật trạng thái ký duyệt.', 500, 'INTERNAL_ERROR');
   }
 
-  logger.info(`Disbursement signed and updated in MongoDB. requestId=${requestId} approvalCount=${updatedApprovals.length}`);
+  if (updatedRecord.status === 'APPROVED') {
+    void triggerAutoTransferForApprovedRequest(updatedRecord.requestId)
+      .catch(error => {
+        logger.error(`Trigger auto-transfer thất bại. requestId=${updatedRecord.requestId} error=${(error as Error)?.message}`);
+      });
+  }
+
   return mapDisbursementRecordToResult(updatedRecord);
 }
 
-/**
- * Ham tu choi request.
- * Quy tac: chi signer hop le, reason toi thieu 5 ky tu, org khong duoc tu tu choi request cua minh.
- */
+/** Hàm từ chối request FR7. Mục đích: gọi reject on-chain và đồng bộ trạng thái REJECTED ở MongoDB. */
 export async function rejectDisbursementRequest(
   userId: string,
   requestId: string,
   reason: string
 ): Promise<DisbursementResult> {
   const user = await ensureDisbursementSigner(userId);
+  const {
+    kernelClient,
+    smartAccountAddress: signerSmartAccountAddress,
+    effectiveUser
+  } = await getKernelClientContextForUser(user);
+
+  if (effectiveUser.role === 'organizations') {
+    await ensureOrganizationSignerRoleOnChain(signerSmartAccountAddress);
+  }
 
   if (!reason || reason.trim().length < 5) {
-    throw new ApplicationError('Ly do tu choi phai toi thieu 5 ky tu.', 400, 'VALIDATION_ERROR');
+    throw new ApplicationError('Lý do từ chối phải tối thiểu 5 ký tự.', 400, 'VALIDATION_ERROR');
   }
 
   const record = await findDisbursementByRequestId(requestId);
   if (!record) {
-    throw new ApplicationError('Khong tim thay yeu cau rut tien.', 404, 'NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy yêu cầu rút tiền.', 404, 'NOT_FOUND');
   }
 
   if (record.status !== 'PENDING') {
-    throw new ApplicationError('Yeu cau khong con o trang thai cho duyet.', 409, 'INVALID_STATUS_TRANSITION');
+    throw new ApplicationError('Yêu cầu không còn ở trạng thái chờ duyệt.', 409, 'INVALID_STATUS_TRANSITION');
   }
 
-  const signerRoleMap: Record<string, string> = {
-    admin: 'ADMIN_SIGNER',
-    organizations: 'ORG_SIGNER',
-    regulatory: 'REGULATORY_SIGNER'
-  };
-  const signerRole = signerRoleMap[user.role];
-
-  // Org khong duoc tu tu choi request cua minh.
-  if (user.role === 'organizations' && record.organizationId === user.id) {
-    throw new ApplicationError('To chuc khong duoc tu tu choi yeu cau rut tien cua minh.', 403, 'FORBIDDEN');
+  if (effectiveUser.role === 'organizations' && record.organizationId === effectiveUser.id) {
+    throw new ApplicationError('Tổ chức không được tự từ chối yêu cầu rút tiền của chính mình.', 403, 'FORBIDDEN');
   }
 
-  // Gui reject len chain bang Smart Account (ZeroDev Kernel).
+  const signerRole = mapSignerRole(effectiveUser.role);
+  if (!signerRole) {
+    throw new ApplicationError('Vai trò không hợp lệ để từ chối yêu cầu.', 403, 'FORBIDDEN');
+  }
+
   const { contractAddress } = getReadOnlyMultisigContract();
-  let txHash: string;
+  let transactionHash: string;
   try {
-    const kernelClient = await getKernelClientForUser(user);
-    const callData = encodeFunctionData({
-      abi: MULTISIG_VIEM_ABI,
+    const encodedCallData = encodeFunctionData({
+      abi: multisigContractAbiViem,
       functionName: 'rejectRequest',
       args: [BigInt(record.onChainRequestId), reason.trim()]
     });
-    // Cast qua any de bypass type checking cua Kernel client.
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    txHash = await (kernelClient as any).sendTransaction({
+    transactionHash = await (kernelClient as any).sendTransaction({
       to: contractAddress as `0x${string}`,
-      data: callData,
+      data: encodedCallData,
       value: BigInt(0)
     }) as string;
-    logger.info(`Disbursement rejected on-chain via Smart Account. txHash=${txHash} reason=${reason}`);
 
-    // Cho receipt xac nhan.
     const rpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    await provider.waitForTransaction(txHash);
+    await provider.waitForTransaction(transactionHash);
   } catch (error) {
-    logger.error(`Reject disbursement on-chain failed. error=${(error as Error)?.message}`);
-    throw new ApplicationError('Khong the tu choi tren blockchain.', 502, 'INTERNAL_ERROR');
+    const mappedError = mapBlockchainErrorToApplicationError(error);
+    if (mappedError) {
+      throw mappedError;
+    }
+
+    logger.error(`Từ chối disbursement on-chain thất bại. error=${(error as Error)?.message}`);
+    throw new ApplicationError('Không thể từ chối trên blockchain.', 502, 'INTERNAL_ERROR');
   }
 
   const updatedRecord = await updateDisbursementByRequestId(requestId, {
     status: 'REJECTED',
-    rejection: { signerRole, signerUserId: user.id, signerAddress: user.walletAddress, reason: reason.trim(), rejectedAt: new Date() },
-    transactionHash: txHash,
-    updatedAt: new Date()
+    rejection: {
+      signerRole,
+      signerUserId: effectiveUser.id,
+      signerAddress: signerSmartAccountAddress,
+      reason: reason.trim(),
+      rejectedAt: new Date()
+    },
+    transactionHash,
+    payosTransferStatus: null,
+    payosTransferLastError: null
   });
 
   if (!updatedRecord) {
-    throw new ApplicationError('Khong the cap nhat trang thai tu choi.', 500, 'INTERNAL_ERROR');
+    throw new ApplicationError('Không thể cập nhật trạng thái từ chối.', 500, 'INTERNAL_ERROR');
   }
 
   return mapDisbursementRecordToResult(updatedRecord);
@@ -548,56 +976,90 @@ export async function rejectDisbursementRequest(
 
 // ============ QUERY FUNCTIONS ============
 
-/** Ham lay danh sach yeu cau cua to chuc. Muc dich: trang quan ly giai ngan cua org. */
+/** Hàm lấy danh sách yêu cầu của tổ chức. Mục đích: cấp dữ liệu thật cho tab quản lý giải ngân phía organization. */
 export async function getDisbursementsForOrganization(userId: string): Promise<DisbursementResult[]> {
   const user = await ensureDisbursementCreator(userId);
-  const records = await findDisbursementsByOrganizationId(user.id);
-  return records.map(mapDisbursementRecordToResult);
+  const recordList = await findDisbursementsByOrganizationId(user.id);
+  return recordList.map(mapDisbursementRecordToResult);
 }
 
-/** Ham lay danh sach yeu cau cho ky duyet. Muc dich: dashboard ky duyet cho admin/regulatory. */
+/** Hàm lấy danh sách chờ ký duyệt. Mục đích: cấp dữ liệu thật cho dashboard admin/regulatory. */
 export async function getDisbursementsForReview(userId: string): Promise<DisbursementResult[]> {
   await ensureDisbursementSigner(userId);
-  const records = await findDisbursementsByStatus('PENDING');
-  return records.map(mapDisbursementRecordToResult);
+  const recordList = await findDisbursementsByStatus('PENDING');
+  return recordList.map(mapDisbursementRecordToResult);
 }
 
-/** Ham lay chi tiet yeu cau. Muc dich: trang chi tiet request. */
+/** Hàm lấy summary cho dashboard ký duyệt. Mục đích: FE /admin và /regulatory-bodies hiển thị bảng urgent không dùng mock. */
+export async function getDisbursementRequestSummaries(userId: string): Promise<DisbursementRequestSummary[]> {
+  await ensureDisbursementSigner(userId);
+  const pendingRecordList = await findDisbursementsByStatus('PENDING');
+
+  const summaryList = await Promise.all(pendingRecordList.map(async record => {
+    const [project, organizationUser] = await Promise.all([
+      findProjectById(record.projectId),
+      findUserById(record.organizationId)
+    ]);
+
+    const deadlineDate = record.timeoutDeadline || record.expiredAt || new Date(record.createdAt.getTime() + (7 * 24 * 60 * 60 * 1000));
+    const firstEvidenceCid = record.evidenceCid.split(',').map(cid => cid.trim()).find(cid => cid.length > 0) || '';
+
+    return {
+      id: record.requestId,
+      projectName: project?.name || record.projectId,
+      organizationName: organizationUser?.organizationName || organizationUser?.fullName || record.organizationId,
+      amount: record.amount,
+      requiredSignatures: record.requiredApprovals,
+      currentSignatures: record.approvals.length,
+      deadlineTimestamp: deadlineDate.getTime(),
+      usagePurpose: record.usagePurpose,
+      ipfsCid: firstEvidenceCid,
+      fileName: 'Tài liệu minh chứng giải ngân',
+      requestMode: record.requestMode
+    };
+  }));
+
+  return summaryList;
+}
+
+/** Hàm lấy chi tiết request. Mục đích: cấp dữ liệu thật cho drawer chi tiết ký duyệt. */
 export async function getDisbursementDetail(userId: string, requestId: string): Promise<DisbursementResult> {
   await ensureDisbursementSigner(userId);
   const record = await findDisbursementByRequestId(requestId);
+
   if (!record) {
-    throw new ApplicationError('Khong tim thay yeu cau rut tien.', 404, 'NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy yêu cầu rút tiền.', 404, 'NOT_FOUND');
   }
+
   return mapDisbursementRecordToResult(record);
 }
 
-/** Ham lay danh sach yeu cau theo project. Muc dich: trang chi tiet du an. */
+/** Hàm lấy lịch sử theo project. Mục đích: hỗ trợ trang chi tiết dự án hiển thị các lần giải ngân thật. */
 export async function getDisbursementsByProject(projectId: string): Promise<DisbursementResult[]> {
-  const records = await findDisbursementsByProjectId(projectId);
-  return records.map(mapDisbursementRecordToResult);
+  const recordList = await findDisbursementsByProjectId(projectId);
+  return recordList.map(mapDisbursementRecordToResult);
 }
 
-/** Ham lay so du kha dung cua du an. Muc dich: hien thi max withdrawal cho org. */
+/** Hàm lấy hạn mức rút tối đa. Mục đích: FE hiển thị rule reserve 20% đúng dữ liệu blockchain. */
 export async function getMaxWithdrawableAmount(projectId: string): Promise<{ projectId: string; maxAmount: string; reserve: string }> {
   const project = await findProjectById(projectId);
   if (!project) {
-    throw new ApplicationError('Khong tim thay du an.', 404, 'NOT_FOUND');
+    throw new ApplicationError('Không tìm thấy dự án.', 404, 'NOT_FOUND');
   }
 
   const { contract: readOnlyContract } = getReadOnlyMultisigContract();
   const onChainProjectId = Number(project.projectId);
 
-  let maxAmount: bigint;
+  let maxAmountAsBigInt: bigint;
   try {
-    maxAmount = await readOnlyContract.getMaxWithdrawableAmount(onChainProjectId);
+    maxAmountAsBigInt = await readOnlyContract.getMaxWithdrawableAmount(onChainProjectId);
   } catch {
-    throw new ApplicationError('Khong the lay so du kha dung.', 502, 'INTERNAL_ERROR');
+    throw new ApplicationError('Không thể lấy số dư khả dụng.', 502, 'INTERNAL_ERROR');
   }
 
   return {
     projectId,
-    maxAmount: maxAmount.toString(),
+    maxAmount: maxAmountAsBigInt.toString(),
     reserve: '20%'
   };
 }

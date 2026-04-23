@@ -2,15 +2,14 @@ import type { Metadata } from 'next';
 import RegulatoryBodiesPageClientTailwind from '../components/regulatoryBodies/RegulatoryBodiesPageClientTailwind';
 
 export const metadata: Metadata = {
-  title: 'DCP - Cơ quan Giám sát',
-  description: 'Trang Cơ quan giám sát (Regulatory Bodies) với dữ liệu giả lập để thao tác UI.'
+  title: 'DCP - Cơ quan giám sát',
+  description: 'Trang Cơ quan giám sát sử dụng dữ liệu thật từ backend cho các luồng kiểm duyệt.'
 };
 
 /**
  * Hàm trang Cơ quan giám sát.
- * Mục đích: render giao diện Regulatory Bodies full-screen bằng component cô lập, không ảnh hưởng các trang khác.
+ * Mục đích: hiển thị giao diện Cơ quan giám sát toàn màn hình bằng component cô lập, không ảnh hưởng các trang khác.
  */
 export default function RegulatoryBodiesPage() {
   return <RegulatoryBodiesPageClientTailwind />;
 }
-

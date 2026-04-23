@@ -69,6 +69,35 @@ const HoneycombOverlay = () => (
  * Hàm trang đăng nhập.
  * Mục đích: hiển thị giao diện đăng nhập theo mẫu DCP.
  */
+
+/** Hàm chuẩn hóa role để mapping điều hướng ổn định giữa dữ liệu role mới và legacy. */
+function normalizeUserRole(userRoleValue: string | undefined | null): string {
+  if (!userRoleValue) {
+    return '';
+  }
+
+  return userRoleValue.trim().toLowerCase().replace(/[\s_-]+/g, '');
+}
+
+/** Hàm ánh xạ role sang đường dẫn sau đăng nhập để không rơi về trang chủ sai ngữ cảnh. */
+function resolvePostLoginRedirectPath(userRoleValue: string | undefined | null): string {
+  const normalizedUserRole = normalizeUserRole(userRoleValue);
+
+  if (normalizedUserRole === 'regulatory' || normalizedUserRole === 'regulatorybody' || normalizedUserRole === 'regulatorybodies') {
+    return '/regulatory-bodies';
+  }
+
+  if (normalizedUserRole === 'organization' || normalizedUserRole === 'organizations') {
+    return '/organizations';
+  }
+
+  if (normalizedUserRole === 'admin' || normalizedUserRole === 'systemadmin') {
+    return '/admin';
+  }
+
+  return '/';
+}
+
 export default function LoginPage() {
   const [isInfoCollapsed, setIsInfoCollapsed] = useState(false);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
@@ -215,15 +244,7 @@ export default function LoginPage() {
         setIsSuccessVisible(true);
 
         // Ghi chú logic phức tạp: điều hướng theo role để mỗi nhóm người dùng vào đúng màn hình nghiệp vụ ngay sau đăng nhập.
-        const userRole = userData?.role;
-        const redirectPath =
-          userRole === 'regulatory'
-            ? '/regulatory-bodies'
-            : userRole === 'organizations'
-              ? '/organizations'
-              : userRole === 'admin'
-              ? '/admin'
-                : '/';
+        const redirectPath = resolvePostLoginRedirectPath(userData?.role);
         router.push(redirectPath);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';

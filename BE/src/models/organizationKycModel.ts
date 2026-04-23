@@ -169,6 +169,14 @@ export async function findPendingKycSubmissions(): Promise<OrganizationKycSubmis
 }
 
 /**
+ * Hàm đếm tổng số hồ sơ KYC đang chờ duyệt.
+ * Mục đích: trả metric tổng quan hệ thống cho trang admin mà không cần dùng mock data.
+ */
+export async function countPendingKycSubmissions(): Promise<number> {
+  return OrganizationKycSubmissionModel.countDocuments({ status: 'PENDING_REVIEW' }).exec();
+}
+
+/**
  * Hàm tìm hồ sơ KYC theo submissionId.
  * Mục đích: lấy đúng bản ghi để xử lý phê duyệt hoặc từ chối.
  */
@@ -233,4 +241,3 @@ export async function updateOrganizationKycSubmissionReview(
 
   return updatedSubmission ? (updatedSubmission.toObject() as OrganizationKycSubmission) : null;
 }
-

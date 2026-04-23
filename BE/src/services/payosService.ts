@@ -13,6 +13,23 @@ type CreatePaymentLinkResult = {
   orderCode: string;
 };
 
+export type CreatePayosTransferInput = {
+  requestId: string;
+  amountVnd: number;
+  bankCode: string;
+  bankAccountNumber: string;
+  accountHolderName: string;
+  description: string;
+  idempotencyKey: string;
+};
+
+export type CreatePayosTransferResult = {
+  transferId: string;
+  providerTransactionId: string;
+  transferStatus: 'PROCESSING' | 'SUCCESS' | 'FAILED';
+  rawPayload: unknown;
+};
+
 /**
  * Hàm đọc checksum key chính của PayOS từ biến môi trường.
  * Mục đích: dùng cho bước ký request tạo payment link.
@@ -147,6 +164,122 @@ export async function createPayosPaymentLink(input: CreatePaymentLinkInput): Pro
 }
 
 /**
+ * Hàm chuyển đổi trạng thái transfer thô từ PayOS về trạng thái chuẩn nội bộ.
+ * Mục đích: tránh lệ thuộc chặt vào một định dạng status duy nhất từ cổng thanh toán.
+ */
+function mapPayosTransferStatus(statusValue: string): 'PROCESSING' | 'SUCCESS' | 'FAILED' {
+  const normalizedStatusValue = statusValue.trim().toUpperCase();
+
+  if (['SUCCESS', 'COMPLETED', 'PAID', 'DONE'].includes(normalizedStatusValue)) {
+    return 'SUCCESS';
+  }
+
+  if (['FAILED', 'ERROR', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(normalizedStatusValue)) {
+    return 'FAILED';
+  }
+
+  return 'PROCESSING';
+}
+
+/**
+ * Hàm tạo lệnh chuyển khoản ngân hàng qua PayOS cho luồng FR8.
+ * Mục đích: thực thi auto-transfer có idempotency key để chống gửi trùng giao dịch.
+ */
+export async function createPayosTransfer(input: CreatePayosTransferInput): Promise<CreatePayosTransferResult> {
+  const clientId = process.env.PAYOS_CLIENT_ID;
+  const apiKey = process.env.PAYOS_API_KEY;
+
+  if (!clientId || !apiKey) {
+    throw new Error('Thiếu cấu hình PayOS transfer. Kiểm tra PAYOS_CLIENT_ID và PAYOS_API_KEY.');
+  }
+
+  const transferEndpointUrl = String(process.env.PAYOS_TRANSFER_API_URL || 'https://api-merchant.payos.vn/v1/transfers').trim();
+  const transferTimeoutMilliseconds = Number(process.env.PAYOS_TRANSFER_TIMEOUT_MS || 30000);
+
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), transferTimeoutMilliseconds);
+
+  try {
+    const transferRequestPayload = {
+      requestId: input.requestId,
+      accountNumber: input.bankAccountNumber,
+      bankCode: input.bankCode,
+      accountHolderName: input.accountHolderName,
+      amount: input.amountVnd,
+      description: input.description,
+      idempotencyKey: input.idempotencyKey
+    };
+
+    const response = await fetch(transferEndpointUrl, {
+      method: 'POST',
+      headers: {
+        'x-client-id': clientId,
+        'x-api-key': apiKey,
+        'x-idempotency-key': input.idempotencyKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(transferRequestPayload),
+      signal: abortController.signal
+    });
+
+    const responseText = await response.text();
+    let responsePayload: unknown = null;
+    try {
+      responsePayload = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      responsePayload = responseText;
+    }
+
+    if (!response.ok) {
+      throw new Error(`PayOS transfer thất bại: ${response.status} ${responseText}`);
+    }
+
+    const normalizedPayload = (responsePayload || {}) as {
+      code?: string | number;
+      status?: string;
+      data?: {
+        transferId?: string | number;
+        id?: string | number;
+        transactionId?: string | number;
+        bankReferenceNumber?: string | number;
+        referenceNumber?: string | number;
+        status?: string;
+      };
+    };
+
+    const transferId = String(
+      normalizedPayload.data?.transferId
+      || normalizedPayload.data?.id
+      || normalizedPayload.data?.transactionId
+      || input.idempotencyKey
+    );
+
+    const providerTransactionId = String(
+      normalizedPayload.data?.transactionId
+      || normalizedPayload.data?.bankReferenceNumber
+      || normalizedPayload.data?.referenceNumber
+      || transferId
+    );
+
+    const rawTransferStatus = String(
+      normalizedPayload.data?.status
+      || normalizedPayload.status
+      || normalizedPayload.code
+      || ''
+    );
+
+    return {
+      transferId,
+      providerTransactionId,
+      transferStatus: mapPayosTransferStatus(rawTransferStatus),
+      rawPayload: responsePayload
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+/**
  * Hàm chuẩn hóa value về chuỗi ký checksum ổn định.
  * Mục đích: xử lý đúng object/array lồng nhau khi webhook có cấu trúc data phức tạp.
  */
@@ -231,4 +364,3 @@ export function verifyPayosWebhookChecksum(data: Record<string, unknown>, checks
 
   return false;
 }
-

@@ -9,8 +9,9 @@ import {DcpDonationRanking} from "./DcpDonationRanking.sol";
 
 /**
  * @title MultisigDisbursement
- * @notice Hop dong giai ngan da chu ky 2/3 tu 3 vai tro: Admin he thong,
+ * @notice Hop dong giai ngan da chu ky tu 3 vai tro: Admin he thong,
  *         Dai dien to chuc tu thien, Co quan giam sat.
+ *         Chinh sach chu ky dong theo requestMode va ty le raised/goal.
  *         Chi rut duoc 80% tong raised, timeout 7 ngay, evidence bat buoc.
  *         Tuong tac voi DcpCharityToken (burn token) va DcpDonationRanking (doc so du).
  */
@@ -22,7 +23,11 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
     bytes32 public constant REGULATORY_SIGNER_ROLE = keccak256("REGULATORY_SIGNER_ROLE");
 
     // ============ CONSTANTS ============
-    uint256 public constant REQUIRED_APPROVALS     = 2;
+    uint256 public constant BASIS_POINTS_DENOMINATOR = 10000;
+    uint256 public constant MIN_NORMAL_RAISED_BPS    = 2000; // 20%
+    uint256 public constant FAST_TRACK_RAISED_BPS    = 5000; // 50%
+    uint256 public constant APPROVALS_TWO_OF_THREE   = 2;
+    uint256 public constant APPROVALS_THREE_OF_THREE = 3;
     uint256 public constant WITHDRAWAL_RESERVE_BPS = 2000; // 20% reserve -> max 80% withdrawal
     uint256 public constant TIMEOUT_SECONDS        = 7 days;
     uint256 public constant MIN_SIGNERS_PER_ROLE   = 1;
@@ -39,10 +44,16 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         uint256 projectId;
         address beneficiaryAddress;
         uint256 amount;
+        RequestMode requestMode;
+        uint256 requiredApprovals;
+        uint256 raisedRatioBpsAtCreation;
         string evidenceCid;           // IPFS CID cua bang chung su dung tien
         RequestStatus status;
         uint256 approvalCount;
         mapping(address => bool) hasSigned;
+        bool adminRoleSigned;
+        bool orgRoleSigned;
+        bool regulatoryRoleSigned;
         address[3] signedSigners;     // Chi luu 3 signer dau tien (dung voi 1 signer moi role)
         uint256 signedCount;
         uint256 createdAt;
@@ -64,6 +75,11 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         Expired
     }
 
+    enum RequestMode {
+        Normal,
+        Emergency
+    }
+
     /// @notice Struct tra ve cac truong value types cua yeu cau.
     struct RequestData {
         bool exists;
@@ -82,6 +98,12 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         bool regulatorySigned;
         uint256 timeoutDeadline;
         uint256 maxWithdrawable;
+        uint8 requestMode;
+        uint256 requiredApprovals;
+        uint256 raisedRatioBpsAtCreation;
+        bool adminRoleSignatureCollected;
+        bool orgRoleSignatureCollected;
+        bool regulatoryRoleSignatureCollected;
     }
 
     struct RequestStrings {
@@ -99,13 +121,18 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
     // ============ ERRORS ============
     error InvalidAddress();
     error InvalidProjectId();
+    error InvalidProjectGoalAmount();
     error InvalidAmount();
     error RequestNotFound();
     error InvalidRequestState();
     error MaxWithdrawalExceeded(uint256 requested, uint256 maxAllowed);
     error MinimumRaisedNotMet();
+    error NormalModeRequiresEmergency();
+    error InvalidRequestMode();
+    error EmergencyReasonRequired();
     error EvidenceRequired();
     error AlreadySigned();
+    error RoleAlreadySigned();
     error InvalidSignerRole();
     error InsufficientSignatures();
     error RequestNotExpired();
@@ -124,7 +151,10 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         uint256 amount,
         string evidenceCid,
         uint256 createdAt,
-        uint256 timeoutDeadline
+        uint256 timeoutDeadline,
+        uint8 requestMode,
+        uint256 requiredApprovals,
+        uint256 raisedRatioBpsAtCreation
     );
     event RequestStatusChanged(
         uint256 indexed requestId,
@@ -211,6 +241,8 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
      * @param amount So token muon rut.
      * @param projectGoalAmount Muc tieu cua du an (tu MongoDB) de kiem tra 50% goal.
      * @param evidenceCid CID IPFS cua bang chung su dung tien.
+     * @param requestMode Che do tao request: 0 = Normal, 1 = Emergency.
+     * @param emergencyReason Ly do khan cap, bat buoc khi requestMode la Emergency.
      * @return requestId Ma yeu cau giai ngan.
      */
     function createDisbursementRequest(
@@ -218,12 +250,21 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         address beneficiary,
         uint256 amount,
         uint256 projectGoalAmount,
-        string calldata evidenceCid
+        string calldata evidenceCid,
+        uint8 requestMode,
+        string calldata emergencyReason
     ) external onlyRole(ORG_SIGNER_ROLE) nonReentrant whenNotPaused returns (uint256 requestId) {
         if (projectId == 0) revert InvalidProjectId();
         if (beneficiary == address(0)) revert InvalidAddress();
         if (amount == 0) revert InvalidAmount();
+        if (projectGoalAmount == 0) revert InvalidProjectGoalAmount();
         if (bytes(evidenceCid).length == 0) revert EvidenceRequired();
+        if (requestMode > uint8(RequestMode.Emergency)) revert InvalidRequestMode();
+
+        RequestMode resolvedMode = RequestMode(requestMode);
+        if (resolvedMode == RequestMode.Emergency && bytes(emergencyReason).length == 0) {
+            revert EmergencyReasonRequired();
+        }
 
         // Kiem tra khong co request pending cua cung beneficiary.
         uint256 existingBeneficiary = pendingRequestsByBeneficiary[beneficiary];
@@ -239,13 +280,21 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
 
         // Lay snapshot va kiem tra du an ton tai.
         DcpDonationRanking.ProjectSnapshot memory snapshot = donationRanking.getProjectSnapshot(projectId);
-        if (!snapshot.exists || snapshot.totalDonationAmount == 0) revert MinimumRaisedNotMet();
+        if (!snapshot.exists) revert MinimumRaisedNotMet();
 
-        // Kiem tra da dat 50% goal theo SADD UC7.1.
-        if (snapshot.totalDonationAmount < (projectGoalAmount * 50) / 100) revert MinimumRaisedNotMet();
+        uint256 raisedRatioBpsAtCreation = _calculateRaisedRatioBps(
+            snapshot.totalDonationAmount,
+            projectGoalAmount
+        );
+        uint256 requiredApprovals = _resolveRequiredApprovals(
+            resolvedMode,
+            raisedRatioBpsAtCreation
+        );
 
         // Tinh max withdrawable: 80% cua totalRaised.
-        uint256 maxBase = (snapshot.totalDonationAmount * (10000 - WITHDRAWAL_RESERVE_BPS)) / 10000;
+        uint256 maxBase =
+            (snapshot.totalDonationAmount * (BASIS_POINTS_DENOMINATOR - WITHDRAWAL_RESERVE_BPS)) /
+            BASIS_POINTS_DENOMINATOR;
         if (amount > maxBase) revert MaxWithdrawalExceeded(amount, maxBase);
 
         // Tao request moi.
@@ -256,6 +305,9 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         req.projectId           = projectId;
         req.beneficiaryAddress  = beneficiary;
         req.amount              = amount;
+        req.requestMode         = resolvedMode;
+        req.requiredApprovals   = requiredApprovals;
+        req.raisedRatioBpsAtCreation = raisedRatioBpsAtCreation;
         req.evidenceCid         = evidenceCid;
         req.status              = RequestStatus.Pending;
         req.approvalCount       = 0;
@@ -267,7 +319,18 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         pendingRequestsByBeneficiary[beneficiary] = newRequestId;
         pendingRequestsByProject[projectId]       = newRequestId;
 
-        emit RequestCreated(newRequestId, projectId, beneficiary, amount, evidenceCid, block.timestamp, req.timeoutDeadline);
+        emit RequestCreated(
+            newRequestId,
+            projectId,
+            beneficiary,
+            amount,
+            evidenceCid,
+            block.timestamp,
+            req.timeoutDeadline,
+            uint8(resolvedMode),
+            requiredApprovals,
+            raisedRatioBpsAtCreation
+        );
         emit RequestStatusChanged(newRequestId, RequestStatus.None, RequestStatus.Pending, "");
 
         return newRequestId;
@@ -276,7 +339,7 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
     /**
      * @notice Ky duyet yeu cau giai ngan.
      *         Kiem tra: request dang Pending, signer co dung vai tro, chua ky, chua timeout.
-     *         Khi du 2/3 chu ky tu 3 vai tro khac nhau -> tu dong chuyen sang Approved.
+     *         Khi du chu ky theo nguong dong cua request -> tu dong chuyen sang Approved.
      * @param requestId Ma yeu cau giai ngan.
      */
     function signRequest(uint256 requestId) external nonReentrant whenNotPaused {
@@ -306,21 +369,23 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         }
 
         if (req.hasSigned[msg.sender]) revert AlreadySigned();
+        if (_isRoleAlreadySigned(req, signerRole)) revert RoleAlreadySigned();
 
-        // Safety check: khong cho phep gap 3 chu ky (chi can 2/3 la du).
+        // Safety check: moi request toi da 3 chu ky tu 3 vai tro khac nhau.
         if (req.signedCount >= 3) revert SigningSlotsExceeded();
 
         // Danh dau signer da ky.
         req.hasSigned[msg.sender]          = true;
+        _markRoleAsSigned(req, signerRole);
         req.signedSigners[req.signedCount] = msg.sender;
         req.signedCount++;
         req.approvalCount++;
 
         emit RequestSigned(requestId, msg.sender, signerRole);
 
-        // Kiem tra du 2/3 chu ky tu cac vai tro khac nhau.
+        // Kiem tra da du chu ky theo chinh sach cua request hay chua.
         if (_hasMinimumApprovals(requestId)) {
-            _transitionToStatus(requestId, RequestStatus.Approved, "2/3 signatures collected");
+            _transitionToStatus(requestId, RequestStatus.Approved, "Required signatures collected");
             emit ThresholdSignaturesReached(
                 requestId,
                 req.projectId,
@@ -574,10 +639,18 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
         data.orgSigned          = hasRole(ORG_SIGNER_ROLE, msg.sender) ? req.hasSigned[msg.sender] : false;
         data.regulatorySigned   = hasRole(REGULATORY_SIGNER_ROLE, msg.sender) ? req.hasSigned[msg.sender] : false;
         data.timeoutDeadline    = req.timeoutDeadline;
+        data.requestMode        = uint8(req.requestMode);
+        data.requiredApprovals  = req.requiredApprovals;
+        data.raisedRatioBpsAtCreation = req.raisedRatioBpsAtCreation;
+        data.adminRoleSignatureCollected = req.adminRoleSigned;
+        data.orgRoleSignatureCollected = req.orgRoleSigned;
+        data.regulatoryRoleSignatureCollected = req.regulatoryRoleSigned;
 
         // Tinh maxWithdrawable hien tai (tru pending requests).
         uint256 totalRaised = donationRanking.getProjectSnapshot(req.projectId).totalDonationAmount;
-        uint256 maxBase = (totalRaised * (10000 - WITHDRAWAL_RESERVE_BPS)) / 10000;
+        uint256 maxBase =
+            (totalRaised * (BASIS_POINTS_DENOMINATOR - WITHDRAWAL_RESERVE_BPS)) /
+            BASIS_POINTS_DENOMINATOR;
         data.maxWithdrawable = maxBase;
     }
 
@@ -643,26 +716,95 @@ contract MultisigDisbursement is AccessControl, Pausable, ReentrancyGuard {
     // ============ INTERNAL FUNCTIONS ============
 
     /**
-     * @notice Kiem tra du 2/3 chu ky tu cac vai tro khac nhau.
-     *         Can it nhat 2 trong 3 vai tro: admin, org, regulatory da ky.
-     * @param requestId Ma yeu cau.
-     * @return True neu du 2/3.
+     * @notice Kiểm tra đã đủ chữ ký theo ngưỡng động của request hay chưa.
+     * @param requestId Mã yêu cầu.
+     * @return True nếu số vai trò đã ký >= requiredApprovals.
      */
     function _hasMinimumApprovals(uint256 requestId) internal view returns (bool) {
         DisbursementRequest storage req = requests[requestId];
-        bool hasAdmin      = false;
-        bool hasOrg        = false;
-        bool hasRegulatory = false;
+        uint256 roleCount = (req.adminRoleSigned ? 1 : 0) +
+            (req.orgRoleSigned ? 1 : 0) +
+            (req.regulatoryRoleSigned ? 1 : 0);
+        return roleCount >= req.requiredApprovals;
+    }
 
-        for (uint256 i = 0; i < req.signedCount; i++) {
-            address signer = req.signedSigners[i];
-            if (hasRole(ADMIN_SIGNER_ROLE, signer))       hasAdmin      = true;
-            if (hasRole(ORG_SIGNER_ROLE, signer))        hasOrg        = true;
-            if (hasRole(REGULATORY_SIGNER_ROLE, signer)) hasRegulatory = true;
+    /**
+     * @notice Tính tỷ lệ raised/goal tại thời điểm tạo request theo đơn vị basis points.
+     * @param totalRaisedAmount Tổng số tiền đã raised của dự án.
+     * @param projectGoalAmount Mục tiêu gọi vốn của dự án.
+     * @return raisedRatioBps Tỷ lệ raised/goal * 10_000.
+     */
+    function _calculateRaisedRatioBps(
+        uint256 totalRaisedAmount,
+        uint256 projectGoalAmount
+    ) internal pure returns (uint256 raisedRatioBps) {
+        if (projectGoalAmount == 0) revert InvalidProjectGoalAmount();
+        return (totalRaisedAmount * BASIS_POINTS_DENOMINATOR) / projectGoalAmount;
+    }
+
+    /**
+     * @notice Xác định số chữ ký bắt buộc theo requestMode và tỷ lệ raised/goal.
+     * @param requestModeValue Chế độ request (Normal/Emergency).
+     * @param raisedRatioBps Tỷ lệ raised/goal tại thời điểm tạo request.
+     * @return requiredApprovals Ngưỡng chữ ký cần đạt cho request.
+     */
+    function _resolveRequiredApprovals(
+        RequestMode requestModeValue,
+        uint256 raisedRatioBps
+    ) internal pure returns (uint256 requiredApprovals) {
+        if (requestModeValue == RequestMode.Emergency) {
+            return APPROVALS_THREE_OF_THREE;
         }
 
-        uint256 roleCount = (hasAdmin ? 1 : 0) + (hasOrg ? 1 : 0) + (hasRegulatory ? 1 : 0);
-        return roleCount >= REQUIRED_APPROVALS;
+        if (requestModeValue != RequestMode.Normal) revert InvalidRequestMode();
+
+        if (raisedRatioBps < MIN_NORMAL_RAISED_BPS) {
+            revert NormalModeRequiresEmergency();
+        }
+
+        if (raisedRatioBps >= FAST_TRACK_RAISED_BPS) {
+            return APPROVALS_TWO_OF_THREE;
+        }
+
+        return APPROVALS_THREE_OF_THREE;
+    }
+
+    /**
+     * @notice Kiểm tra vai trò ký hiện tại đã được dùng trong request hay chưa.
+     * @param req Bản ghi request đang xử lý.
+     * @param signerRole Vai trò của signer hiện tại.
+     * @return True nếu vai trò đó đã ký trước đó.
+     */
+    function _isRoleAlreadySigned(
+        DisbursementRequest storage req,
+        bytes32 signerRole
+    ) internal view returns (bool) {
+        if (signerRole == ADMIN_SIGNER_ROLE) return req.adminRoleSigned;
+        if (signerRole == ORG_SIGNER_ROLE) return req.orgRoleSigned;
+        if (signerRole == REGULATORY_SIGNER_ROLE) return req.regulatoryRoleSigned;
+        return false;
+    }
+
+    /**
+     * @notice Đánh dấu vai trò đã ký để đảm bảo mỗi vai trò chỉ ký một lần.
+     * @param req Bản ghi request đang xử lý.
+     * @param signerRole Vai trò của signer hiện tại.
+     */
+    function _markRoleAsSigned(DisbursementRequest storage req, bytes32 signerRole) internal {
+        if (signerRole == ADMIN_SIGNER_ROLE) {
+            req.adminRoleSigned = true;
+            return;
+        }
+        if (signerRole == ORG_SIGNER_ROLE) {
+            req.orgRoleSigned = true;
+            return;
+        }
+        if (signerRole == REGULATORY_SIGNER_ROLE) {
+            req.regulatoryRoleSigned = true;
+            return;
+        }
+
+        revert InvalidSignerRole();
     }
 
     /**

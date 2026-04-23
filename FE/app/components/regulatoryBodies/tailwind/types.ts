@@ -17,6 +17,7 @@ export type UrgentRequestItem = {
   deadlineLevel: 'urgent' | 'normal' | 'ok';
   ipfsCid?: string;
   fileName?: string;
+  usagePurpose?: string;
 };
 
 export type AuditLogItem = {

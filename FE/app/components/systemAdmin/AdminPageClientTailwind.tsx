@@ -130,6 +130,22 @@ export default function AdminPageClientTailwind() {
     return 'ok';
   };
 
+  /** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: bảo đảm dữ liệu API luôn khớp union type mà UI hỗ trợ. */
+  const normalizeSignatureState = (currentSignatures: number, requiredSignatures: number): '1/3' | '2/3' | '3/3' => {
+    const safeRequiredSignatures = requiredSignatures === 3 ? 3 : 3;
+    const safeCurrentSignatures = Math.min(Math.max(currentSignatures, 1), safeRequiredSignatures);
+
+    if (safeCurrentSignatures >= 3) {
+      return '3/3';
+    }
+
+    if (safeCurrentSignatures === 2) {
+      return '2/3';
+    }
+
+    return '1/3';
+  };
+
   /** Hàm gọi API dashboard từng h?p cho Admin — lấy metrics, urgent requests, timeline, audit logs. */
   const loadDashboardData = useCallback(async () => {
     setDashboardLoading(true);
@@ -155,6 +171,9 @@ export default function AdminPageClientTailwind() {
             requiredSignatures: number;
             currentSignatures: number;
             deadlineTimestamp: number;
+            usagePurpose?: string;
+            ipfsCid?: string;
+            fileName?: string;
           }[];
         }>(buildApiUrl('/api/disbursement/requests'), { headers: authHeaders }),
         fetchApi<{
@@ -190,12 +209,13 @@ export default function AdminPageClientTailwind() {
           id: r.id,
           projectName: r.projectName,
           organizationName: r.organizationName,
-          amountText: new Intl.NumberFormat('vi-VN').format(r.amount) + '?',
-          signatureState: `${r.currentSignatures}/${r.requiredSignatures}`,
+          amountText: new Intl.NumberFormat('vi-VN').format(r.amount) + '₫',
+          signatureState: normalizeSignatureState(r.currentSignatures, r.requiredSignatures),
           deadlineText: normalizeDeadlineText(r.deadlineTimestamp),
           deadlineLevel: normalizeDeadlineLevel(r.deadlineTimestamp),
-          ipfsCid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',
-          fileName: 'Biên bản nghiệm thu.pdf',
+          ipfsCid: r.ipfsCid,
+          fileName: r.fileName,
+          usagePurpose: r.usagePurpose,
         })));
       } else {
         setDashboardUrgentRequests([]);
@@ -273,26 +293,79 @@ export default function AdminPageClientTailwind() {
     const item = dashboardUrgentRequests.find((r) => r.id === requestId) ?? null;
     setSelectedUrgentRequestItem(item);
     setDrawerTabKey('overview');
-  }, []);
+  }, [dashboardUrgentRequests]);
 
   /** Đóng drawer — reset state về null. */
   const handleCloseDrawer = useCallback(() => {
     setSelectedUrgentRequestItem(null);
   }, []);
 
-  /** Ký duyệt từ drawer — đóng drawer + hiện toast thành công. */
-  const handleApproveFromDrawer = useCallback(() => {
-    const itemId = selectedUrgentRequestItem?.id ?? '';
-    setSelectedUrgentRequestItem(null);
-    addToast({ titleText: 'Ký duyệt thành công', bodyText: `Đã ký duyệt yêu cầu ${itemId}`, tone: 'success' });
-  }, [addToast, selectedUrgentRequestItem]);
+  /** Hàm thực thi action ký/từ chối với API thật. Mục đích: đồng bộ dashboard admin với dữ liệu backend, không dùng mock. */
+  const submitDisbursementAction = useCallback(async (
+    requestId: string,
+    action: 'approve' | 'reject',
+    rejectReason?: string
+  ): Promise<void> => {
+    const session = readAuthSession();
+    if (!session.accessToken) {
+      addToast({ titleText: 'Phiên đăng nhập hết hạn', bodyText: 'Vui lòng đăng nhập lại để tiếp tục ký duyệt.', tone: 'error' });
+      return;
+    }
 
-  /** từ ch?i từ drawer — đóng drawer + hiện toast cảnh báo. */
-  const handleRejectFromDrawer = useCallback(() => {
-    const itemId = selectedUrgentRequestItem?.id ?? '';
-    setSelectedUrgentRequestItem(null);
-    addToast({ titleText: 'từ ch?i yêu cầu', bodyText: `Đã từ ch?i yêu cầu ${itemId}`, tone: 'warning' });
-  }, [addToast, selectedUrgentRequestItem]);
+    if (action === 'approve') {
+      await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/sign`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+        body: JSON.stringify({ comment: 'Approved from admin dashboard' })
+      });
+      addToast({ titleText: 'Ký duyệt thành công', bodyText: `Đã ký duyệt yêu cầu ${requestId}.`, tone: 'success' });
+    } else {
+      await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/reject`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+        body: JSON.stringify({ reason: rejectReason })
+      });
+      addToast({ titleText: 'Đã từ chối yêu cầu', bodyText: `Yêu cầu ${requestId} đã được cập nhật trạng thái từ chối.`, tone: 'warning' });
+    }
+
+    await loadDashboardData();
+  }, [addToast, loadDashboardData]);
+
+  /** Hàm xử lý ký duyệt từ drawer. Mục đích: gọi API thật, làm mới dữ liệu và đóng drawer sau khi thành công. */
+  const handleApproveFromDrawer = useCallback(async (): Promise<void> => {
+    const requestId = selectedUrgentRequestItem?.id;
+    if (!requestId) {
+      return;
+    }
+
+    try {
+      await submitDisbursementAction(requestId, 'approve');
+      setSelectedUrgentRequestItem(null);
+    } catch {
+      addToast({ titleText: 'Ký duyệt thất bại', bodyText: 'Không thể cập nhật trạng thái yêu cầu. Vui lòng thử lại.', tone: 'error' });
+    }
+  }, [addToast, selectedUrgentRequestItem, submitDisbursementAction]);
+
+  /** Hàm xử lý từ chối từ drawer. Mục đích: bắt buộc nhập lý do và đồng bộ trạng thái reject với backend. */
+  const handleRejectFromDrawer = useCallback(async (): Promise<void> => {
+    const requestId = selectedUrgentRequestItem?.id;
+    if (!requestId) {
+      return;
+    }
+
+    const rejectReason = window.prompt('Nhập lý do từ chối (tối thiểu 5 ký tự):', 'Thiếu thông tin chứng từ minh chứng.');
+    if (!rejectReason || rejectReason.trim().length < 5) {
+      addToast({ titleText: 'Thiếu lý do từ chối', bodyText: 'Bạn cần nhập lý do từ chối tối thiểu 5 ký tự.', tone: 'warning' });
+      return;
+    }
+
+    try {
+      await submitDisbursementAction(requestId, 'reject', rejectReason.trim());
+      setSelectedUrgentRequestItem(null);
+    } catch {
+      addToast({ titleText: 'Từ chối thất bại', bodyText: 'Không thể cập nhật trạng thái yêu cầu. Vui lòng thử lại.', tone: 'error' });
+    }
+  }, [addToast, selectedUrgentRequestItem, submitDisbursementAction]);
 
   // =============================================================================
   // LOGOUT

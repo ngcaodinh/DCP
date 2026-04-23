@@ -5,8 +5,12 @@ type AuditTableProps = {
   auditLogItemList: AuditLogItem[];
 };
 
-/** Hàm component AuditTable để hiển thị nhật ký ký duyệt đầy đủ gồm lọc, bảng và phân trang theo giao diện mẫu. */
+/** Hàm component AuditTable để hiển thị nhật ký ký duyệt bằng dữ liệu thật từ backend, không dùng dữ liệu cố định. */
 export default function AuditTable({ auditLogItemList }: AuditTableProps) {
+  const totalAuditLogCount = auditLogItemList.length;
+  const displayedStartIndex = totalAuditLogCount > 0 ? 1 : 0;
+  const displayedEndIndex = totalAuditLogCount;
+
   return (
     <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
       <div className="border-b border-emerald-900/15 px-6 py-3.5">
@@ -39,13 +43,19 @@ export default function AuditTable({ auditLogItemList }: AuditTableProps) {
         <table className="min-w-full text-left">
           <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.1em] text-slate-500">
             <tr>
-              {['Tx hash', 'Yêu cầu', 'Số tiền', 'Trạng thái', 'Đơn vị thao tác', 'Thời gian'].map(headerLabel => (
+              {['Tx hash', 'Yêu cầu', 'Số tiền', 'Trạng thái', 'Đơn vị thao tác', 'Thời gian'].map((headerLabel) => (
                 <th key={headerLabel} className="px-6 py-2.5 font-semibold">{headerLabel}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {auditLogItemList.map(auditLogItem => (
+            {auditLogItemList.length === 0 ? (
+              <tr className="border-t border-slate-100">
+                <td colSpan={6} className="px-6 py-6 text-center text-sm text-slate-500">
+                  Chưa có dữ liệu nhật ký ký duyệt từ backend.
+                </td>
+              </tr>
+            ) : auditLogItemList.map((auditLogItem) => (
               <tr key={auditLogItem.transactionId} className="border-t border-slate-100 text-sm transition hover:bg-slate-50/80">
                 <td className="px-6 py-3 font-mono text-[12px] leading-4 text-cyan-700">{getShortHash(auditLogItem.transactionId)}</td>
                 <td className="px-6 py-3 text-[13px] leading-4 text-slate-800">{auditLogItem.requestId}</td>
@@ -64,16 +74,9 @@ export default function AuditTable({ auditLogItemList }: AuditTableProps) {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-900/15 bg-slate-50 px-6 py-2.5 text-[12px] text-slate-600">
-        <p>Hiển thị 1-4 trên 24 bản ghi</p>
-        <div className="flex items-center gap-1.5">
-          <button type="button" className="inline-flex h-7 items-center rounded-md border border-emerald-900/15 bg-white px-2.5 leading-none text-slate-700 transition hover:bg-slate-100">‹</button>
-          <button type="button" className="inline-flex h-7 items-center rounded-md border border-[#0E7C6B]/30 bg-[#0E7C6B] px-2.5 leading-none text-white">1</button>
-          <button type="button" className="inline-flex h-7 items-center rounded-md border border-emerald-900/15 bg-white px-2.5 leading-none text-slate-700 transition hover:bg-slate-100">2</button>
-          <button type="button" className="inline-flex h-7 items-center rounded-md border border-emerald-900/15 bg-white px-2.5 leading-none text-slate-700 transition hover:bg-slate-100">3</button>
-          <button type="button" className="inline-flex h-7 items-center rounded-md border border-emerald-900/15 bg-white px-2.5 leading-none text-slate-700 transition hover:bg-slate-100">›</button>
-        </div>
+        <p>Hiển thị {displayedStartIndex}-{displayedEndIndex} trên {totalAuditLogCount} bản ghi</p>
+        <p className="font-medium text-slate-500">Đồng bộ thời gian thực từ backend</p>
       </div>
     </div>
   );
 }
-

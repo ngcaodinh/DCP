@@ -68,7 +68,11 @@ export type ProjectSummary = {
   rejectionReason: string | null;
   createdAt: string;
 };
-export type DisbursementStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
+export type DisbursementStatus = 'PENDING' | 'APPROVED' | 'EXECUTING' | 'REJECTED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
+
+export type DisbursementRequestMode = 'NORMAL' | 'EMERGENCY';
+
+export type DisbursementTransferStatus = 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'MANUAL_REVIEW';
 
 export type DisbursementResult = {
   requestId: string;
@@ -81,7 +85,12 @@ export type DisbursementResult = {
     accountHolderName: string;
     branchName?: string;
   };
+  requestMode: DisbursementRequestMode;
+  emergencyReason: string | null;
+  requiredApprovals: number;
+  raisedRatioBpsAtCreation: number;
   amount: number;
+  usagePurpose: string;
   evidenceCid: string;
   status: DisbursementStatus;
   approvals: Array<{
@@ -91,13 +100,18 @@ export type DisbursementResult = {
     signedAt: string;
     comment?: string;
   }>;
-  rejection?: {
-    rejectedBy: string;
+  rejection: {
+    signerRole: string;
+    signerUserId: string;
+    signerAddress: string;
     reason: string;
     rejectedAt: string;
-  };
+  } | null;
+  timeoutDeadline: string | null;
+  payosTransferId: string | null;
+  payosTransferStatus: DisbursementTransferStatus | null;
   createdAt: string;
   updatedAt: string;
-  expiredAt?: string;
-  completedAt?: string;
+  expiredAt: string | null;
+  completedAt: string | null;
 };

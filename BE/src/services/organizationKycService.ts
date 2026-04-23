@@ -48,6 +48,12 @@ const donationRankingContractAbi = [
   'function projectManagerRole() external view returns (bytes32)',
   'function grantProjectManagerRole(address account) external'
 ];
+const multisigDisbursementContractAbi = [
+  'function hasRole(bytes32 role, address account) external view returns (bool)',
+  'function ORG_SIGNER_ROLE() external view returns (bytes32)',
+  'function grantOrgSignerRole(address account) external'
+];
+
 const logger = getLogger();
 
 /** Hàm lấy contract admin cho donation ranking. Mục đích: phục vụ cấp quyền PROJECT_MANAGER_ROLE cho organization sau khi KYC được duyệt. */
@@ -103,6 +109,53 @@ async function ensureOrganizationWalletProjectManagerRole(walletAddress: string)
   const hasProjectManagerRoleAfterGrant = await donationRankingContract.hasRole(projectManagerRoleHash, normalizedWalletAddress);
   if (!hasProjectManagerRoleAfterGrant) {
     throw new Error(`Cấp PROJECT_MANAGER_ROLE thất bại cho ví ${normalizedWalletAddress}. txHash=${grantRoleTransaction.hash}`);
+  }
+
+  return { transactionHash: grantRoleTransaction.hash, wasAlreadyGranted: false };
+}
+
+/** Hàm lấy contract admin cho MultisigDisbursement. Mục đích: cấp quyền ORG_SIGNER_ROLE cho organization sau khi KYC được duyệt. */
+function getMultisigDisbursementAdminContract() {
+  const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
+  const multisigDisbursementAddress = process.env.MULTISIG_DISBURSEMENT_ADDRESS?.trim() || '';
+  const adminPrivateKey = process.env.DONATION_ADMIN_PRIVATE_KEY?.trim() || '';
+
+  if (!blockchainRpcUrl || !multisigDisbursementAddress || !adminPrivateKey) {
+    throw new Error('Thiếu cấu hình cấp quyền blockchain. Cần BLOCKCHAIN_RPC_URL, MULTISIG_DISBURSEMENT_ADDRESS và DONATION_ADMIN_PRIVATE_KEY.');
+  }
+
+  const provider = new ethers.JsonRpcProvider(blockchainRpcUrl);
+  const adminSigner = new ethers.Wallet(adminPrivateKey, provider);
+  const multisigDisbursementContract = new ethers.Contract(multisigDisbursementAddress, multisigDisbursementContractAbi, adminSigner);
+
+  return { provider, adminSigner, multisigDisbursementContract };
+}
+
+/** Hàm cấp ORG_SIGNER_ROLE cho ví organization trên MultisigDisbursement. Mục đích: đảm bảo tổ chức có quyền tạo yêu cầu giải ngân on-chain. */
+export async function ensureOrganizationWalletOrgSignerRole(walletAddress: string): Promise<{ transactionHash: string | null; wasAlreadyGranted: boolean }> {
+  const normalizedWalletAddress = walletAddress.trim();
+  if (!normalizedWalletAddress || !ethers.isAddress(normalizedWalletAddress)) {
+    throw new Error('Địa chỉ ví organization không hợp lệ để cấp quyền ORG_SIGNER_ROLE.');
+  }
+
+  const { multisigDisbursementContract } = getMultisigDisbursementAdminContract();
+
+  const orgSignerRoleHash = await multisigDisbursementContract.ORG_SIGNER_ROLE();
+  const hasOrgSignerRole = await multisigDisbursementContract.hasRole(orgSignerRoleHash, normalizedWalletAddress);
+  if (hasOrgSignerRole) {
+    return { transactionHash: null, wasAlreadyGranted: true };
+  }
+
+  const grantRoleTransaction = await multisigDisbursementContract.grantOrgSignerRole(normalizedWalletAddress);
+  const grantRoleReceipt = await grantRoleTransaction.wait();
+
+  if (grantRoleReceipt && Number(grantRoleReceipt.status) !== 1) {
+    throw new Error(`Transaction cấp ORG_SIGNER_ROLE thất bại. txHash=${grantRoleTransaction.hash}`);
+  }
+
+  const hasOrgSignerRoleAfterGrant = await multisigDisbursementContract.hasRole(orgSignerRoleHash, normalizedWalletAddress);
+  if (!hasOrgSignerRoleAfterGrant) {
+    throw new Error(`Cấp ORG_SIGNER_ROLE thất bại cho ví ${normalizedWalletAddress}. txHash=${grantRoleTransaction.hash}`);
   }
 
   return { transactionHash: grantRoleTransaction.hash, wasAlreadyGranted: false };
@@ -549,12 +602,20 @@ export async function reviewOrganizationKycSubmission(
     if (normalizedAction === 'approve') {
       try {
         const grantRoleResult = await ensureOrganizationWalletProjectManagerRole(updatedOrganizationUser.walletAddress);
-        const detailMessage = grantRoleResult.wasAlreadyGranted
-          ? 'KYC approve thành công, ví organization đã có PROJECT_MANAGER_ROLE từ trước.'
-          : 'KYC approve thành công và đã cấp PROJECT_MANAGER_ROLE cho ví organization.';
+
+        // Cấp ORG_SIGNER_ROLE trên MultisigDisbursement để organization có quyền tạo yêu cầu giải ngân on-chain.
+        const grantOrgSignerResult = await ensureOrganizationWalletOrgSignerRole(updatedOrganizationUser.walletAddress);
+
+        const projectManagerMessage = grantRoleResult.wasAlreadyGranted
+          ? 'PROJECT_MANAGER_ROLE đã có từ trước.'
+          : 'PROJECT_MANAGER_ROLE đã cấp thành công.';
+        const orgSignerMessage = grantOrgSignerResult.wasAlreadyGranted
+          ? 'ORG_SIGNER_ROLE đã có từ trước.'
+          : 'ORG_SIGNER_ROLE đã cấp thành công.';
+        const detailMessage = `KYC approve thành công. ${projectManagerMessage} ${orgSignerMessage}`;
 
         logger.info(
-          `KYC approve + grant role success. reviewerUserId=${reviewerUserId} organizationUserId=${updatedOrganizationUser.id} walletAddress=${updatedOrganizationUser.walletAddress} txHash=${grantRoleResult.transactionHash || 'N/A'}`
+          `KYC approve + grant role success. reviewerUserId=${reviewerUserId} organizationUserId=${updatedOrganizationUser.id} walletAddress=${updatedOrganizationUser.walletAddress} projectManagerTx=${grantRoleResult.transactionHash || 'N/A'} orgSignerTx=${grantOrgSignerResult.transactionHash || 'N/A'}`
         );
 
         await addOrganizationKycAuditLog({

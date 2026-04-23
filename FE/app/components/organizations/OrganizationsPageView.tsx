@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { financeNavigationItems, primaryNavigationItems, systemNavigationItems } from './mockData';
 import {
+  CreateDisbursementModal,
   CreateProjectModal,
   DashboardSection,
   DisbursementSection,
@@ -15,7 +16,7 @@ import {
 import { ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { clearAuthSession, readAuthSession } from '@/app/utils/authSession';
 import Topbar from '../regulatoryBodies/tailwind/Topbar';
-import { NavigationItem, OrganizationPageKey, ProjectSummary } from './types';
+import { DisbursementResult, NavigationItem, OrganizationPageKey, ProjectSummary } from './types';
 
 type CreateProjectEligibilityResponse = {
   isEligibleToCreateProject: boolean;
@@ -37,6 +38,13 @@ type OrganizationKycSubmissionSummary = {
     accountHolderName: string;
     branchName: string | null;
   } | null;
+};
+
+type ApprovedBeneficiaryBankAccount = {
+  bankName: string;
+  bankAccountNumber: string;
+  accountHolderName: string;
+  branchName?: string | null;
 };
 
 type SidebarItemProps = {
@@ -99,6 +107,7 @@ export default function OrganizationsPageView() {
   const [activeDisbursementTab, setActiveDisbursementTab] = useState<'eligible' | 'pending' | 'history'>('eligible');
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
+  const [selectedDisbursementProject, setSelectedDisbursementProject] = useState<ProjectSummary | null>(null);
   const [isBankSetupHighlighted, setIsBankSetupHighlighted] = useState(false);
   const [hasUnreadNotification, setHasUnreadNotification] = useState(true);
   const [createdProjects, setCreatedProjects] = useState<ProjectSummary[]>([]);
@@ -118,6 +127,15 @@ export default function OrganizationsPageView() {
   const [userEmail, setUserEmail] = useState('');
   const [userWalletAddress, setUserWalletAddress] = useState('');
   const latestEligibilityRequestRef = useRef(0);
+
+  /** Hàm lấy tài khoản thụ hưởng đã duyệt. Mục đích: dùng đúng tài khoản ngân hàng đã qua phê duyệt khi tạo yêu cầu giải ngân. */
+  const approvedBeneficiaryBankAccount = useMemo<ApprovedBeneficiaryBankAccount | null>(() => {
+    const approvedSubmission = organizationKycSubmissionList.find(submissionItem =>
+      submissionItem.status === 'APPROVED' && submissionItem.beneficiaryBankAccount !== null
+    );
+
+    return approvedSubmission?.beneficiaryBankAccount || null;
+  }, [organizationKycSubmissionList]);
 
   /** Hàm tính tiêu đề topbar. Mục đích: đồng bộ tiêu đề theo menu đang active. */
   const pageTitle = useMemo(() => {
@@ -310,6 +328,23 @@ export default function OrganizationsPageView() {
   /** Hàm nhận dự án vừa tạo. Mục đích: thêm dự án mới vào đầu danh sách để hiển thị ngay. */
   const handleProjectCreated = (project: ProjectSummary) => {
     setCreatedProjects(currentProjects => [project, ...currentProjects]);
+  };
+
+  /** Hàm mở modal tạo giải ngân. Mục đích: chỉ cho phép mở khi tổ chức đã có tài khoản thụ hưởng được duyệt. */
+  const handleOpenCreateDisbursementModal = (project: ProjectSummary) => {
+    if (!approvedBeneficiaryBankAccount) {
+      handleLinkBankAccount();
+      return;
+    }
+
+    setSelectedDisbursementProject(project);
+  };
+
+  /** Hàm nhận yêu cầu giải ngân vừa tạo. Mục đích: cập nhật UI ngay mà không cần chờ tải lại toàn bộ trang. */
+  const handleDisbursementCreated = (createdDisbursement: DisbursementResult) => {
+    setDisbursements(currentDisbursements => [createdDisbursement, ...currentDisbursements]);
+    setActiveDisbursementTab('pending');
+    setSelectedDisbursementProject(null);
   };
 
   /** Hàm cập nhật dự án sau khi submit. Mục đích: đồng bộ trạng thái PENDING_APPROVAL tại danh sách local. */
@@ -637,6 +672,7 @@ export default function OrganizationsPageView() {
                 disbursementsErrorMessage={disbursementsErrorMessage}
                 onRetryLoadDisbursements={loadDisbursementsFromApi}
                 createdProjects={createdProjects}
+                onOpenCreateDisbursementModal={handleOpenCreateDisbursementModal}
               />
             ) : null}
             {activePage === 'transparency' ? <TransparencySection /> : null}
@@ -665,6 +701,14 @@ export default function OrganizationsPageView() {
         <CreateProjectModal
           onClose={() => setIsCreateProjectOpen(false)}
           onProjectCreated={handleProjectCreated}
+        />
+      ) : null}
+      {selectedDisbursementProject && approvedBeneficiaryBankAccount ? (
+        <CreateDisbursementModal
+          project={selectedDisbursementProject}
+          beneficiaryBankAccount={approvedBeneficiaryBankAccount}
+          onClose={() => setSelectedDisbursementProject(null)}
+          onCreated={handleDisbursementCreated}
         />
       ) : null}
     </main>

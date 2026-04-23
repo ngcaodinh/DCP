@@ -9,6 +9,7 @@ import { createDonationRoutes } from './routes/donationRoutes';
 import { createRankingRoutes } from './routes/rankingRoutes';
 import { createSybilRoutes } from './routes/sybilRoutes';
 import { createDisbursementRoutes } from './routes/disbursementRoutes';
+import { createAdminDashboardRoutes } from './routes/adminDashboardRoutes';
 
 const application = express();
 
@@ -46,10 +47,10 @@ function registerRoutes(): void {
   application.use('/rankings', createRankingRoutes());
   application.use('/api/sybil', createSybilRoutes());
   application.use('/api/disbursement', createDisbursementRoutes());
+  application.use('/api/admin/dashboard', createAdminDashboardRoutes());
 }
 
 configureMiddlewares();
 registerRoutes();
 
 export default application;
-

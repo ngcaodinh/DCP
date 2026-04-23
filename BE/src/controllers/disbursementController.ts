@@ -6,6 +6,7 @@ import {
   CreateDisbursementPayload,
   getDisbursementsForOrganization,
   getDisbursementsForReview,
+  getDisbursementRequestSummaries,
   getDisbursementDetail,
   getDisbursementsByProject,
   getMaxWithdrawableAmount,
@@ -15,13 +16,13 @@ import {
 
 const logger = getLogger();
 
-// ============ UC7.1: TAO YEU CAU RUT TIEN ============
+// ============ UC7.1: TẠO YÊU CẦU RÚT TIỀN ============
 
 /**
  * POST /api/disbursement/create
- * Tao yeu cau rut tien moi.
- * Actor: Tá»• chá»©c tá»« thiá»‡n (organizations).
- * Body: { projectId, amount, evidenceCid, beneficiaryBankAccount }
+ * Tạo yêu cầu rút tiền mới.
+ * Actor: Tổ chức từ thiện (organizations).
+ * Body: { projectId, amount, usagePurpose, evidenceCid, requestMode, emergencyReason?, beneficiaryBankAccount }
  */
 export async function handleCreateDisbursementRequest(req: Request, res: Response): Promise<void> {
   try {
@@ -34,7 +35,10 @@ export async function handleCreateDisbursementRequest(req: Request, res: Respons
     const payload: CreateDisbursementPayload = {
       projectId: req.body.projectId,
       amount: req.body.amount,
+      usagePurpose: req.body.usagePurpose,
       evidenceCid: req.body.evidenceCid,
+      requestMode: req.body.requestMode,
+      emergencyReason: req.body.emergencyReason,
       beneficiaryBankAccount: req.body.beneficiaryBankAccount
     };
 
@@ -44,7 +48,7 @@ export async function handleCreateDisbursementRequest(req: Request, res: Respons
     res.status(201).json({
       success: true,
       data: result,
-      message: 'Yêu cầu rút tiền đã được tạo thành công. Đang chờ ký duyệt.'
+      message: 'Yêu cầu rút tiền đã được tạo thành công. Đang chờ ký duyệt theo ngưỡng chữ ký động của request.'
     });
   } catch (error) {
     if (error instanceof ApplicationError) {
@@ -56,12 +60,12 @@ export async function handleCreateDisbursementRequest(req: Request, res: Respons
   }
 }
 
-// ============ UC7.2: KY DUYET YEU CAU RUT TIEN ============
+// ============ UC7.2: KÝ DUYỆT YÊU CẦU RÚT TIỀN ============
 
 /**
  * POST /api/disbursement/:requestId/sign
- * Ky duyet yeu cau rut tien.
- * Actor: Admin há»‡ thá»‘ng / Äáº¡i diá»‡n tá»• chá»©c tá»« thiá»‡n / CÆ¡ quan giÃ¡m sÃ¡t.
+ * Ký duyệt yêu cầu rút tiền.
+ * Actor: Admin hệ thống / Đại diện tổ chức từ thiện / Cơ quan giám sát.
  * Body: { comment? }
  */
 export async function handleSignDisbursementRequest(req: Request, res: Response): Promise<void> {
@@ -76,7 +80,7 @@ export async function handleSignDisbursementRequest(req: Request, res: Response)
     const { comment } = req.body as { comment?: string };
 
     if (!requestId) {
-      res.status(400).json({ error: 'requestId is required.' });
+      res.status(400).json({ error: 'Thiếu requestId bắt buộc.' });
       return;
     }
 
@@ -87,8 +91,8 @@ export async function handleSignDisbursementRequest(req: Request, res: Response)
       success: true,
       data: result,
       message: result.status === 'APPROVED'
-        ? 'Đã có đủ 2/3 chữ ký. Yêu cầu được phê duyệt và sẵn sàng giải ngân.'
-        : 'Chữ ký của bạn đã được ghi nhận. Đang chờ các chữ ký còn lại.'
+        ? `Đã đủ chữ ký (${result.approvals.length}/${result.requiredApprovals}). Hệ thống đang tự động thực thi chuyển khoản FR8.`
+        : `Chữ ký của bạn đã được ghi nhận (${result.approvals.length}/${result.requiredApprovals}).`
     });
   } catch (error) {
     if (error instanceof ApplicationError) {
@@ -102,8 +106,8 @@ export async function handleSignDisbursementRequest(req: Request, res: Response)
 
 /**
  * POST /api/disbursement/:requestId/reject
- * Tu choi yeu cau rut tien.
- * Actor: Admin há»‡ thá»‘ng / Äáº¡i diá»‡n tá»• chá»©c tá»« thiá»‡n / CÆ¡ quan giÃ¡m sÃ¡t.
+ * Từ chối yêu cầu rút tiền.
+ * Actor: Admin hệ thống / Đại diện tổ chức từ thiện / Cơ quan giám sát.
  * Body: { reason }
  */
 export async function handleRejectDisbursementRequest(req: Request, res: Response): Promise<void> {
@@ -118,7 +122,7 @@ export async function handleRejectDisbursementRequest(req: Request, res: Respons
     const { reason } = req.body as { reason: string };
 
     if (!requestId) {
-      res.status(400).json({ error: 'requestId is required.' });
+      res.status(400).json({ error: 'Thiếu requestId bắt buộc.' });
       return;
     }
 
@@ -145,12 +149,12 @@ export async function handleRejectDisbursementRequest(req: Request, res: Respons
   }
 }
 
-// ============ QUERY ENDPOINTS ============
+// ============ CÁC ENDPOINT TRUY VẤN ============
 
 /**
  * GET /api/disbursement/me
- * Lay danh sach yeu cau cua to chuc dang nhap.
- * Actor: Tá»• chá»©c tá»« thiá»‡n.
+ * Lấy danh sách yêu cầu của tổ chức đang đăng nhập.
+ * Actor: Tổ chức từ thiện.
  */
 export async function handleGetMyDisbursements(req: Request, res: Response): Promise<void> {
   try {
@@ -174,8 +178,8 @@ export async function handleGetMyDisbursements(req: Request, res: Response): Pro
 
 /**
  * GET /api/disbursement/pending
- * Lay danh sach yeu cau cho ky duyet.
- * Actor: Admin / Regulatory.
+ * Lấy danh sách yêu cầu chờ ký duyệt.
+ * Actor: Admin hệ thống / Cơ quan giám sát.
  */
 export async function handleGetPendingDisbursements(req: Request, res: Response): Promise<void> {
   try {
@@ -198,9 +202,34 @@ export async function handleGetPendingDisbursements(req: Request, res: Response)
 }
 
 /**
+ * GET /api/disbursement/requests
+ * Lấy danh sách tóm tắt cho dashboard ký duyệt.
+ * Actor: Admin hệ thống / Cơ quan giám sát.
+ */
+export async function handleGetDisbursementRequestSummaries(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = (req as any).authenticatedUser?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Không có quyền truy cập.' });
+      return;
+    }
+
+    const requests = await getDisbursementRequestSummaries(userId);
+    res.status(200).json({ success: true, data: { requests } });
+  } catch (error) {
+    if (error instanceof ApplicationError) {
+      res.status(error.statusCode).json({ error: error.message, code: error.errorCode });
+    } else {
+      logger.error(`handleGetDisbursementRequestSummaries failed. error=${(error as Error)?.message}`);
+      res.status(500).json({ error: 'Lỗi server khi lấy danh sách tóm tắt giải ngân.' });
+    }
+  }
+}
+
+/**
  * GET /api/disbursement/:requestId
- * Lay chi tiet yeu cau rut tien.
- * Actor: Admin / Regulatory / Organizations.
+ * Lấy chi tiết yêu cầu rút tiền.
+ * Actor: Admin hệ thống / Cơ quan giám sát / Tổ chức từ thiện.
  */
 export async function handleGetDisbursementDetail(req: Request, res: Response): Promise<void> {
   try {
@@ -212,7 +241,7 @@ export async function handleGetDisbursementDetail(req: Request, res: Response): 
 
     const { requestId } = req.params;
     if (!requestId) {
-      res.status(400).json({ error: 'requestId is required.' });
+      res.status(400).json({ error: 'Thiếu requestId bắt buộc.' });
       return;
     }
 
@@ -230,14 +259,14 @@ export async function handleGetDisbursementDetail(req: Request, res: Response): 
 
 /**
  * GET /api/disbursement/project/:projectId
- * Lay lich su giai ngan theo du an.
+ * Lấy lịch sử giải ngân theo dự án.
  * Actor: Public (optional authentication).
  */
 export async function handleGetDisbursementsByProject(req: Request, res: Response): Promise<void> {
   try {
     const { projectId } = req.params;
     if (!projectId) {
-      res.status(400).json({ error: 'projectId is required.' });
+      res.status(400).json({ error: 'Thiếu projectId bắt buộc.' });
       return;
     }
 
@@ -255,14 +284,14 @@ export async function handleGetDisbursementsByProject(req: Request, res: Respons
 
 /**
  * GET /api/disbursement/max-withdrawable/:projectId
- * Lay so du kha dung toi da cho withdrawal.
- * Actor: Tá»• chá»©c tá»« thiá»‡n.
+ * Lấy số dư khả dụng tối đa cho withdrawal.
+ * Actor: Tổ chức từ thiện.
  */
 export async function handleGetMaxWithdrawable(req: Request, res: Response): Promise<void> {
   try {
     const { projectId } = req.params;
     if (!projectId) {
-      res.status(400).json({ error: 'projectId is required.' });
+      res.status(400).json({ error: 'Thiếu projectId bắt buộc.' });
       return;
     }
 

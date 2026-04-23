@@ -15,8 +15,8 @@ type RequestDrawerProps = {
   selectedDrawerTabKey: DrawerTabKey;
   onClose: () => void;
   onChangeTab: (drawerTabKey: DrawerTabKey) => void;
-  onApprove: () => void;
-  onReject: () => void;
+  onApprove: () => Promise<void>;
+  onReject: () => Promise<void>;
 };
 
 const TABS: { key: DrawerTabKey; label: string }[] = [
@@ -42,16 +42,20 @@ export default function RequestDrawer({
 
   const handleApprove = async () => {
     setIsSubmitting(true);
-    await new Promise((r) => setTimeout(r, 800));
-    onApprove();
-    setIsSubmitting(false);
+    try {
+      await onApprove();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleReject = async () => {
     setIsSubmitting(true);
-    await new Promise((r) => setTimeout(r, 800));
-    onReject();
-    setIsSubmitting(false);
+    try {
+      await onReject();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -114,6 +118,12 @@ export default function RequestDrawer({
                 <p className="text-[10px] uppercase tracking-wider text-slate-500">Số tiền</p>
                 <p className="mt-1 font-mono text-base font-semibold text-[#0A5C50]">
                   {selectedUrgentRequestItem.amountText}
+                </p>
+              </div>
+              <div className="rounded-lg bg-slate-50 p-3 sm:col-span-2">
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Mục đích sử dụng tiền</p>
+                <p className="mt-1 text-sm leading-6 text-slate-700">
+                  {selectedUrgentRequestItem.usagePurpose || 'Chưa có thông tin mục đích sử dụng tiền.'}
                 </p>
               </div>
             </div>

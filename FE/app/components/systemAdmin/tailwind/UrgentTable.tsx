@@ -76,8 +76,21 @@ export default function UrgentTable({ urgentRequestItemList, onOpenDrawer }: Urg
 // SIGNATURE CHECKLIST — với checkmark icons thay vì dot đơn thuần
 // =============================================================================
 
-function SignatureChecklist({ state }: { state: '1/3' | '2/3' }) {
-  const signed = state === '2/3' ? 2 : 1;
+/** Hàm tính số chữ ký đã có từ chuỗi trạng thái. Mục đích: hiển thị checklist an toàn với cả trạng thái 1/3, 2/3, 3/3. */
+function getSignedCount(signatureState: '1/3' | '2/3' | '3/3'): number {
+  const [signedCountText] = signatureState.split('/');
+  const signedCount = Number(signedCountText);
+
+  if (!Number.isFinite(signedCount) || signedCount < 0) {
+    return 0;
+  }
+
+  return Math.min(signedCount, 3);
+}
+
+/** Component hiển thị tiến độ chữ ký. Mục đích: trực quan hóa số vai trò đã ký của yêu cầu giải ngân. */
+function SignatureChecklist({ state }: { state: '1/3' | '2/3' | '3/3' }) {
+  const signed = getSignedCount(state);
 
   return (
     <div className="flex items-center gap-1">

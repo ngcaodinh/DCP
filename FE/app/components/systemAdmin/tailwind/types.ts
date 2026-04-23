@@ -29,11 +29,12 @@ export type UrgentRequestItem = {
   projectName: string;
   organizationName: string;
   amountText: string;
-  signatureState: string;        // Ví dụ: '1/3', '2/3', '3/3' — chuỗi linh hoạt từ API
+  signatureState: '1/3' | '2/3' | '3/3';
   deadlineText: string;
   deadlineLevel: 'urgent' | 'normal' | 'ok';
   ipfsCid?: string;
   fileName?: string;
+  usagePurpose?: string;
 };
 
 /** Một dòng trong bảng audit log. */

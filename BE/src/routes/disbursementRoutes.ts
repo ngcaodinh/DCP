@@ -5,6 +5,7 @@ import {
   handleCreateDisbursementRequest,
   handleGetMyDisbursements,
   handleGetPendingDisbursements,
+  handleGetDisbursementRequestSummaries,
   handleGetDisbursementDetail,
   handleGetDisbursementsByProject,
   handleGetMaxWithdrawable,
@@ -49,6 +50,13 @@ export function createDisbursementRoutes(): Router {
    * Lay danh sach yeu cau cho ky duyet.
    * Quyen: admin, regulatory.
    */
+  router.get(
+    '/requests',
+    authenticationMiddleware,
+    createRoleAuthorizationMiddleware(['admin', 'regulatory']),
+    handleGetDisbursementRequestSummaries
+  );
+
   router.get(
     '/pending',
     authenticationMiddleware,

@@ -231,6 +231,35 @@ export async function addAuditLog(entry: AuditLogEntry): Promise<void> {
 }
 
 /**
+ * Hàm đếm số người dùng có đăng nhập trong một khoảng thời gian.
+ * Mục đích: cung cấp dữ liệu thật cho metric người dùng hoạt động theo tháng trên dashboard admin.
+ */
+export async function countUsersByLastLoginRange(startDate: Date, endDate: Date): Promise<number> {
+  return AuthUserModel.countDocuments({
+    lastLoginAt: {
+      $gte: startDate,
+      $lt: endDate
+    }
+  }).exec();
+}
+
+/**
+ * Hàm lấy danh sách audit log mới nhất.
+ * Mục đích: phục vụ bảng nhật ký kiểm toán trên trang tổng quan hệ thống admin.
+ */
+export async function findLatestAuditLogs(limitCount: number = 50): Promise<AuditLogEntry[]> {
+  const normalizedLimitCount = Number.isFinite(limitCount)
+    ? Math.max(1, Math.min(200, Math.floor(limitCount)))
+    : 50;
+
+  return AuditLogModel.find({})
+    .sort({ createdAt: -1 })
+    .limit(normalizedLimitCount)
+    .lean<AuditLogEntry[]>()
+    .exec();
+}
+
+/**
  * Hàm lấy danh sách người dùng theo nhiều ví.
  * Mục đích: map dữ liệu donation on-chain sang thông tin công khai nhà hảo tâm từ MongoDB.
  */

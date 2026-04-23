@@ -20,6 +20,14 @@ export type DisbursementStatus =
   | 'EXPIRED'
   | 'CANCELLED';
 
+export type DisbursementRequestMode = 'NORMAL' | 'EMERGENCY';
+
+export type DisbursementTransferStatus =
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'MANUAL_REVIEW';
+
 /**
  * Bản ghi yêu cầu giải ngân trong MongoDB.
  * Đồng bộ với MultisigDisbursement.sol on-chain.
@@ -30,6 +38,10 @@ export type DisbursementRecord = {
   projectId: string;                    // projectId dự án
   onChainProjectId: number;             // projectId trên blockchain
   organizationId: string;               // Tổ chức tạo request
+  requestMode: DisbursementRequestMode;
+  emergencyReason: string | null;
+  requiredApprovals: number;
+  raisedRatioBpsAtCreation: number;
   beneficiaryWalletAddress: string;      // Địa chỉ ví nhận tiền
   beneficiaryBankAccount: {
     bankName: string;
@@ -38,6 +50,7 @@ export type DisbursementRecord = {
     branchName?: string;
   };
   amount: number;                       // Số token muốn rút
+  usagePurpose: string;                // Mục đích sử dụng khoản giải ngân
   evidenceCid: string;                 // CID IPFS của bằng chứng sử dụng tiền
   status: DisbursementStatus;
   // Tracking chữ ký từ 3 vai trò
@@ -55,9 +68,14 @@ export type DisbursementRecord = {
     reason: string;
     rejectedAt: Date;
   } | null;
+  timeoutDeadline: Date | null;
   payosTransferId: string | null;      // PayOS transfer ID khi thực hiện chuyển khoản
-  payosTransferStatus: string | null;  // PENDING | SUCCESS | FAILED
+  payosTransferStatus: DisbursementTransferStatus | null;
+  payosTransferAttemptCount: number;
+  payosTransferLastError: string | null;
+  transferIdempotencyKey: string | null;
   transactionHash: string | null;      // Hash giao dịch burn token trên blockchain
+  finalizeTransactionHash: string | null;
   createdAt: Date;
   updatedAt: Date;
   expiredAt: Date | null;              // Thời điểm hết hạn (createdAt + 7 ngày)
@@ -86,6 +104,10 @@ const disbursementSchema = new Schema<DisbursementRecord>({
   projectId: { type: String, required: true, index: true },
   onChainProjectId: { type: Number, required: true },
   organizationId: { type: String, required: true, index: true },
+  requestMode: { type: String, required: true, enum: ['NORMAL', 'EMERGENCY'] },
+  emergencyReason: { type: String, default: null },
+  requiredApprovals: { type: Number, required: true },
+  raisedRatioBpsAtCreation: { type: Number, required: true },
   beneficiaryWalletAddress: { type: String, required: true },
   beneficiaryBankAccount: {
     bankName: { type: String, required: true },
@@ -94,13 +116,19 @@ const disbursementSchema = new Schema<DisbursementRecord>({
     branchName: { type: String, default: null }
   },
   amount: { type: Number, required: true },
+  usagePurpose: { type: String, required: true, trim: true },
   evidenceCid: { type: String, required: true },
   status: { type: String, required: true, index: true },
   approvals: { type: [approvalSchema], default: [] },
   rejection: { type: rejectionSchema, default: null },
+  timeoutDeadline: { type: Date, default: null },
   payosTransferId: { type: String, default: null },
   payosTransferStatus: { type: String, default: null },
+  payosTransferAttemptCount: { type: Number, default: 0 },
+  payosTransferLastError: { type: String, default: null },
+  transferIdempotencyKey: { type: String, default: null },
   transactionHash: { type: String, default: null },
+  finalizeTransactionHash: { type: String, default: null },
   createdAt: { type: Date, required: true },
   updatedAt: { type: Date, required: true },
   expiredAt: { type: Date, default: null },
@@ -111,6 +139,7 @@ const disbursementSchema = new Schema<DisbursementRecord>({
 disbursementSchema.index({ organizationId: 1, projectId: 1 });
 disbursementSchema.index({ beneficiaryWalletAddress: 1 });
 disbursementSchema.index({ status: 1, createdAt: -1 });
+disbursementSchema.index({ payosTransferId: 1 }, { sparse: true });
 
 const DisbursementMongoModel = mongoose.model<DisbursementRecord>('Disbursement', disbursementSchema);
 
@@ -126,9 +155,30 @@ export async function findDisbursementByOnChainRequestId(onChainRequestId: numbe
   return DisbursementMongoModel.findOne({ onChainRequestId }).lean<DisbursementRecord>().exec();
 }
 
+/** Tìm bản ghi theo payosTransferId. Mục đích: xử lý callback hoặc đối soát transfer từ cổng thanh toán. */
+export async function findDisbursementByPayosTransferId(payosTransferId: string): Promise<DisbursementRecord | null> {
+  return DisbursementMongoModel.findOne({ payosTransferId }).lean<DisbursementRecord>().exec();
+}
+
 /** Tìm các yêu cầu giải ngân theo trạng thái. Mục đích: phục vụ dashboard ký duyệt. */
 export async function findDisbursementsByStatus(status: DisbursementStatus): Promise<DisbursementRecord[]> {
   return DisbursementMongoModel.find({ status }).sort({ createdAt: -1 }).lean<DisbursementRecord[]>().exec();
+}
+
+/**
+ * Hàm lấy danh sách yêu cầu giải ngân mới nhất.
+ * Mục đích: cung cấp dữ liệu thật cho timeline và audit log trên dashboard admin.
+ */
+export async function findLatestDisbursements(limitCount: number): Promise<DisbursementRecord[]> {
+  const normalizedLimitCount = Number.isFinite(limitCount)
+    ? Math.max(1, Math.min(200, Math.floor(limitCount)))
+    : 20;
+
+  return DisbursementMongoModel.find({})
+    .sort({ updatedAt: -1 })
+    .limit(normalizedLimitCount)
+    .lean<DisbursementRecord[]>()
+    .exec();
 }
 
 /** Tìm các yêu cầu giải ngân theo projectId. Mục đích: xem lịch sử giải ngân dự án. */
@@ -165,6 +215,21 @@ export async function updateDisbursementByRequestId(
     { ...payload, updatedAt: new Date() },
     { returnDocument: 'after' }
   ).exec();
+  return updated ? (updated.toObject() as DisbursementRecord) : null;
+}
+
+/** Cập nhật bản ghi theo requestId và điều kiện. Mục đích: tạo lock idempotency khi xử lý auto-transfer. */
+export async function updateDisbursementByRequestIdWithCondition(
+  requestId: string,
+  condition: Record<string, unknown>,
+  payload: Partial<DisbursementRecord>
+): Promise<DisbursementRecord | null> {
+  const updated = await DisbursementMongoModel.findOneAndUpdate(
+    { requestId, ...condition },
+    { ...payload, updatedAt: new Date() },
+    { returnDocument: 'after' }
+  ).exec();
+
   return updated ? (updated.toObject() as DisbursementRecord) : null;
 }
 

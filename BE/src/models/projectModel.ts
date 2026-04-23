@@ -72,6 +72,11 @@ export async function countActiveProjectsByOrganizationId(organizationId: string
   return ProjectMongoModel.countDocuments({ organizationId, status: 'ACTIVE' }).exec();
 }
 
+/** Hàm đếm số dự án theo trạng thái. Mục đích: cung cấp số liệu thật cho metric dashboard quản trị. */
+export async function countProjectsByStatus(status: ProjectStatus): Promise<number> {
+  return ProjectMongoModel.countDocuments({ status }).exec();
+}
+
 /** Hàm tạo mới bản ghi dự án. Mục đích: lưu dữ liệu dự án vào MongoDB theo chuẩn repository. */
 export async function createProjectRecord(projectRecord: ProjectRecord): Promise<ProjectRecord> {
   const createdProject = await ProjectMongoModel.create(projectRecord);

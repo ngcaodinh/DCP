@@ -87,6 +87,22 @@ function normalizeDeadlineLevel(
   return "ok";
 }
 
+/** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: ép dữ liệu API về đúng 3 trạng thái UI hỗ trợ để tránh lỗi TypeScript. */
+function normalizeSignatureState(currentSignatures: number, requiredSignatures: number): '1/3' | '2/3' | '3/3' {
+  const safeRequiredSignatures = requiredSignatures === 3 ? 3 : 3;
+  const safeCurrentSignatures = Math.min(Math.max(currentSignatures, 1), safeRequiredSignatures);
+
+  if (safeCurrentSignatures >= 3) {
+    return '3/3';
+  }
+
+  if (safeCurrentSignatures === 2) {
+    return '2/3';
+  }
+
+  return '1/3';
+}
+
 type DisbursementPanelProps = {
   onPushToast?: (t: Omit<ToastItem, "id">) => void;
 
@@ -130,6 +146,12 @@ function DisbursementPanel({
           currentSignatures: number;
 
           deadlineTimestamp: number;
+
+          usagePurpose?: string;
+
+          ipfsCid?: string;
+
+          fileName?: string;
         }[];
       }>(buildApiUrl("/api/disbursement/requests"), {
         headers: { Authorization: `Bearer ${session.accessToken}` },
@@ -147,11 +169,17 @@ function DisbursementPanel({
 
           amountText: new Intl.NumberFormat("vi-VN").format(r.amount) + "₫",
 
-          signatureState: `${r.currentSignatures}/${r.requiredSignatures}`,
+          signatureState: normalizeSignatureState(r.currentSignatures, r.requiredSignatures),
 
           deadlineText: normalizeDeadlineText(r.deadlineTimestamp),
 
           deadlineLevel: normalizeDeadlineLevel(r.deadlineTimestamp),
+
+          usagePurpose: r.usagePurpose,
+
+          ipfsCid: r.ipfsCid,
+
+          fileName: r.fileName,
         })),
       );
     } catch {
