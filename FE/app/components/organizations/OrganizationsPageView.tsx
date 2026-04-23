@@ -102,6 +102,9 @@ export default function OrganizationsPageView() {
   const [isBankSetupHighlighted, setIsBankSetupHighlighted] = useState(false);
   const [hasUnreadNotification, setHasUnreadNotification] = useState(true);
   const [createdProjects, setCreatedProjects] = useState<ProjectSummary[]>([]);
+  const [disbursements, setDisbursements] = useState<import('./types').DisbursementResult[]>([]);
+  const [isDisbursementsLoading, setIsDisbursementsLoading] = useState(false);
+  const [disbursementsErrorMessage, setDisbursementsErrorMessage] = useState<string | null>(null);
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [projectsErrorMessage, setProjectsErrorMessage] = useState<string | null>(null);
   const [isCreateProjectAllowed, setIsCreateProjectAllowed] = useState(true);
@@ -244,6 +247,35 @@ export default function OrganizationsPageView() {
     }
 
     setIsNotificationOpen(currentState => !currentState);
+  };
+
+  /** Hàm tải danh sách giải ngân từ backend. Mục đích: đồng bộ dữ liệu thật cho màn hình "Giải ngân". */
+  const loadDisbursementsFromApi = async () => {
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setDisbursementsErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsDisbursementsLoading(true);
+    setDisbursementsErrorMessage(null);
+
+    try {
+      const response = await fetchApi<import('./types').DisbursementResult[]>(buildApiUrl('/api/disbursement/me'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+      setDisbursements(response.data);
+    } catch (error: unknown) {
+      const fallbackErrorMessage = 'Không thể tải danh sách giải ngân. Vui lòng thử lại sau.';
+      if (error && typeof error === 'object' && 'message' in error) {
+        setDisbursementsErrorMessage((error as { message?: string }).message || fallbackErrorMessage);
+      } else {
+        setDisbursementsErrorMessage(fallbackErrorMessage);
+      }
+    } finally {
+      setIsDisbursementsLoading(false);
+    }
   };
 
   /** Hàm tải danh sách dự án từ backend. Mục đích: đồng bộ dữ liệu thật cho màn hình “Dự án của tôi”. */
@@ -464,7 +496,7 @@ export default function OrganizationsPageView() {
       return;
     }
 
-    void Promise.all([loadProjectsFromApi(), loadCreateProjectEligibility(), loadOrganizationKycSubmissions()]);
+    void Promise.all([loadProjectsFromApi(), loadCreateProjectEligibility(), loadOrganizationKycSubmissions(), loadDisbursementsFromApi()]);
   }, [isAccessChecking]);
 
   useEffect(() => {
@@ -600,6 +632,11 @@ export default function OrganizationsPageView() {
               <DisbursementSection
                 activeDisbursementTab={activeDisbursementTab}
                 onChangeDisbursementTab={setActiveDisbursementTab}
+                disbursements={disbursements}
+                isDisbursementsLoading={isDisbursementsLoading}
+                disbursementsErrorMessage={disbursementsErrorMessage}
+                onRetryLoadDisbursements={loadDisbursementsFromApi}
+                createdProjects={createdProjects}
               />
             ) : null}
             {activePage === 'transparency' ? <TransparencySection /> : null}

@@ -68,3 +68,36 @@ export type ProjectSummary = {
   rejectionReason: string | null;
   createdAt: string;
 };
+export type DisbursementStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED' | 'EXPIRED' | 'CANCELLED';
+
+export type DisbursementResult = {
+  requestId: string;
+  onChainRequestId: number;
+  projectId: string;
+  beneficiaryWalletAddress: string;
+  beneficiaryBankAccount: {
+    bankName: string;
+    bankAccountNumber: string;
+    accountHolderName: string;
+    branchName?: string;
+  };
+  amount: number;
+  evidenceCid: string;
+  status: DisbursementStatus;
+  approvals: Array<{
+    signerRole: string;
+    signerUserId: string;
+    signerAddress: string;
+    signedAt: string;
+    comment?: string;
+  }>;
+  rejection?: {
+    rejectedBy: string;
+    reason: string;
+    rejectedAt: string;
+  };
+  createdAt: string;
+  updatedAt: string;
+  expiredAt?: string;
+  completedAt?: string;
+};

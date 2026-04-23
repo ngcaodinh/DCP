@@ -9,6 +9,11 @@ import { ProjectSummary } from './types';
 type DisbursementSectionProps = {
   activeDisbursementTab: 'eligible' | 'pending' | 'history';
   onChangeDisbursementTab: (tab: 'eligible' | 'pending' | 'history') => void;
+  disbursements?: import('./types').DisbursementResult[];
+  isDisbursementsLoading?: boolean;
+  disbursementsErrorMessage?: string | null;
+  onRetryLoadDisbursements?: () => void;
+  createdProjects?: import('./types').ProjectSummary[];
 };
 
 type CreateProjectModalProps = {
@@ -964,19 +969,43 @@ export function ProjectsSection({
 }
 
 /** Hàm render section Disbursement. Mục đích: hiển thị tab giải ngân và trạng thái đa chữ ký. */
-export function DisbursementSection({ activeDisbursementTab, onChangeDisbursementTab }: DisbursementSectionProps) {
+/** Hàm lấy tên dự án từ danh sách dự án. Mục đích: hiển thị tên dự án thay vì ID khó nhớ. */
+function getProjectName(projectId: string, projects: import('./types').ProjectSummary[]): string {
+  const project = projects.find(p => p.projectId === projectId);
+  return project ? project.name : projectId;
+}
+
+/** Hàm render danh sách giải ngân theo tab. Mục đích: tái sử dụng UI cho các tab khác nhau. */
+export function DisbursementSection({
+  activeDisbursementTab,
+  onChangeDisbursementTab,
+  disbursements = [],
+  isDisbursementsLoading = false,
+  disbursementsErrorMessage = null,
+  onRetryLoadDisbursements,
+  createdProjects = []
+}: DisbursementSectionProps) {
   const tabItems = [
     { key: 'eligible', label: 'Đủ điều kiện' },
     { key: 'pending', label: 'Chờ duyệt' },
     { key: 'history', label: 'Lịch sử' }
   ] as const;
 
-  // Ghi chú: ánh xạ trạng thái theo tab để giữ nội dung rõ ràng, tránh viết điều kiện lồng nhau trong JSX.
   const statusLabelMap = {
     eligible: '🟢 Sẵn sàng tạo yêu cầu',
     pending: '⏳ Đang chờ 2/3 chữ ký',
     history: '✅ Đã hoàn tất giải ngân'
   } as const;
+
+  const pendingDisbursements = disbursements.filter(d => d.status === 'PENDING');
+  const historyDisbursements = disbursements.filter(d => d.status !== 'PENDING');
+  
+  // Lọc các dự án ACTIVE và không có yêu cầu PENDING nào
+  const eligibleProjects = createdProjects.filter(p => {
+    if (p.status !== 'ACTIVE') return false;
+    const hasPending = pendingDisbursements.some(d => d.projectId === p.projectId);
+    return !hasPending;
+  });
 
   return (
     <SectionCard title="Yêu cầu giải ngân">
@@ -993,35 +1022,102 @@ export function DisbursementSection({ activeDisbursementTab, onChangeDisbursemen
         ))}
       </div>
 
-      <div className="rounded-[12px] border border-[#E5E7EB] p-4">
-        <div className="mb-3 flex items-start justify-between">
-          <div>
-            <p className="font-semibold">Học bổng vùng cao Tây Bắc</p>
-            <p className="text-xs text-[#6B7280]">#DIS-2025-0047 · Đợt giải ngân tháng 05</p>
-          </div>
-          <p className="text-lg font-bold text-[#0E7C6B]">15,000,000 ₫</p>
+      {isDisbursementsLoading ? (
+        <div className="py-8 text-center text-sm text-[#6B7280]">Đang tải dữ liệu...</div>
+      ) : disbursementsErrorMessage ? (
+        <div className="flex flex-col items-center justify-center py-8">
+          <p className="mb-2 text-sm text-[#DC2626]">{disbursementsErrorMessage}</p>
+          {onRetryLoadDisbursements && (
+            <button type="button" onClick={onRetryLoadDisbursements} className="rounded bg-[#F3F4F6] px-4 py-2 text-xs font-medium">Thử lại</button>
+          )}
         </div>
+      ) : (
+        <div className="space-y-4">
+          {activeDisbursementTab === 'eligible' && (
+            eligibleProjects.length === 0 ? (
+              <p className="py-4 text-center text-sm text-[#6B7280]">Không có dự án nào đủ điều kiện giải ngân.</p>
+            ) : (
+              eligibleProjects.map(project => (
+                <div key={project.projectId} className="rounded-[12px] border border-[#E5E7EB] p-4">
+                  <div className="mb-3 flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold">{project.name}</p>
+                      <p className="text-xs text-[#6B7280]">Đủ điều kiện giải ngân</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-[#0E7C6B]">{statusLabelMap['eligible']}</p>
+                    <button type="button" className="rounded-[8px] bg-[#0E7C6B] px-3 py-1.5 text-xs font-semibold text-white">Tạo yêu cầu giải ngân</button>
+                  </div>
+                </div>
+              ))
+            )
+          )}
 
-        <div className="space-y-2 text-xs">
-          <div className="rounded border border-[#E5E7EB] bg-[#F9FAFB] p-2.5">
-            <p className="font-medium">✅ Admin hệ thống đã ký</p>
-            <p className="mt-0.5 text-[#6B7280]">Nguyễn Văn A · 09:45 20/05/2025</p>
-          </div>
-          <div className="rounded border border-[#E5E7EB] bg-[#F9FAFB] p-2.5">
-            <p className="font-medium">✅ Đại diện tổ chức đã ký</p>
-            <p className="mt-0.5 text-[#6B7280]">Trần Minh H · 10:12 20/05/2025</p>
-          </div>
-          <div className="rounded border border-[#FCD34D] bg-[#FFFBEB] p-2.5">
-            <p className="font-medium text-[#92400E]">⏳ Cơ quan giám sát chưa ký</p>
-            <p className="mt-0.5 text-[#B45309]">Bộ Tài chính · Chờ xác nhận</p>
-          </div>
-        </div>
+          {activeDisbursementTab === 'pending' && (
+            pendingDisbursements.length === 0 ? (
+              <p className="py-4 text-center text-sm text-[#6B7280]">Không có yêu cầu giải ngân nào đang chờ duyệt.</p>
+            ) : (
+              pendingDisbursements.map(disbursement => {
+                const adminSigned = disbursement.approvals.some(a => a.signerRole === 'ADMIN_SIGNER');
+                const orgSigned = disbursement.approvals.some(a => a.signerRole === 'ORG_SIGNER');
+                const regSigned = disbursement.approvals.some(a => a.signerRole === 'REGULATORY_SIGNER');
+                return (
+                  <div key={disbursement.requestId} className="rounded-[12px] border border-[#E5E7EB] p-4">
+                    <div className="mb-3 flex items-start justify-between">
+                      <div>
+                        <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
+                        <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền</p>
+                      </div>
+                      <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
+                    </div>
+                    
+                    <div className="space-y-2 text-xs">
+                      <div className={`rounded border p-2.5 ${adminSigned ? 'border-[#E5E7EB] bg-[#F9FAFB]' : 'border-[#FCD34D] bg-[#FFFBEB]'}`}>
+                        <p className={`font-medium ${adminSigned ? '' : 'text-[#92400E]'}`}>
+                          {adminSigned ? '✅ Admin hệ thống đã ký' : '⏳ Admin hệ thống chưa ký'}
+                        </p>
+                      </div>
+                      <div className={`rounded border p-2.5 ${orgSigned ? 'border-[#E5E7EB] bg-[#F9FAFB]' : 'border-[#FCD34D] bg-[#FFFBEB]'}`}>
+                        <p className={`font-medium ${orgSigned ? '' : 'text-[#92400E]'}`}>
+                          {orgSigned ? '✅ Đại diện tổ chức đã ký' : '⏳ Đại diện tổ chức chưa ký'}
+                        </p>
+                      </div>
+                      <div className={`rounded border p-2.5 ${regSigned ? 'border-[#E5E7EB] bg-[#F9FAFB]' : 'border-[#FCD34D] bg-[#FFFBEB]'}`}>
+                        <p className={`font-medium ${regSigned ? '' : 'text-[#92400E]'}`}>
+                          {regSigned ? '✅ Cơ quan giám sát đã ký' : '⏳ Cơ quan giám sát chưa ký'}
+                        </p>
+                      </div>
+                    </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-semibold text-[#0E7C6B]">{statusLabelMap[activeDisbursementTab]}</p>
-          <button type="button" className="rounded-[8px] bg-[#0E7C6B] px-3 py-1.5 text-xs font-semibold text-white">Tạo yêu cầu giải ngân</button>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-[#B45309]">{statusLabelMap['pending']}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )
+          )}
+
+          {activeDisbursementTab === 'history' && (
+            historyDisbursements.length === 0 ? (
+              <p className="py-4 text-center text-sm text-[#6B7280]">Không có lịch sử giải ngân nào.</p>
+            ) : (
+              historyDisbursements.map(disbursement => (
+                <div key={disbursement.requestId} className="rounded-[12px] border border-[#E5E7EB] p-4">
+                  <div className="mb-3 flex items-start justify-between">
+                    <div>
+                      <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
+                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {disbursement.status}</p>
+                    </div>
+                    <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
+                  </div>
+                </div>
+              ))
+            )
+          )}
         </div>
-      </div>
+      )}
     </SectionCard>
   );
 }
