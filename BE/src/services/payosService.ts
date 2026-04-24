@@ -30,6 +30,39 @@ export type CreatePayosTransferResult = {
   rawPayload: unknown;
 };
 
+export type GetPayosTransferStatusByReferenceIdResult = {
+  found: boolean;
+  transferId: string | null;
+  providerTransactionId: string | null;
+  transferStatus: 'PROCESSING' | 'SUCCESS' | 'FAILED';
+  errorMessage: string | null;
+  rawPayload: unknown;
+};
+
+/** Hàm lọc thông tin nhạy cảm khỏi payload log. Mục đích: hỗ trợ debug PayOS mà không lộ số tài khoản hoặc tên thụ hưởng đầy đủ. */
+function maskPayosSensitivePayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => maskPayosSensitivePayload(item));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const maskedPayload: Record<string, unknown> = {};
+  for (const [payloadKey, payloadValue] of Object.entries(value as Record<string, unknown>)) {
+    const normalizedPayloadKey = payloadKey.toLowerCase();
+    if (normalizedPayloadKey.includes('account') || normalizedPayloadKey.includes('recipient') || normalizedPayloadKey.includes('name')) {
+      maskedPayload[payloadKey] = '[MASKED]';
+      continue;
+    }
+
+    maskedPayload[payloadKey] = maskPayosSensitivePayload(payloadValue);
+  }
+
+  return maskedPayload;
+}
+
 /**
  * Hàm lấy cặp credential cho API transfer PayOS.
  * Mục đích: ưu tiên cấu hình riêng của FR8 và fallback về credential chung khi cần tương thích ngược.
@@ -139,23 +172,39 @@ function getPayosTransferChecksumKeysForWebhookVerify(): string[] {
 }
 
 /**
+ * Hàm sắp xếp object lồng nhau theo key. Mục đích: tạo dữ liệu ký payout đúng quy tắc PayOS với object trong array được sort ổn định.
+ */
+function deepSortPayosSignatureValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(item => deepSortPayosSignatureValue(item));
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.keys(value as Record<string, unknown>)
+    .sort()
+    .reduce<Record<string, unknown>>((sortedValue, valueKey) => {
+      sortedValue[valueKey] = deepSortPayosSignatureValue((value as Record<string, unknown>)[valueKey]);
+      return sortedValue;
+    }, {});
+}
+
+/**
  * Hàm chuẩn hóa value cho chuỗi ký request PayOS.
- * Mục đích: đảm bảo dữ liệu được URL-encode đúng chuẩn trước khi tính HMAC.
+ * Mục đích: encode array/object đúng dạng JSON string theo tài liệu payout PayOS.
  */
 function toPayosRequestSignatureValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value.map((item) => encodeURIComponent(String(item))).join(',');
+  let normalizedValue = deepSortPayosSignatureValue(value);
+
+  if (normalizedValue === null || normalizedValue === undefined || normalizedValue === 'undefined' || normalizedValue === 'null') {
+    normalizedValue = '';
+  } else if (Array.isArray(normalizedValue) || typeof normalizedValue === 'object') {
+    normalizedValue = JSON.stringify(normalizedValue);
   }
 
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  if (typeof value === 'object') {
-    return encodeURIComponent(JSON.stringify(value));
-  }
-
-  return encodeURIComponent(String(value));
+  return encodeURIComponent(String(normalizedValue));
 }
 
 /**
@@ -178,6 +227,28 @@ function signPayosTransferPayload(payload: Record<string, unknown>): string {
   const checksumKey = getPayosTransferChecksumKey();
   const signText = buildPayosRequestSignText(payload);
   return crypto.createHmac('sha256', checksumKey).update(signText).digest('hex');
+}
+
+/** Hàm rút gọn mô tả payout theo giới hạn PayOS. Mục đích: đảm bảo description không vượt quá 25 ký tự nhưng vẫn có hậu tố request để đối soát nhanh. */
+function buildPayosTransferDescription(requestId: string): string {
+  const requestIdSuffix = requestId.replace(/[^A-Za-z0-9]/g, '').slice(-12);
+  return `DCP ${requestIdSuffix}`.slice(0, 25);
+}
+
+/**
+ * Hàm lấy endpoint payout chuẩn từ cấu hình môi trường.
+ * Mục đích: dùng chung cho cả create payout và query trạng thái để tránh lệch endpoint.
+ */
+function getPayosTransferEndpointUrl(): string {
+  const configuredTransferEndpointUrl = String(
+    process.env.PAYOS_TRANSFER_API_URL
+    || process.env.PAYOS_PAYOUT_API_URL
+    || 'https://api-merchant.payos.vn/v1/payouts'
+  ).trim();
+
+  // Ghi chú logic phức tạp: tương thích ngược với cấu hình cũ còn dùng /v1/transfers để tránh 404.
+  return configuredTransferEndpointUrl
+    .replace(/\/v1\/transfers\/?$/i, '/v1/payouts');
 }
 
 /**
@@ -286,11 +357,14 @@ export async function createPayosPaymentLink(input: CreatePaymentLinkInput): Pro
 function mapPayosTransferStatus(statusValue: string): 'PROCESSING' | 'SUCCESS' | 'FAILED' {
   const normalizedStatusValue = statusValue.trim().toUpperCase();
 
-  if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'PAID', 'DONE'].includes(normalizedStatusValue)) {
+  if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'PAID', 'DONE', '00', '0'].includes(normalizedStatusValue)) {
     return 'SUCCESS';
   }
 
-  if (['FAILED', 'ERROR', 'CANCELLED', 'CANCELED', 'REJECTED'].includes(normalizedStatusValue)) {
+  if (
+    ['FAILED', 'ERROR', 'CANCELLED', 'CANCELED', 'REJECTED', '-1', '02'].includes(normalizedStatusValue)
+    || normalizedStatusValue.startsWith('ERR')
+  ) {
     return 'FAILED';
   }
 
@@ -346,20 +420,85 @@ function getPrimaryPayosTransferTransaction(payoutData: Record<string, unknown> 
 }
 
 /**
+ * Hàm chuẩn hóa danh sách payout từ response PayOS.
+ * Mục đích: hỗ trợ cả trường hợp payouts là array hoặc object map.
+ */
+function normalizePayosPayoutList(rawPayouts: unknown): Record<string, unknown>[] {
+  if (Array.isArray(rawPayouts)) {
+    return rawPayouts
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+  }
+
+  if (rawPayouts && typeof rawPayouts === 'object') {
+    return Object.values(rawPayouts)
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object');
+  }
+
+  return [];
+}
+
+/**
+ * Hàm lấy payout chính từ data response PayOS.
+ * Mục đích: chuẩn hóa cấu trúc payload để truy xuất status ổn định khi polling.
+ */
+function getPrimaryPayosPayoutRecord(payoutData: unknown): Record<string, unknown> | null {
+  if (!payoutData) {
+    return null;
+  }
+
+  if (typeof payoutData === 'string') {
+    try {
+      const parsedPayoutData = JSON.parse(payoutData) as unknown;
+      return getPrimaryPayosPayoutRecord(parsedPayoutData);
+    } catch {
+      return null;
+    }
+  }
+
+  if (Array.isArray(payoutData)) {
+    for (const payoutItem of payoutData) {
+      const primaryPayoutRecord = getPrimaryPayosPayoutRecord(payoutItem);
+      if (primaryPayoutRecord) {
+        return primaryPayoutRecord;
+      }
+    }
+
+    return null;
+  }
+
+  if (typeof payoutData !== 'object') {
+    return null;
+  }
+
+  const payoutRecord = payoutData as Record<string, unknown>;
+  const payoutList = normalizePayosPayoutList(payoutRecord.payouts);
+  if (payoutList.length > 0) {
+    return payoutList[0];
+  }
+
+  const looksLikePayoutRecord = Boolean(
+    payoutRecord.id
+    || payoutRecord.transferId
+    || payoutRecord.referenceId
+    || payoutRecord.approvalState
+    || payoutRecord.transactions
+  );
+
+  if (looksLikePayoutRecord) {
+    return payoutRecord;
+  }
+
+  return null;
+}
+
+/**
  * Hàm tạo lệnh chuyển khoản ngân hàng qua PayOS cho luồng FR8.
  * Mục đích: thực thi auto-transfer có idempotency key để chống gửi trùng giao dịch.
  */
 export async function createPayosTransfer(input: CreatePayosTransferInput): Promise<CreatePayosTransferResult> {
   const { clientId, apiKey } = getPayosTransferApiCredentials();
 
-  const configuredTransferEndpointUrl = String(
-    process.env.PAYOS_TRANSFER_API_URL
-    || process.env.PAYOS_PAYOUT_API_URL
-    || 'https://api-merchant.payos.vn/v1/payouts'
-  ).trim();
-  // Ghi chú logic phức tạp: tương thích ngược với cấu hình cũ còn dùng /v1/transfers để tránh 404.
-  const transferEndpointUrl = configuredTransferEndpointUrl
-    .replace(/\/v1\/transfers\/?$/i, '/v1/payouts');
+  const transferEndpointUrl = getPayosTransferEndpointUrl();
   const transferTimeoutMilliseconds = Number(process.env.PAYOS_TRANSFER_TIMEOUT_MS || 30000);
 
   const abortController = new AbortController();
@@ -374,10 +513,9 @@ export async function createPayosTransfer(input: CreatePayosTransferInput): Prom
     const transferRequestPayload = {
       referenceId: input.requestId,
       amount: input.amountVnd,
-      description: input.description,
+      description: buildPayosTransferDescription(input.requestId),
       toBin: input.bankCode,
       toAccountNumber: input.bankAccountNumber,
-      recipientName: input.accountHolderName,
       category: transferCategoryList.length > 0 ? transferCategoryList : ['transfer']
     };
     const transferRequestSignature = signPayosTransferPayload(transferRequestPayload);
@@ -410,24 +548,24 @@ export async function createPayosTransfer(input: CreatePayosTransferInput): Prom
     const normalizedPayload = (responsePayload || {}) as {
       code?: string | number;
       status?: string;
-      data?: {
-        transferId?: string | number;
-        id?: string | number;
-        transactionId?: string | number;
-        bankReferenceNumber?: string | number;
-        referenceNumber?: string | number;
-        status?: string;
-        state?: string;
-        approvalState?: string;
-        transactions?: unknown;
-        payouts?: unknown;
-      };
+      data?: unknown;
     };
-    const normalizedData = (normalizedPayload.data || {}) as Record<string, unknown>;
-    const primaryTransaction = getPrimaryPayosTransferTransaction(normalizedData);
+    const normalizedData = (
+      normalizedPayload.data
+      && typeof normalizedPayload.data === 'object'
+      && !Array.isArray(normalizedPayload.data)
+    )
+      ? (normalizedPayload.data as Record<string, unknown>)
+      : {};
+    const primaryPayoutRecord = getPrimaryPayosPayoutRecord(normalizedPayload.data) || normalizedData;
+    const primaryTransaction = getPrimaryPayosTransferTransaction(primaryPayoutRecord);
 
     const transferId = String(
-      normalizedData.transferId
+      primaryPayoutRecord.transferId
+      || primaryPayoutRecord.id
+      || primaryPayoutRecord.transactionId
+      || primaryPayoutRecord.referenceId
+      || normalizedData.transferId
       || normalizedData.id
       || normalizedData.transactionId
       || normalizedData.referenceId
@@ -441,6 +579,9 @@ export async function createPayosTransfer(input: CreatePayosTransferInput): Prom
       || (primaryTransaction ? primaryTransaction.id : undefined)
       || (primaryTransaction ? primaryTransaction.bankReferenceNumber : undefined)
       || (primaryTransaction ? primaryTransaction.referenceNumber : undefined)
+      || primaryPayoutRecord.transactionId
+      || primaryPayoutRecord.bankReferenceNumber
+      || primaryPayoutRecord.referenceNumber
       || normalizedData.transactionId
       || normalizedData.bankReferenceNumber
       || normalizedData.referenceNumber
@@ -451,18 +592,157 @@ export async function createPayosTransfer(input: CreatePayosTransferInput): Prom
       (primaryTransaction ? primaryTransaction.state : undefined)
       || (primaryTransaction ? primaryTransaction.status : undefined)
       || (primaryTransaction ? primaryTransaction.approvalState : undefined)
+      || primaryPayoutRecord.state
+      || primaryPayoutRecord.status
+      || primaryPayoutRecord.approvalState
       || normalizedData.state
       || normalizedData.status
       || normalizedData.approvalState
       || normalizedPayload.status
-      || normalizedPayload.code
       || ''
     );
+
+    if (transferId === input.idempotencyKey && providerTransactionId === input.idempotencyKey) {
+      console.warn('PayOS payout response thiếu định danh giao dịch thật.', maskPayosSensitivePayload(responsePayload));
+    }
 
     return {
       transferId,
       providerTransactionId,
       transferStatus: mapPayosTransferStatus(rawTransferStatus),
+      rawPayload: responsePayload
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+/**
+ * Hàm lấy trạng thái payout theo referenceId từ PayOS.
+ * Mục đích: hỗ trợ BE polling chủ động cho luồng FR8 mà không phụ thuộc webhook ngoài.
+ */
+export async function getPayosTransferStatusByReferenceId(
+  referenceId: string
+): Promise<GetPayosTransferStatusByReferenceIdResult> {
+  const { clientId, apiKey } = getPayosTransferApiCredentials();
+  const transferEndpointUrl = getPayosTransferEndpointUrl();
+  const transferTimeoutMilliseconds = Number(process.env.PAYOS_TRANSFER_TIMEOUT_MS || 30000);
+
+  const transferQueryUrl = new URL(transferEndpointUrl);
+  transferQueryUrl.searchParams.set('referenceId', referenceId);
+  transferQueryUrl.searchParams.set('limit', '1');
+  transferQueryUrl.searchParams.set('offset', '0');
+
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), transferTimeoutMilliseconds);
+
+  try {
+    const response = await fetch(transferQueryUrl.toString(), {
+      method: 'GET',
+      headers: {
+        'x-client-id': clientId,
+        'x-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      signal: abortController.signal
+    });
+
+    const responseText = await response.text();
+    let responsePayload: unknown = null;
+    try {
+      responsePayload = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      responsePayload = responseText;
+    }
+
+    if (!response.ok) {
+      throw new Error(`PayOS query transfer thất bại: ${response.status} ${responseText}`);
+    }
+
+    const normalizedPayload = (responsePayload || {}) as {
+      code?: string | number;
+      desc?: string;
+      status?: string;
+      data?: unknown;
+    };
+    const normalizedData = (
+      normalizedPayload.data
+      && typeof normalizedPayload.data === 'object'
+      && !Array.isArray(normalizedPayload.data)
+    )
+      ? (normalizedPayload.data as Record<string, unknown>)
+      : {};
+    const primaryPayoutRecord = getPrimaryPayosPayoutRecord(normalizedPayload.data);
+
+    if (!primaryPayoutRecord) {
+      return {
+        found: false,
+        transferId: null,
+        providerTransactionId: null,
+        transferStatus: 'PROCESSING',
+        errorMessage: null,
+        rawPayload: responsePayload
+      };
+    }
+
+    const primaryTransaction = getPrimaryPayosTransferTransaction(primaryPayoutRecord);
+    const transferId = String(
+      primaryPayoutRecord.id
+      || primaryPayoutRecord.transferId
+      || primaryPayoutRecord.referenceId
+      || (primaryTransaction ? primaryTransaction.id : undefined)
+      || (primaryTransaction ? primaryTransaction.transactionId : undefined)
+      || normalizedData.id
+      || normalizedData.transferId
+      || normalizedData.referenceId
+      || referenceId
+    );
+
+    const providerTransactionId = String(
+      (primaryTransaction ? primaryTransaction.transactionId : undefined)
+      || (primaryTransaction ? primaryTransaction.id : undefined)
+      || (primaryTransaction ? primaryTransaction.bankReferenceNumber : undefined)
+      || (primaryTransaction ? primaryTransaction.referenceNumber : undefined)
+      || primaryPayoutRecord.transactionId
+      || primaryPayoutRecord.bankReferenceNumber
+      || primaryPayoutRecord.referenceNumber
+      || normalizedData.transactionId
+      || normalizedData.bankReferenceNumber
+      || normalizedData.referenceNumber
+      || transferId
+    );
+
+    const rawTransferStatus = String(
+      (primaryTransaction ? primaryTransaction.state : undefined)
+      || (primaryTransaction ? primaryTransaction.status : undefined)
+      || (primaryTransaction ? primaryTransaction.approvalState : undefined)
+      || primaryPayoutRecord.approvalState
+      || primaryPayoutRecord.state
+      || primaryPayoutRecord.status
+      || normalizedData.approvalState
+      || normalizedData.state
+      || normalizedData.status
+      || normalizedPayload.status
+      || ''
+    );
+
+    const errorMessage = String(
+      (primaryTransaction ? primaryTransaction.errorMessage : undefined)
+      || (primaryTransaction ? primaryTransaction.message : undefined)
+      || primaryPayoutRecord.errorMessage
+      || primaryPayoutRecord.message
+      || normalizedData.errorMessage
+      || normalizedData.message
+      || normalizedPayload.desc
+      || ''
+    ).trim() || null;
+
+    return {
+      found: true,
+      transferId,
+      providerTransactionId,
+      transferStatus: mapPayosTransferStatus(rawTransferStatus),
+      errorMessage,
       rawPayload: responsePayload
     };
   } finally {

@@ -7,6 +7,7 @@ import {
   getDisbursementsForOrganization,
   getDisbursementsForReview,
   getDisbursementRequestSummaries,
+  getLatestDisbursementApprovalLogs,
   getDisbursementDetail,
   getDisbursementsByProject,
   getMaxWithdrawableAmount,
@@ -123,7 +124,7 @@ export async function handleCreateDisbursementRequest(req: Request, res: Respons
 
     const payload: CreateDisbursementPayload = {
       projectId: req.body.projectId,
-      amount: req.body.amount,
+      amount: Number(req.body.amount),
       usagePurpose: req.body.usagePurpose,
       evidenceCid: req.body.evidenceCid,
       requestMode: req.body.requestMode,
@@ -311,6 +312,36 @@ export async function handleGetDisbursementRequestSummaries(req: Request, res: R
     } else {
       logger.error(`handleGetDisbursementRequestSummaries failed. error=${(error as Error)?.message}`);
       res.status(500).json({ error: 'Lỗi server khi lấy danh sách tóm tắt giải ngân.' });
+    }
+  }
+}
+
+/**
+ * GET /api/disbursement/approval-logs
+ * Lấy nhật ký ký duyệt gần nhất cho dashboard.
+ * Actor: Admin hệ thống / Cơ quan giám sát.
+ */
+export async function handleGetDisbursementApprovalLogs(req: Request, res: Response): Promise<void> {
+  try {
+    const userId = (req as any).authenticatedUser?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Không có quyền truy cập.' });
+      return;
+    }
+
+    const rawLimitCount = Number(req.query.limit);
+    const limitCount = Number.isFinite(rawLimitCount)
+      ? Math.max(1, Math.min(100, Math.floor(rawLimitCount)))
+      : 20;
+
+    const logs = await getLatestDisbursementApprovalLogs(userId, limitCount);
+    res.status(200).json({ success: true, data: { logs } });
+  } catch (error) {
+    if (error instanceof ApplicationError) {
+      res.status(error.statusCode).json({ error: error.message, code: error.errorCode });
+    } else {
+      logger.error(`handleGetDisbursementApprovalLogs failed. error=${(error as Error)?.message}`);
+      res.status(500).json({ error: 'Lỗi server khi lấy nhật ký ký duyệt.' });
     }
   }
 }

@@ -1144,6 +1144,7 @@ export default function OrganizationsPageView() {
                 disbursementsErrorMessage={disbursementsErrorMessage}
                 onRetryLoadDisbursements={loadDisbursementsFromApi}
                 createdProjects={createdProjects}
+                raisedAmountByProjectIdMap={new Map(Array.from(rankingItemByProjectIdMap.entries()).map(([projectId, rankingItem]) => [projectId, rankingItem.totalRaisedAmount]))}
                 onOpenCreateDisbursementModal={handleOpenCreateDisbursementModal}
               />
             ) : null}

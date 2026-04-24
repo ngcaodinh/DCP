@@ -14,6 +14,7 @@ type DisbursementSectionProps = {
   disbursementsErrorMessage?: string | null;
   onRetryLoadDisbursements?: () => void;
   createdProjects?: import('./types').ProjectSummary[];
+  raisedAmountByProjectIdMap?: Map<string, number>;
   onOpenCreateDisbursementModal?: (project: import('./types').ProjectSummary) => void;
 };
 
@@ -157,6 +158,7 @@ const createDisbursementDefaultFormState: CreateDisbursementFormData = {
   amount: '',
   usagePurpose: ''
 };
+const minimumPayosTransferAmountVnd = 10000;
 
 const createdProjectEmojis = ['🚀', '📌', '🎯', '✨', '🌱'];
 const createdProjectStyles = [
@@ -270,7 +272,20 @@ function formatProjectStatusVietnamese(status: ProjectSummary['status']): string
 }
 
 /** Hàm đổi trạng thái giải ngân sang tiếng Việt. Mục đích: hiển thị trạng thái yêu cầu giải ngân đúng ngữ cảnh nghiệp vụ cho tổ chức. */
-function formatDisbursementStatusVietnamese(status: import('./types').DisbursementStatus): string {
+function formatDisbursementStatusVietnamese(disbursement: import('./types').DisbursementResult): string {
+  if (disbursement.payosTransferStatus === 'MANUAL_REVIEW') {
+    return 'Cần kiểm tra thủ công';
+  }
+
+  if (disbursement.payosTransferStatus === 'FAILED') {
+    return 'Chuyển khoản thất bại';
+  }
+
+  if (disbursement.payosTransferStatus === 'PROCESSING') {
+    return 'Đang chuyển khoản';
+  }
+
+  const status = disbursement.status;
   if (status === 'PENDING') {
     return 'Chờ duyệt';
   }
@@ -1198,6 +1213,7 @@ export function DisbursementSection({
   disbursementsErrorMessage = null,
   onRetryLoadDisbursements,
   createdProjects = [],
+  raisedAmountByProjectIdMap = new Map<string, number>(),
   onOpenCreateDisbursementModal
 }: DisbursementSectionProps) {
   const tabItems = [
@@ -1209,7 +1225,7 @@ export function DisbursementSection({
   const statusLabelMap = {
     eligible: '🟢 Sẵn sàng tạo yêu cầu',
     pending: '⏳ Đang chờ đủ chữ ký theo policy request',
-    history: '✅ Đã hoàn tất giải ngân'
+    history: '📋 Lịch sử yêu cầu giải ngân'
   } as const;
 
   const pendingDisbursements = disbursements.filter(d => d.status === 'PENDING');
@@ -1224,6 +1240,8 @@ export function DisbursementSection({
   // Lọc các dự án ACTIVE và không có yêu cầu PENDING nào
   const eligibleProjects = createdProjects.filter(p => {
     if (p.status !== 'ACTIVE') return false;
+    const raisedAmount = raisedAmountByProjectIdMap.get(p.projectId) || 0;
+    if (raisedAmount < minimumPayosTransferAmountVnd) return false;
     const hasPending = pendingDisbursements.some(d => d.projectId === p.projectId);
     return !hasPending;
   });
@@ -1345,6 +1363,7 @@ export function DisbursementSection({
                     <div>
                       <p className="font-semibold">{project.name}</p>
                       <p className="text-xs text-[#6B7280]">Đủ điều kiện giải ngân</p>
+                      <p className="mt-1 text-xs text-[#4B5563]">Đã quyên góp: {formatCurrencyFromNumber(raisedAmountByProjectIdMap.get(project.projectId) || 0)} ₫</p>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -1452,7 +1471,7 @@ export function DisbursementSection({
                   <div className="mb-3 flex items-start justify-between">
                     <div>
                       <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
-                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {formatDisbursementStatusVietnamese(disbursement.status)}</p>
+                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {formatDisbursementStatusVietnamese(disbursement)}</p>
                       <p className="mt-1 text-xs text-[#4B5563]">Mục đích: {disbursement.usagePurpose}</p>
                     </div>
                     <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
@@ -1468,20 +1487,51 @@ export function DisbursementSection({
 }
 
 /** Hàm kiểm tra dữ liệu form giải ngân. Mục đích: chặn submit sai trước khi upload minh chứng và gọi API. */
+function validateDisbursementAmountField(
+  amountInputValue: string,
+  maxWithdrawableAmount: number | null,
+  shouldRequireValue: boolean
+): string | undefined {
+  const normalizedAmountValue = amountInputValue.trim();
+
+  if (!normalizedAmountValue) {
+    return shouldRequireValue ? 'Vui lòng nhập số tiền cần giải ngân.' : undefined;
+  }
+
+  if (!/^\d+$/.test(normalizedAmountValue)) {
+    return 'Số tiền giải ngân chỉ được nhập số nguyên VNĐ.';
+  }
+
+  const amountValue = Number(normalizedAmountValue);
+  if (!Number.isFinite(amountValue) || amountValue <= 0) {
+    return 'Số tiền giải ngân phải lớn hơn 0.';
+  }
+
+  if (!Number.isSafeInteger(amountValue)) {
+    return 'Số tiền giải ngân vượt quá giới hạn số nguyên cho phép.';
+  }
+
+  if (amountValue < minimumPayosTransferAmountVnd) {
+    return `Số tiền giải ngân tối thiểu là ${formatCurrencyFromNumber(minimumPayosTransferAmountVnd)} VNĐ mới đạt điều kiện giải ngân.`;
+  }
+
+  if (maxWithdrawableAmount !== null && amountValue > maxWithdrawableAmount) {
+    return 'Số tiền vượt quá hạn mức giải ngân khả dụng của dự án.';
+  }
+
+  return undefined;
+}
+
+/** Hàm kiểm tra dữ liệu form giải ngân. Mục đích: chặn submit sai trước khi upload minh chứng và gọi API. */
 function validateCreateDisbursementForm(
   formData: CreateDisbursementFormData,
   selectedEvidenceFiles: File[],
   maxWithdrawableAmount: number | null
 ): CreateDisbursementFormErrors {
   const nextFormErrors: CreateDisbursementFormErrors = {};
-  const amountValue = Number(formData.amount);
-
-  if (!formData.amount.trim()) {
-    nextFormErrors.amount = 'Vui lòng nhập số tiền cần giải ngân.';
-  } else if (!Number.isFinite(amountValue) || amountValue <= 0) {
-    nextFormErrors.amount = 'Số tiền giải ngân phải lớn hơn 0.';
-  } else if (maxWithdrawableAmount !== null && amountValue > maxWithdrawableAmount) {
-    nextFormErrors.amount = 'Số tiền vượt quá hạn mức giải ngân khả dụng của dự án.';
+  const amountErrorMessage = validateDisbursementAmountField(formData.amount, maxWithdrawableAmount, true);
+  if (amountErrorMessage) {
+    nextFormErrors.amount = amountErrorMessage;
   }
 
   if (!formData.usagePurpose.trim()) {
@@ -1517,16 +1567,41 @@ export function CreateDisbursementModal({
   const [maxWithdrawableErrorMessage, setMaxWithdrawableErrorMessage] = useState<string | null>(null);
   const [submitErrorMessage, setSubmitErrorMessage] = useState<string | null>(null);
 
-  /** Hàm cập nhật từng field form giải ngân. Mục đích: đồng bộ state và xóa lỗi field hiện tại khi người dùng sửa. */
+  /** Hàm cập nhật từng field form giải ngân. Mục đích: đồng bộ state và báo lỗi realtime cho amount nếu không phải số nguyên VNĐ. */
   const handleChangeFormField = (fieldName: keyof CreateDisbursementFormData, fieldValue: string) => {
-    setFormData(currentFormData => ({
-      ...currentFormData,
-      [fieldName]: fieldValue
-    }));
-    setFormErrors(currentFormErrors => ({
-      ...currentFormErrors,
-      [fieldName]: undefined
-    }));
+    const normalizedFieldValue = fieldName === 'amount'
+      ? fieldValue.replace(/\s+/g, '')
+      : fieldValue;
+
+    if (fieldName === 'amount' && normalizedFieldValue && !/^\d+$/.test(normalizedFieldValue)) {
+      setFormErrors(currentFormErrors => ({
+        ...currentFormErrors,
+        amount: 'Số tiền giải ngân chỉ được nhập số nguyên VNĐ.'
+      }));
+      setSubmitErrorMessage(null);
+      return;
+    }
+
+    const nextFormData: CreateDisbursementFormData = {
+      ...formData,
+      [fieldName]: normalizedFieldValue
+    };
+
+    setFormData(nextFormData);
+
+    if (fieldName === 'amount') {
+      const amountErrorMessage = validateDisbursementAmountField(nextFormData.amount, maxWithdrawableAmount, false);
+      setFormErrors(currentFormErrors => ({
+        ...currentFormErrors,
+        amount: amountErrorMessage
+      }));
+    } else {
+      setFormErrors(currentFormErrors => ({
+        ...currentFormErrors,
+        [fieldName]: undefined
+      }));
+    }
+
     setSubmitErrorMessage(null);
   };
 
@@ -1692,7 +1767,15 @@ export function CreateDisbursementModal({
 
             <div>
               <p className="mb-1 text-xs font-semibold text-[#374151]">Số tiền yêu cầu giải ngân (VNĐ)</p>
-              <input className="w-full rounded border border-[#D1D5DB] px-3 py-2" placeholder="Ví dụ: 15000000" value={formData.amount} onChange={event => handleChangeFormField('amount', event.target.value)} />
+              <input
+                className="w-full rounded border border-[#D1D5DB] px-3 py-2"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                placeholder="Ví dụ: 15000000"
+                value={formData.amount}
+                aria-invalid={Boolean(formErrors.amount)}
+                onChange={event => handleChangeFormField('amount', event.target.value)}
+              />
               {formErrors.amount ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.amount}</p> : null}
               {isLoadingMaxWithdrawable ? (
                 <p className="mt-1 text-xs text-[#6B7280]">Đang tải hạn mức giải ngân tối đa...</p>

@@ -31,12 +31,6 @@ export default function AuditTable({ auditLogItemList }: AuditTableProps) {
           <option>Chờ ký</option>
           <option>Bị từ chối</option>
         </select>
-        <button
-          type="button"
-          className="ml-auto inline-flex h-8 items-center rounded-lg border border-emerald-900/15 bg-white px-3.5 text-[12px] font-semibold text-slate-700 transition hover:bg-[#0E7C6B] hover:text-white"
-        >
-          Xuất báo cáo
-        </button>
       </div>
 
       <div className="overflow-x-auto">
@@ -56,7 +50,7 @@ export default function AuditTable({ auditLogItemList }: AuditTableProps) {
                 </td>
               </tr>
             ) : auditLogItemList.map((auditLogItem) => (
-              <tr key={auditLogItem.transactionId} className="border-t border-slate-100 text-sm transition hover:bg-slate-50/80">
+              <tr key={`${auditLogItem.transactionId}-${auditLogItem.requestId}-${auditLogItem.timeText}`} className="border-t border-slate-100 text-sm transition hover:bg-slate-50/80">
                 <td className="px-6 py-3 font-mono text-[12px] leading-4 text-cyan-700">{getShortHash(auditLogItem.transactionId)}</td>
                 <td className="px-6 py-3 text-[13px] leading-4 text-slate-800">{auditLogItem.requestId}</td>
                 <td className="px-6 py-3 font-mono text-[13px] font-semibold leading-4 text-slate-800">{auditLogItem.amountText}</td>

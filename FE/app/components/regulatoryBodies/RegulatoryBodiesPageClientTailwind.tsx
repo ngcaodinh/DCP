@@ -40,6 +40,16 @@ type DisbursementSummaryItem = {
   requestMode: 'NORMAL' | 'EMERGENCY';
 };
 
+type DisbursementApprovalLogResponseItem = {
+  id: string;
+  requestId: string;
+  transactionHash: string | null;
+  amount: number;
+  status: 'SIGNED' | 'PENDING' | 'REJECTED';
+  actor: string;
+  actionTimestamp: number;
+};
+
 type SigningStatusSummary = {
   fullySignedRequestCount: number;
   partiallySignedRequestCount: number;
@@ -108,6 +118,43 @@ function buildDeadlineText(deadlineTimestamp: number): string {
   return `${remainDays} ngày`;
 }
 
+/** Hàm ánh xạ trạng thái ký duyệt từ API sang nhãn tiếng Việt để hiển thị đồng nhất trong bảng nhật ký. */
+function mapApprovalLogStatusToText(status: 'SIGNED' | 'PENDING' | 'REJECTED'): string {
+  if (status === 'SIGNED') {
+    return 'Đã ký';
+  }
+
+  if (status === 'REJECTED') {
+    return 'Bị từ chối';
+  }
+
+  return 'Chờ ký';
+}
+
+/** Hàm chuẩn hóa thời gian nhật ký về định dạng `vi-VN` để người dùng tra cứu hành động mới nhất. */
+function buildApprovalLogTimeText(actionTimestamp: number): string {
+  const actionDate = new Date(actionTimestamp);
+  if (!Number.isFinite(actionDate.getTime())) {
+    return 'Không xác định';
+  }
+
+  return actionDate.toLocaleString('vi-VN');
+}
+
+/** Hàm chuyển dữ liệu nhật ký ký duyệt từ backend thành định dạng `AuditLogItem` mà bảng đang sử dụng. */
+function mapApprovalLogResponseItemToAuditLogItem(
+  approvalLogResponseItem: DisbursementApprovalLogResponseItem
+): AuditLogItem {
+  return {
+    transactionId: approvalLogResponseItem.transactionHash || approvalLogResponseItem.id,
+    requestId: approvalLogResponseItem.requestId,
+    amountText: `${new Intl.NumberFormat('vi-VN').format(approvalLogResponseItem.amount)}₫`,
+    statusText: mapApprovalLogStatusToText(approvalLogResponseItem.status),
+    actorText: approvalLogResponseItem.actor,
+    timeText: buildApprovalLogTimeText(approvalLogResponseItem.actionTimestamp)
+  };
+}
+
 /** Hàm tạo dữ liệu metric từ danh sách request thật để loại bỏ phụ thuộc mock data. */
 function buildMetricItemList(disbursementSummaryItemList: DisbursementSummaryItem[]): DashboardMetricItem[] {
   const totalPendingRequestCount = disbursementSummaryItemList.length;
@@ -157,18 +204,6 @@ function buildTimelineItemList(disbursementSummaryItemList: DisbursementSummaryI
   }));
 }
 
-/** Hàm tạo audit log từ dữ liệu request thật để đồng bộ dữ liệu bảng kiểm toán. */
-function buildAuditLogItemList(disbursementSummaryItemList: DisbursementSummaryItem[]): AuditLogItem[] {
-  return disbursementSummaryItemList.slice(0, 4).map((item) => ({
-    transactionId: item.id,
-    requestId: item.id,
-    amountText: new Intl.NumberFormat('vi-VN').format(item.amount) + '₫',
-    statusText: item.currentSignatures > 0 ? 'Đã ký' : 'Chờ ký',
-    actorText: item.organizationName,
-    timeText: buildDeadlineText(item.deadlineTimestamp)
-  }));
-}
-
 /** Hàm tạo thống kê tiến độ chữ ký từ danh sách request thật để card trạng thái không dùng số liệu cứng. */
 function buildSigningStatusSummary(disbursementSummaryItemList: DisbursementSummaryItem[]): SigningStatusSummary {
   return disbursementSummaryItemList.reduce<SigningStatusSummary>((previousSummary, item) => {
@@ -214,6 +249,7 @@ export default function RegulatoryBodiesPageClientTailwind() {
   const [userEmail, setUserEmail] = useState('');
   const [userWalletAddress, setUserWalletAddress] = useState('');
   const [disbursementSummaryItemList, setDisbursementSummaryItemList] = useState<DisbursementSummaryItem[]>([]);
+  const [auditLogItemList, setAuditLogItemList] = useState<AuditLogItem[]>([]);
 
   const metricItemList = useMemo(
     () => buildMetricItemList(disbursementSummaryItemList),
@@ -238,11 +274,6 @@ export default function RegulatoryBodiesPageClientTailwind() {
 
   const timelineItemList = useMemo(
     () => buildTimelineItemList(disbursementSummaryItemList),
-    [disbursementSummaryItemList]
-  );
-
-  const auditLogItemList = useMemo(
-    () => buildAuditLogItemList(disbursementSummaryItemList),
     [disbursementSummaryItemList]
   );
 
@@ -338,16 +369,26 @@ export default function RegulatoryBodiesPageClientTailwind() {
     setIsDashboardLoading(true);
     setIsDashboardError(false);
     try {
-      const response = await fetchApi<{ requests?: DisbursementSummaryItem[] }>(buildApiUrl('/api/disbursement/requests'), {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${sessionPayload.accessToken}`
-        }
-      });
+      const [disbursementSummaryResponse, approvalLogResponse] = await Promise.all([
+        fetchApi<{ requests?: DisbursementSummaryItem[] }>(buildApiUrl('/api/disbursement/requests'), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${sessionPayload.accessToken}`
+          }
+        }),
+        fetchApi<{ logs?: DisbursementApprovalLogResponseItem[] }>(buildApiUrl('/api/disbursement/approval-logs'), {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${sessionPayload.accessToken}`
+          }
+        })
+      ]);
 
-      setDisbursementSummaryItemList(response.data?.requests ?? []);
+      setDisbursementSummaryItemList(disbursementSummaryResponse.data?.requests ?? []);
+      setAuditLogItemList((approvalLogResponse.data?.logs ?? []).map(mapApprovalLogResponseItemToAuditLogItem));
     } catch {
       setDisbursementSummaryItemList([]);
+      setAuditLogItemList([]);
       setIsDashboardError(true);
     } finally {
       setIsDashboardLoading(false);

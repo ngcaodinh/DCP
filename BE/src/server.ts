@@ -5,6 +5,7 @@ import { connectToRedisSafely } from './config/redis';
 import { startRankingWorker } from './workers/rankingWorker';
 import { startRankingScheduler } from './workers/rankingScheduler';
 import { startRankingReconcileWorker } from './workers/rankingReconcileWorker';
+import { startDisbursementTransferStatusSweepPolling } from './services/disbursementService';
 
 const serverPort = Number(process.env.PORT) || 4000;
 
@@ -23,6 +24,7 @@ async function startServer(): Promise<void> {
   // donations mỗi 5 phút — donation mới được cập nhật O(1) ngay khi ghi nhận.
   // Reconcile worker đảm bảo metrics không drift theo thời gian.
   startRankingReconcileWorker();
+  startDisbursementTransferStatusSweepPolling();
 
   application.listen(serverPort, () => {
     console.log(`Server running on port ${serverPort}`);

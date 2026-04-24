@@ -10,6 +10,7 @@ import {
   handleGetMyDisbursements,
   handleGetPendingDisbursements,
   handleGetDisbursementRequestSummaries,
+  handleGetDisbursementApprovalLogs,
   handleGetDisbursementDetail,
   handleGetDisbursementsByProject,
   handleGetMaxWithdrawable,
@@ -77,6 +78,18 @@ export function createDisbursementRoutes(): Router {
     authenticationMiddleware,
     createRoleAuthorizationMiddleware(['admin', 'regulatory']),
     handleGetPendingDisbursements
+  );
+
+  /**
+   * GET /api/disbursement/approval-logs
+   * Lấy nhật ký ký duyệt gần nhất cho dashboard.
+   * Quyền: admin, regulatory.
+   */
+  router.get(
+    '/approval-logs',
+    authenticationMiddleware,
+    createRoleAuthorizationMiddleware(['admin', 'regulatory']),
+    handleGetDisbursementApprovalLogs
   );
 
   /**
