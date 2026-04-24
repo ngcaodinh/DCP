@@ -11,10 +11,99 @@ import {
   getDisbursementsByProject,
   getMaxWithdrawableAmount,
   signDisbursementRequest,
-  rejectDisbursementRequest
+  rejectDisbursementRequest,
+  processDisbursementTransferWebhook,
+  DisbursementTransferWebhookPayload
 } from '../services/disbursementService';
 
 const logger = getLogger();
+
+// ============ FR8: WEBHOOK CHUYỂN KHOẢN ============
+
+/**
+ * GET /api/disbursement/webhook
+ * Kiểm tra nhanh endpoint webhook transfer có hoạt động hay không.
+ * Actor: PayOS system health-check.
+ */
+export async function handleDisbursementTransferWebhookHealth(_request: Request, response: Response): Promise<void> {
+  response.status(200).json({ message: 'Webhook transfer URL hoạt động.' });
+}
+
+/**
+ * POST /api/disbursement/webhook
+ * Xử lý webhook transfer từ PayOS cho FR8.
+ * Actor: PayOS callback.
+ */
+export async function handleDisbursementTransferWebhook(request: Request, response: Response): Promise<void> {
+  try {
+    const rawPayload = request.body || {};
+    const signatureHeaderValue = String(
+      request.headers['x-payos-signature']
+      || request.headers['x-signature']
+      || request.headers['x-checksum']
+      || ''
+    ).trim();
+    const bodySignatureValue = String(
+      (rawPayload as { signature?: string; checksum?: string }).signature
+      || (rawPayload as { signature?: string; checksum?: string }).checksum
+      || ''
+    ).trim();
+
+    const normalizedChecksum = bodySignatureValue || signatureHeaderValue || undefined;
+    const checksumSource = bodySignatureValue
+      ? 'body'
+      : (signatureHeaderValue ? 'header' : 'missing');
+
+    const webhookPayload: DisbursementTransferWebhookPayload = {
+      ...(rawPayload as DisbursementTransferWebhookPayload),
+      signature: normalizedChecksum,
+      checksum: normalizedChecksum,
+      checksumSource
+    };
+
+    const webhookData = (
+      webhookPayload.data && typeof webhookPayload.data === 'object'
+        ? webhookPayload.data
+        : {}
+    ) as Record<string, unknown>;
+
+    const hasSignature = Boolean(webhookPayload.signature || webhookPayload.checksum);
+    const hasBusinessIdentifier = Boolean(
+      webhookPayload.transferId
+      || webhookPayload.requestId
+      || webhookData.transferId
+      || webhookData.requestId
+      || webhookData.transactionId
+    );
+
+    // Ghi chú logic phức tạp: request verify webhook từ cổng thanh toán có thể không có payload nghiệp vụ thực.
+    // Trường hợp này cần trả 200 để pass bước kích hoạt webhook URL, không được xử lý nghiệp vụ.
+    if (!hasSignature || !hasBusinessIdentifier) {
+      response.status(200).json({ message: 'Webhook transfer URL hoạt động.' });
+      return;
+    }
+
+    const processedDisbursement = await processDisbursementTransferWebhook(webhookPayload);
+    response.status(200).json({
+      message: 'Webhook transfer được xử lý thành công.',
+      requestId: processedDisbursement.requestId,
+      status: processedDisbursement.status,
+      payosTransferStatus: processedDisbursement.payosTransferStatus,
+      payosTransferId: processedDisbursement.payosTransferId
+    });
+  } catch (error) {
+    const errorMessage = (error as Error).message || 'Webhook transfer không hợp lệ.';
+
+    if (errorMessage.includes('Không tìm thấy disbursement theo transferId hoặc requestId')) {
+      logger.warn('Nhận webhook transfer test với định danh không tồn tại, bỏ qua xử lý nghiệp vụ.', { errorMessage });
+      response.status(200).json({ message: 'Webhook transfer URL hoạt động.' });
+      return;
+    }
+
+    logger.error('Xử lý webhook transfer thất bại.', { errorMessage });
+    response.status(400).json({ message: errorMessage });
+  }
+}
 
 // ============ UC7.1: TẠO YÊU CẦU RÚT TIỀN ============
 

@@ -18,6 +18,7 @@ export function getPageTitle(key: PageKey): string {
     disbursement: 'Ký duyệt Giải ngân',
     kyc: 'Duyệt Hồ sơ KYC',
     bankAccountApproval: 'Duyệt tài khoản ngân hàng',
+    systemErrorLog: 'Log lỗi hệ thống',
     report: 'Báo cáo Tuân thủ',
     transparency: 'Tra cứu Giao dịch',
     sybilManagement: 'Quản lý Sybil Attack',

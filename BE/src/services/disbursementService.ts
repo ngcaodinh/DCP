@@ -6,6 +6,7 @@ import {
   createDisbursementRecord,
   DisbursementRecord,
   DisbursementStatus,
+  findDisbursementByPayosTransferId,
   findDisbursementByRequestId,
   findDisbursementsByOrganizationId,
   findDisbursementsByProjectId,
@@ -15,9 +16,10 @@ import {
   updateDisbursementByRequestIdWithCondition
 } from '../models/disbursementModel';
 import { AuthUser, findUserById, updateUser } from '../models/authModel';
+import { findSubmissionsByOrganizationId } from '../models/organizationKycModel';
 import { findProjectById } from '../repositories/projectRepository';
 import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
-import { createPayosTransfer } from './payosService';
+import { createPayosTransfer, verifyPayosTransferWebhookChecksum } from './payosService';
 
 // ============ ABI ============
 
@@ -29,7 +31,14 @@ const multisigContractAbiEthers = [
   'function finalizeDisbursement(uint256 requestId, uint256 transactionId) external returns (uint256 burnedAmount)',
   'function getRequest(uint256 requestId) external view returns (bool exists, uint256 requestIdOut, uint256 projectId, address beneficiaryAddress, uint256 amount, uint8 status, uint256 approvalCount, uint256 signedCount, uint256 createdAt, uint256 executedAt, uint256 cancelledAt, bool adminSigned, bool orgSigned, bool regulatorySigned, uint256 timeoutDeadline, uint256 maxWithdrawable, uint8 requestMode, uint256 requiredApprovals, uint256 raisedRatioBpsAtCreation, bool adminRoleSignatureCollected, bool orgRoleSignatureCollected, bool regulatoryRoleSignatureCollected)',
   'function getRequestStrings(uint256 requestId) external view returns (string evidenceCid, string rejectReason)',
-  'function getMaxWithdrawableAmount(uint256 projectId) external view returns (uint256 maxAmount)'
+  'function getMaxWithdrawableAmount(uint256 projectId) external view returns (uint256 maxAmount)',
+  'function hasRole(bytes32 role, address account) external view returns (bool)',
+  'function ADMIN_SIGNER_ROLE() external view returns (bytes32)',
+  'function ORG_SIGNER_ROLE() external view returns (bytes32)',
+  'function REGULATORY_SIGNER_ROLE() external view returns (bytes32)',
+  'function grantAdminSignerRole(address account) external',
+  'function grantOrgSignerRole(address account) external',
+  'function grantRegulatorySignerRole(address account) external'
 ] as const;
 
 const multisigContractAbiViem = [
@@ -72,6 +81,48 @@ const logger = getLogger();
 
 const maximumTransferRetryCount = 5;
 const transferRetryDelayMilliseconds = [2000, 4000, 8000, 16000, 32000] as const;
+
+const vietnameseBankBinCodeByAlias: Record<string, string> = {
+  VIETCOMBANK: '970436',
+  BIDV: '970418',
+  VIETINBANK: '970415',
+  AGRIBANK: '970405',
+  ACB: '970416',
+  TECHCOMBANK: '970407',
+  MBBANK: '970422',
+  MB: '970422',
+  VPBANK: '970432',
+  SACOMBANK: '970403',
+  TPBANK: '970423',
+  OCB: '970448',
+  HDBANK: '970437',
+  VIB: '970441',
+  SHB: '970443',
+  MSB: '970426',
+  SEABANK: '970440',
+  LPBANK: '970449',
+  PVCOMBANK: '970412',
+  EXIMBANK: '970431',
+  BACABANK: '970409',
+  NAMABANK: '970428',
+  ABBANK: '970425',
+  BVBANK: '970454',
+  VIETBANK: '970433',
+  SCB: '970429',
+  DONGABANK: '970406',
+  PGBANK: '970430',
+  SAIGONBANK: '970400',
+  KIENLONGBANK: '970452',
+  BAOVIETBANK: '970438',
+  OCEANBANK: '970414',
+  GPBANK: '970408',
+  CBBANK: '970444',
+  HSBC: '458761',
+  SHINHANBANK: '970424',
+  STANDARDCHARTERED: '970410',
+  UOB: '970458',
+  PUBLICBANK: '970439'
+};
 
 // ============ TYPES ============
 
@@ -147,12 +198,41 @@ type KernelClientContext = {
   effectiveUser: AuthUser;
 };
 
+type ManagedDisbursementSignerRole = 'admin' | 'organizations' | 'regulatory';
+
 type RequestCreatedEventData = {
   onChainRequestId: number;
   timeoutDeadline: Date;
   requiredApprovals: number;
   requestMode: 'NORMAL' | 'EMERGENCY';
   raisedRatioBpsAtCreation: number;
+};
+
+export type DisbursementTransferWebhookPayload = {
+  requestId?: string | number;
+  transferId?: string | number;
+  transactionId?: string | number;
+  referenceNumber?: string | number;
+  bankReferenceNumber?: string | number;
+  status?: string;
+  code?: string | number;
+  desc?: string;
+  data?: Record<string, unknown>;
+  signature?: string;
+  checksum?: string;
+  checksumSource?: 'header' | 'body' | 'missing';
+};
+
+type TransferWebhookChecksumCandidate = {
+  checksumData: Record<string, unknown>;
+  checksumValue: string;
+  verifyMode: 'payload_data' | 'payload_top_level';
+};
+
+type TransferWebhookIdentifiers = {
+  requestId: string | null;
+  transferId: string | null;
+  providerTransactionId: string | null;
 };
 
 // ============ HELPERS ============
@@ -194,7 +274,27 @@ function mapRequestModeToContractValue(requestMode: 'NORMAL' | 'EMERGENCY'): num
 
 /** Hàm chuẩn hóa mã ngân hàng từ tên ngân hàng. Mục đích: đảm bảo payload transfer đạt định dạng ổn định. */
 function normalizeBankCode(bankName: string): string {
-  return bankName.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 32);
+  const normalizedBankName = bankName
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  if (!normalizedBankName) {
+    return '';
+  }
+
+  if (/^\d{6,11}$/.test(normalizedBankName)) {
+    return normalizedBankName;
+  }
+
+  const mappedBankBinCode = vietnameseBankBinCodeByAlias[normalizedBankName];
+  if (mappedBankBinCode) {
+    return mappedBankBinCode;
+  }
+
+  return normalizedBankName.slice(0, 32);
 }
 
 /** Hàm chuyển provider transaction id về uint256. Mục đích: truyền tham số finalizeDisbursement đúng kiểu on-chain. */
@@ -210,6 +310,220 @@ function mapProviderTransactionIdToUint256(providerTransactionId: string): bigin
   // ngay cả khi cổng thanh toán trả transaction id dạng chuỗi ký tự không phải số.
   const hashedValue = ethers.keccak256(ethers.toUtf8Bytes(normalizedProviderTransactionId || String(Date.now())));
   return BigInt(hashedValue);
+}
+
+/** Hàm chuẩn hóa chuỗi để so khớp dữ liệu text. Mục đích: giảm sai lệch do khác biệt hoa/thường và khoảng trắng khi verify tài khoản ngân hàng. */
+function normalizeTextForComparison(textValue: string | null | undefined): string {
+  return String(textValue || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toUpperCase();
+}
+
+/** Hàm kiểm tra tài khoản thụ hưởng đã được KYC phê duyệt. Mục đích: đảm bảo FR8 chỉ chuyển khoản vào tài khoản ngân hàng đã xác minh. */
+async function ensureApprovedBeneficiaryBankAccount(record: DisbursementRecord): Promise<void> {
+  const organizationSubmissionList = await findSubmissionsByOrganizationId(record.organizationId);
+  const hasApprovedMatchingBankAccount = organizationSubmissionList.some(submissionItem => {
+    if (submissionItem.status !== 'APPROVED' || !submissionItem.beneficiaryBankAccount) {
+      return false;
+    }
+
+    return (
+      normalizeTextForComparison(submissionItem.beneficiaryBankAccount.bankAccountNumber)
+        === normalizeTextForComparison(record.beneficiaryBankAccount.bankAccountNumber)
+      && normalizeTextForComparison(submissionItem.beneficiaryBankAccount.accountHolderName)
+        === normalizeTextForComparison(record.beneficiaryBankAccount.accountHolderName)
+      && normalizeTextForComparison(submissionItem.beneficiaryBankAccount.bankName)
+        === normalizeTextForComparison(record.beneficiaryBankAccount.bankName)
+    );
+  });
+
+  if (!hasApprovedMatchingBankAccount) {
+    throw new Error('Tài khoản ngân hàng thụ hưởng chưa được KYC phê duyệt hoặc không khớp hồ sơ đã duyệt.');
+  }
+}
+
+/** Hàm chuyển giá trị bất kỳ về chuỗi nullable. Mục đích: tránh lặp logic trim/check rỗng khi parse payload webhook transfer. */
+function toNullableString(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalizedValue = String(value).trim();
+  return normalizedValue.length > 0 ? normalizedValue : null;
+}
+
+/** Hàm chuẩn hóa data object từ payload webhook transfer. Mục đích: hỗ trợ cả trường hợp data là object hoặc chuỗi JSON. */
+function normalizeTransferWebhookData(rawData: unknown): Record<string, unknown> {
+  if (!rawData) {
+    return {};
+  }
+
+  if (typeof rawData === 'string') {
+    try {
+      const parsedData = JSON.parse(rawData) as unknown;
+      if (parsedData && typeof parsedData === 'object') {
+        return parsedData as Record<string, unknown>;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof rawData === 'object') {
+    return rawData as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+/** Hàm chuẩn hóa danh sách transaction từ payload webhook transfer. Mục đích: hỗ trợ cả dữ liệu dạng array và object map. */
+function normalizeTransferWebhookTransactionList(rawTransactions: unknown): Record<string, unknown>[] {
+  if (Array.isArray(rawTransactions)) {
+    return rawTransactions
+      .filter((transactionItem): transactionItem is Record<string, unknown> => Boolean(transactionItem) && typeof transactionItem === 'object');
+  }
+
+  if (rawTransactions && typeof rawTransactions === 'object') {
+    return Object.values(rawTransactions)
+      .filter((transactionItem): transactionItem is Record<string, unknown> => Boolean(transactionItem) && typeof transactionItem === 'object');
+  }
+
+  return [];
+}
+
+/** Hàm lấy transaction chính từ payload webhook transfer. Mục đích: đồng nhất cách đọc trạng thái và định danh khi PayOS trả cấu trúc payouts lồng nhau. */
+function extractPrimaryTransferWebhookTransaction(webhookData: Record<string, unknown>): Record<string, unknown> | null {
+  const directTransactionList = normalizeTransferWebhookTransactionList(webhookData.transactions);
+  if (directTransactionList.length > 0) {
+    return directTransactionList[0];
+  }
+
+  const payoutList = Array.isArray(webhookData.payouts) ? webhookData.payouts : [];
+  for (const payoutItem of payoutList) {
+    if (!payoutItem || typeof payoutItem !== 'object') {
+      continue;
+    }
+
+    const payoutRecord = payoutItem as Record<string, unknown>;
+    const nestedTransactionList = normalizeTransferWebhookTransactionList(payoutRecord.transactions);
+    if (nestedTransactionList.length > 0) {
+      return nestedTransactionList[0];
+    }
+  }
+
+  return null;
+}
+
+/** Hàm dựng danh sách ứng viên checksum cho webhook transfer. Mục đích: verify linh hoạt giữa payload.data và payload top-level. */
+function buildTransferWebhookChecksumCandidates(
+  payload: DisbursementTransferWebhookPayload
+): TransferWebhookChecksumCandidate[] {
+  const webhookData = normalizeTransferWebhookData(payload.data);
+  const payloadData = { ...(payload as unknown as Record<string, unknown>) };
+  delete payloadData.checksumSource;
+  const checksumValue = String(payload.signature || payload.checksum || '').trim();
+
+  if (!checksumValue) {
+    return [];
+  }
+
+  const checksumCandidateList: TransferWebhookChecksumCandidate[] = [];
+  if (Object.keys(webhookData).length > 0) {
+    checksumCandidateList.push({
+      checksumData: webhookData,
+      checksumValue,
+      verifyMode: 'payload_data'
+    });
+  }
+
+  checksumCandidateList.push({
+    checksumData: payloadData,
+    checksumValue,
+    verifyMode: 'payload_top_level'
+  });
+
+  return checksumCandidateList;
+}
+
+/** Hàm xác thực danh sách checksum candidate của webhook transfer. Mục đích: trả kết quả verify kèm chế độ thành công để phục vụ audit log. */
+function verifyTransferWebhookChecksumCandidates(
+  checksumCandidateList: TransferWebhookChecksumCandidate[]
+): { isValid: boolean; verifyMode: 'payload_data' | 'payload_top_level' | 'none' } {
+  for (const checksumCandidate of checksumCandidateList) {
+    const isValidChecksum = verifyPayosTransferWebhookChecksum(checksumCandidate.checksumData, checksumCandidate.checksumValue);
+    if (isValidChecksum) {
+      return { isValid: true, verifyMode: checksumCandidate.verifyMode };
+    }
+  }
+
+  return { isValid: false, verifyMode: 'none' };
+}
+
+/** Hàm trích xuất định danh transfer từ payload webhook. Mục đích: định tuyến webhook đúng request với ưu tiên transferId, sau đó fallback requestId. */
+function extractTransferWebhookIdentifiers(payload: DisbursementTransferWebhookPayload): TransferWebhookIdentifiers {
+  const webhookData = normalizeTransferWebhookData(payload.data);
+  const primaryWebhookTransaction = extractPrimaryTransferWebhookTransaction(webhookData);
+
+  const transferId = toNullableString(
+    webhookData.transferId
+    || webhookData.id
+    || webhookData.transactionId
+    || webhookData.payoutId
+    || webhookData.referenceId
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.id : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.transactionId : undefined)
+    || payload.transferId
+    || payload.transactionId
+  );
+
+  const requestId = toNullableString(
+    webhookData.requestId
+    || webhookData.referenceId
+    || webhookData.orderCode
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.requestId : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.referenceId : undefined)
+    || payload.requestId
+  );
+
+  const providerTransactionId = toNullableString(
+    (primaryWebhookTransaction ? primaryWebhookTransaction.transactionId : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.id : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.bankReferenceNumber : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.referenceNumber : undefined)
+    || webhookData.transactionId
+    || webhookData.bankReferenceNumber
+    || webhookData.referenceNumber
+    || payload.transactionId
+    || payload.bankReferenceNumber
+    || payload.referenceNumber
+    || transferId
+  );
+
+  return {
+    requestId,
+    transferId,
+    providerTransactionId
+  };
+}
+
+/** Hàm ánh xạ trạng thái webhook transfer sang trạng thái nội bộ. Mục đích: chuẩn hóa nhiều biến thể status/code từ cổng thanh toán. */
+function mapTransferWebhookStatus(statusValue: string): 'PROCESSING' | 'SUCCESS' | 'FAILED' {
+  const normalizedStatusValue = statusValue.trim().toUpperCase();
+
+  if (['SUCCESS', 'SUCCEEDED', 'COMPLETED', 'DONE', 'PAID', '00', '0'].includes(normalizedStatusValue)) {
+    return 'SUCCESS';
+  }
+
+  if (
+    ['FAILED', 'FAIL', 'ERROR', 'CANCELLED', 'CANCELED', 'REJECTED', '-1', '02'].includes(normalizedStatusValue)
+    || normalizedStatusValue.startsWith('ERR')
+  ) {
+    return 'FAILED';
+  }
+
+  return 'PROCESSING';
 }
 
 /** Hàm ánh xạ record MongoDB sang response API. Mục đích: trả dữ liệu nhất quán cho FE. */
@@ -450,16 +764,67 @@ async function getKernelClientContextForUser(user: AuthUser): Promise<KernelClie
   return syncUserWalletAddressWithKernelAccount(userForKernelContext, kernelClient);
 }
 
-/** Hàm bảo đảm organization có ORG_SIGNER_ROLE. Mục đích: ngăn lỗi AccessControl khi ký/khởi tạo request. */
-async function ensureOrganizationSignerRoleOnChain(organizationWalletAddress: string): Promise<void> {
+/** Hàm kiểm tra role được quản lý signer on-chain. Mục đích: giới hạn auto-grant cho đúng các role được phép ký FR7. */
+function isManagedDisbursementSignerRole(userRole: string): userRole is ManagedDisbursementSignerRole {
+  return userRole === 'admin' || userRole === 'organizations' || userRole === 'regulatory';
+}
+
+/** Hàm bảo đảm role signer on-chain đã được cấp cho ví. Mục đích: tránh revert InvalidSignerRole khi mô phỏng UserOperation. */
+async function ensureDisbursementSignerRoleOnChain(userRole: string, signerWalletAddress: string): Promise<void> {
+  if (!isManagedDisbursementSignerRole(userRole)) {
+    throw new ApplicationError('Vai trò người dùng không hợp lệ để ký duyệt giải ngân.', 403, 'FORBIDDEN');
+  }
+
+  const normalizedSignerWalletAddress = signerWalletAddress.trim();
+  if (!normalizedSignerWalletAddress || !ethers.isAddress(normalizedSignerWalletAddress)) {
+    throw new ApplicationError('Địa chỉ ví signer không hợp lệ để cấp quyền on-chain.', 400, 'VALIDATION_ERROR');
+  }
+
   try {
-    const { ensureOrganizationWalletOrgSignerRole } = await import('./organizationKycService');
-    const orgSignerResult = await ensureOrganizationWalletOrgSignerRole(organizationWalletAddress);
-    if (!orgSignerResult.wasAlreadyGranted) {
-      logger.info(`Đã auto-grant ORG_SIGNER_ROLE. walletAddress=${organizationWalletAddress} txHash=${orgSignerResult.transactionHash}`);
+    const { contract } = getAdminWritableMultisigContract();
+
+    let roleHash: string;
+    let grantRoleTransaction: ethers.ContractTransactionResponse;
+
+    if (userRole === 'admin') {
+      roleHash = await contract.ADMIN_SIGNER_ROLE();
+      const hasAdminSignerRole = await contract.hasRole(roleHash, normalizedSignerWalletAddress);
+      if (hasAdminSignerRole) {
+        return;
+      }
+
+      grantRoleTransaction = await contract.grantAdminSignerRole(normalizedSignerWalletAddress);
+    } else if (userRole === 'organizations') {
+      roleHash = await contract.ORG_SIGNER_ROLE();
+      const hasOrganizationSignerRole = await contract.hasRole(roleHash, normalizedSignerWalletAddress);
+      if (hasOrganizationSignerRole) {
+        return;
+      }
+
+      grantRoleTransaction = await contract.grantOrgSignerRole(normalizedSignerWalletAddress);
+    } else {
+      roleHash = await contract.REGULATORY_SIGNER_ROLE();
+      const hasRegulatorySignerRole = await contract.hasRole(roleHash, normalizedSignerWalletAddress);
+      if (hasRegulatorySignerRole) {
+        return;
+      }
+
+      grantRoleTransaction = await contract.grantRegulatorySignerRole(normalizedSignerWalletAddress);
     }
+
+    const grantRoleReceipt = await grantRoleTransaction.wait();
+    if (grantRoleReceipt && Number(grantRoleReceipt.status) !== 1) {
+      throw new Error(`Transaction cấp quyền signer thất bại. role=${userRole} txHash=${grantRoleTransaction.hash}`);
+    }
+
+    const hasSignerRoleAfterGrant = await contract.hasRole(roleHash, normalizedSignerWalletAddress);
+    if (!hasSignerRoleAfterGrant) {
+      throw new Error(`Cấp quyền signer thất bại sau khi mined. role=${userRole} walletAddress=${normalizedSignerWalletAddress}`);
+    }
+
+    logger.info(`Đã auto-grant signer role on-chain. role=${userRole} walletAddress=${normalizedSignerWalletAddress} txHash=${grantRoleTransaction.hash}`);
   } catch (error) {
-    logger.error(`Không thể cấp ORG_SIGNER_ROLE cho organization. walletAddress=${organizationWalletAddress} error=${(error as Error)?.message}`);
+    logger.error(`Không thể cấp signer role on-chain. role=${userRole} walletAddress=${normalizedSignerWalletAddress} error=${(error as Error)?.message}`);
     throw new ApplicationError('Không thể cấp quyền giải ngân trên blockchain. Vui lòng liên hệ quản trị viên.', 502, 'INTERNAL_ERROR');
   }
 }
@@ -490,6 +855,10 @@ function mapBlockchainErrorToApplicationError(error: unknown): ApplicationError 
 
   if (errorMessage.includes('invalidrequeststate')) {
     return new ApplicationError('Yêu cầu không còn ở trạng thái hợp lệ để thực hiện thao tác này.', 409, 'INVALID_STATUS_TRANSITION');
+  }
+
+  if (errorMessage.includes('invalidsignerrole') || errorMessage.includes('0x2fc8c968')) {
+    return new ApplicationError('Ví Smart Account của bạn chưa có quyền signer phù hợp trên blockchain. Hệ thống đã từ chối ký duyệt để đảm bảo an toàn.', 403, 'FORBIDDEN');
   }
 
   return null;
@@ -548,6 +917,18 @@ async function triggerAutoTransferForApprovedRequest(requestId: string): Promise
     return;
   }
 
+  try {
+    await ensureApprovedBeneficiaryBankAccount(processingRecord);
+  } catch (error) {
+    await updateDisbursementByRequestId(processingRecord.requestId, {
+      status: 'APPROVED',
+      payosTransferStatus: 'MANUAL_REVIEW',
+      payosTransferLastError: (error as Error)?.message || 'Không thể xác thực tài khoản ngân hàng thụ hưởng.',
+      transferIdempotencyKey: idempotencyKey
+    });
+    return;
+  }
+
   const bankCode = normalizeBankCode(processingRecord.beneficiaryBankAccount.bankName);
   if (!bankCode) {
     await updateDisbursementByRequestId(processingRecord.requestId, {
@@ -580,33 +961,18 @@ async function triggerAutoTransferForApprovedRequest(requestId: string): Promise
 
       await updateDisbursementByRequestId(processingRecord.requestId, {
         payosTransferId: transferResult.transferId,
-        payosTransferStatus: transferResult.transferStatus,
+        payosTransferStatus: 'PROCESSING',
         transferIdempotencyKey: idempotencyKey,
         payosTransferLastError: null
       });
 
-      if (transferResult.transferStatus !== 'SUCCESS') {
-        logger.info(`PayOS transfer đang xử lý. requestId=${processingRecord.requestId} transferId=${transferResult.transferId}`);
-        return;
+      if (transferResult.transferStatus === 'FAILED') {
+        throw new Error('PayOS transfer trả trạng thái FAILED.');
       }
 
-      const finalizeTransactionHash = await finalizeDisbursementOnChain(
-        processingRecord.onChainRequestId,
-        transferResult.providerTransactionId
+      logger.info(
+        `PayOS transfer đã khởi tạo thành công, chờ webhook xác nhận. requestId=${processingRecord.requestId} transferId=${transferResult.transferId} providerTransactionId=${transferResult.providerTransactionId}`
       );
-
-      await updateDisbursementByRequestId(processingRecord.requestId, {
-        status: 'COMPLETED',
-        payosTransferStatus: 'SUCCESS',
-        payosTransferId: transferResult.transferId,
-        transferIdempotencyKey: idempotencyKey,
-        finalizeTransactionHash,
-        transactionHash: finalizeTransactionHash,
-        completedAt: new Date(),
-        payosTransferLastError: null
-      });
-
-      logger.info(`Auto-transfer thành công và đã finalize on-chain. requestId=${processingRecord.requestId} transferId=${transferResult.transferId} txHash=${finalizeTransactionHash}`);
       return;
     } catch (error) {
       const errorMessage = (error as Error)?.message || 'Không xác định';
@@ -626,6 +992,143 @@ async function triggerAutoTransferForApprovedRequest(requestId: string): Promise
       const delayMilliseconds = transferRetryDelayMilliseconds[transferAttemptIndex] || 32000;
       await sleep(delayMilliseconds);
     }
+  }
+}
+
+/** Hàm xử lý webhook chuyển khoản FR8 từ PayOS. Mục đích: xác thực checksum, cập nhật trạng thái transfer, và finalize on-chain khi nhận SUCCESS. */
+export async function processDisbursementTransferWebhook(
+  payload: DisbursementTransferWebhookPayload
+): Promise<DisbursementResult> {
+  const checksumCandidateList = buildTransferWebhookChecksumCandidates(payload);
+  const checksumVerifyResult = verifyTransferWebhookChecksumCandidates(checksumCandidateList);
+  if (checksumCandidateList.length === 0 || !checksumVerifyResult.isValid) {
+    logger.warn('Webhook transfer checksum không hợp lệ.', {
+      checksumSource: payload.checksumSource || 'missing',
+      verifyMode: checksumVerifyResult.verifyMode
+    });
+    throw new Error('Webhook transfer checksum không hợp lệ.');
+  }
+
+  const webhookIdentifiers = extractTransferWebhookIdentifiers(payload);
+  if (!webhookIdentifiers.transferId && !webhookIdentifiers.requestId) {
+    throw new Error('Webhook transfer thiếu transferId hoặc requestId hợp lệ.');
+  }
+
+  let disbursementRecord = webhookIdentifiers.transferId
+    ? await findDisbursementByPayosTransferId(webhookIdentifiers.transferId)
+    : null;
+
+  if (!disbursementRecord && webhookIdentifiers.requestId) {
+    disbursementRecord = await findDisbursementByRequestId(webhookIdentifiers.requestId);
+  }
+
+  if (!disbursementRecord) {
+    throw new Error('Không tìm thấy disbursement theo transferId hoặc requestId.');
+  }
+
+  if (
+    disbursementRecord.status !== 'APPROVED'
+    && disbursementRecord.status !== 'EXECUTING'
+    && disbursementRecord.status !== 'COMPLETED'
+  ) {
+    return mapDisbursementRecordToResult(disbursementRecord);
+  }
+
+  if (disbursementRecord.status === 'COMPLETED' && disbursementRecord.payosTransferStatus === 'SUCCESS') {
+    return mapDisbursementRecordToResult(disbursementRecord);
+  }
+
+  const webhookData = normalizeTransferWebhookData(payload.data);
+  const primaryWebhookTransaction = extractPrimaryTransferWebhookTransaction(webhookData);
+  const rawWebhookStatus = String(
+    (primaryWebhookTransaction ? primaryWebhookTransaction.state : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.status : undefined)
+    || (primaryWebhookTransaction ? primaryWebhookTransaction.approvalState : undefined)
+    || webhookData.state
+    || webhookData.status
+    || webhookData.approvalState
+    || payload.status
+    || webhookData.code
+    || payload.code
+    || ''
+  );
+  const normalizedTransferStatus = mapTransferWebhookStatus(rawWebhookStatus);
+
+  if (normalizedTransferStatus === 'PROCESSING') {
+    const processingRecord = await updateDisbursementByRequestId(disbursementRecord.requestId, {
+      status: 'EXECUTING',
+      payosTransferStatus: 'PROCESSING',
+      payosTransferId: webhookIdentifiers.transferId || disbursementRecord.payosTransferId,
+      payosTransferLastError: null
+    });
+
+    return mapDisbursementRecordToResult(processingRecord || disbursementRecord);
+  }
+
+  if (normalizedTransferStatus === 'FAILED') {
+    const manualReviewReason = toNullableString(
+      payload.desc
+      || webhookData.desc
+      || webhookData.message
+      || (primaryWebhookTransaction ? primaryWebhookTransaction.message : undefined)
+      || (primaryWebhookTransaction ? primaryWebhookTransaction.errorMessage : undefined)
+    )
+      || 'PayOS transfer trả về trạng thái thất bại.';
+    const manualReviewRecord = await updateDisbursementByRequestId(disbursementRecord.requestId, {
+      status: 'APPROVED',
+      payosTransferStatus: 'MANUAL_REVIEW',
+      payosTransferId: webhookIdentifiers.transferId || disbursementRecord.payosTransferId,
+      payosTransferLastError: manualReviewReason,
+      transferIdempotencyKey: disbursementRecord.transferIdempotencyKey || buildTransferIdempotencyKey(disbursementRecord.requestId)
+    });
+
+    return mapDisbursementRecordToResult(manualReviewRecord || disbursementRecord);
+  }
+
+  const providerTransactionId = webhookIdentifiers.providerTransactionId
+    || disbursementRecord.payosTransferId
+    || disbursementRecord.requestId;
+
+  try {
+    const finalizeTransactionHash = await finalizeDisbursementOnChain(
+      disbursementRecord.onChainRequestId,
+      providerTransactionId
+    );
+
+    const completedRecord = await updateDisbursementByRequestId(disbursementRecord.requestId, {
+      status: 'COMPLETED',
+      payosTransferStatus: 'SUCCESS',
+      payosTransferId: webhookIdentifiers.transferId || disbursementRecord.payosTransferId,
+      transferIdempotencyKey: disbursementRecord.transferIdempotencyKey || buildTransferIdempotencyKey(disbursementRecord.requestId),
+      finalizeTransactionHash,
+      transactionHash: finalizeTransactionHash,
+      completedAt: new Date(),
+      payosTransferLastError: null
+    });
+
+    if (!completedRecord) {
+      throw new ApplicationError('Không thể cập nhật trạng thái COMPLETED sau khi finalize.', 500, 'INTERNAL_ERROR');
+    }
+
+    logger.info(
+      `Webhook transfer SUCCESS đã finalize on-chain. requestId=${completedRecord.requestId} transferId=${completedRecord.payosTransferId || ''} txHash=${finalizeTransactionHash}`
+    );
+    return mapDisbursementRecordToResult(completedRecord);
+  } catch (error) {
+    const errorMessage = (error as Error)?.message || 'Không xác định';
+    const manualReviewRecord = await updateDisbursementByRequestId(disbursementRecord.requestId, {
+      status: 'APPROVED',
+      payosTransferStatus: 'MANUAL_REVIEW',
+      payosTransferId: webhookIdentifiers.transferId || disbursementRecord.payosTransferId,
+      payosTransferLastError: `Finalize thất bại sau webhook SUCCESS: ${errorMessage}`,
+      transferIdempotencyKey: disbursementRecord.transferIdempotencyKey || buildTransferIdempotencyKey(disbursementRecord.requestId)
+    });
+
+    if (manualReviewRecord) {
+      return mapDisbursementRecordToResult(manualReviewRecord);
+    }
+
+    throw new ApplicationError('Không thể cập nhật trạng thái MANUAL_REVIEW sau lỗi finalize.', 500, 'INTERNAL_ERROR');
   }
 }
 
@@ -684,7 +1187,7 @@ export async function createDisbursementRequest(
     );
   }
 
-  await ensureOrganizationSignerRoleOnChain(organizationSmartAccountAddress);
+  await ensureDisbursementSignerRoleOnChain(effectiveUser.role, organizationSmartAccountAddress);
 
   let requestCreatedEventData: RequestCreatedEventData;
   try {
@@ -781,9 +1284,7 @@ export async function signDisbursementRequest(
     effectiveUser
   } = await getKernelClientContextForUser(user);
 
-  if (effectiveUser.role === 'organizations') {
-    await ensureOrganizationSignerRoleOnChain(signerSmartAccountAddress);
-  }
+  await ensureDisbursementSignerRoleOnChain(effectiveUser.role, signerSmartAccountAddress);
 
   const record = await findDisbursementByRequestId(requestId);
   if (!record) {
@@ -898,9 +1399,7 @@ export async function rejectDisbursementRequest(
     effectiveUser
   } = await getKernelClientContextForUser(user);
 
-  if (effectiveUser.role === 'organizations') {
-    await ensureOrganizationSignerRoleOnChain(signerSmartAccountAddress);
-  }
+  await ensureDisbursementSignerRoleOnChain(effectiveUser.role, signerSmartAccountAddress);
 
   if (!reason || reason.trim().length < 5) {
     throw new ApplicationError('Lý do từ chối phải tối thiểu 5 ký tự.', 400, 'VALIDATION_ERROR');

@@ -62,7 +62,8 @@ document.md
 keygoogle.json
 BE\.env.example
 
-
+#file setting
 \doan1_hethongbophieu
 CLAUDE.md
 AGENTS.md
+.editorconfig

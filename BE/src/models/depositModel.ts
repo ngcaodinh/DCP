@@ -77,6 +77,22 @@ export async function listRecentDepositTransactionsByUserId(
 }
 
 /**
+ * Hàm lấy danh sách giao dịch nạp tiền thất bại mới nhất.
+ * Mục đích: cung cấp dữ liệu nguồn cho bảng log lỗi hệ thống của Admin.
+ */
+export async function findLatestFailedDepositTransactions(limitCount: number): Promise<DepositTransaction[]> {
+  const normalizedLimitCount = Number.isFinite(limitCount)
+    ? Math.max(1, Math.min(200, Math.floor(limitCount)))
+    : 50;
+
+  return DepositTransactionModel.find({ status: 'FAILED' })
+    .sort({ updatedAt: -1 })
+    .limit(normalizedLimitCount)
+    .lean<DepositTransaction[]>()
+    .exec();
+}
+
+/**
  * Hàm tính tổng token đã mint thành công theo người dùng.
  * Mục đích: cung cấp số dư token quy đổi từ luồng deposit cho sidebar.
  */
@@ -116,4 +132,3 @@ export async function updateDepositTransaction(transaction: DepositTransaction):
 
   return (updatedTransaction?.toObject() as DepositTransaction) || transaction;
 }
-

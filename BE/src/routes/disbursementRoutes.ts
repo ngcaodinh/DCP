@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
 import { createRoleAuthorizationMiddleware } from '../middleware/roleAuthorizationMiddleware';
+import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
+import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
 import {
+  handleDisbursementTransferWebhook,
+  handleDisbursementTransferWebhookHealth,
   handleCreateDisbursementRequest,
   handleGetMyDisbursements,
   handleGetPendingDisbursements,
@@ -20,6 +24,17 @@ import {
 export function createDisbursementRoutes(): Router {
   const router = Router();
   const authenticationMiddleware = createAuthenticationMiddleware();
+  const transferWebhookRateLimit = createRateLimitMiddleware(60, 60 * 1000, {
+    bucketName: 'disbursement-transfer-webhook'
+  });
+
+  /**
+   * GET/POST /api/disbursement/webhook
+   * Endpoint webhook FR8 cho callback transfer từ PayOS.
+   * Quyen: cong khai (chi danh cho he thong PayOS callback).
+   */
+  router.get('/webhook', attachRequestMetadata(), transferWebhookRateLimit, handleDisbursementTransferWebhookHealth);
+  router.post('/webhook', attachRequestMetadata(), transferWebhookRateLimit, handleDisbursementTransferWebhook);
 
   /**
    * POST /api/disbursement/create

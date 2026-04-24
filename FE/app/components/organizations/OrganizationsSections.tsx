@@ -269,6 +269,35 @@ function formatProjectStatusVietnamese(status: ProjectSummary['status']): string
   return 'Bị từ chối';
 }
 
+/** Hàm đổi trạng thái giải ngân sang tiếng Việt. Mục đích: hiển thị trạng thái yêu cầu giải ngân đúng ngữ cảnh nghiệp vụ cho tổ chức. */
+function formatDisbursementStatusVietnamese(status: import('./types').DisbursementStatus): string {
+  if (status === 'PENDING') {
+    return 'Chờ duyệt';
+  }
+
+  if (status === 'APPROVED') {
+    return 'Đã duyệt';
+  }
+
+  if (status === 'EXECUTING') {
+    return 'Đang chuyển khoản';
+  }
+
+  if (status === 'COMPLETED') {
+    return 'Hoàn tất';
+  }
+
+  if (status === 'REJECTED') {
+    return 'Bị từ chối';
+  }
+
+  if (status === 'EXPIRED') {
+    return 'Hết hạn';
+  }
+
+  return 'Đã hủy';
+}
+
 /** Hàm định dạng thời gian hiển thị tiếng Việt. Mục đích: hiển thị timestamp dự án dễ đọc trong modal chi tiết. */
 function formatDateTimeVietnamese(dateValue: string | null): string {
   if (!dateValue) {
@@ -1185,6 +1214,12 @@ export function DisbursementSection({
 
   const pendingDisbursements = disbursements.filter(d => d.status === 'PENDING');
   const historyDisbursements = disbursements.filter(d => d.status !== 'PENDING');
+  const organizationUserId = String(readAuthSession().userId || '').trim();
+  const pendingDisbursementCardElementByRequestIdRef = useRef<Record<string, HTMLDivElement | null>>({});
+  const [processingSignRequestId, setProcessingSignRequestId] = useState<string | null>(null);
+  const [signActionErrorMessageByRequestId, setSignActionErrorMessageByRequestId] = useState<Record<string, string>>({});
+  const [recentlySignedRequestId, setRecentlySignedRequestId] = useState<string | null>(null);
+  const [highlightedRequestId, setHighlightedRequestId] = useState<string | null>(null);
   
   // Lọc các dự án ACTIVE và không có yêu cầu PENDING nào
   const eligibleProjects = createdProjects.filter(p => {
@@ -1192,6 +1227,87 @@ export function DisbursementSection({
     const hasPending = pendingDisbursements.some(d => d.projectId === p.projectId);
     return !hasPending;
   });
+
+  /** Hàm cuộn tới card vừa ký duyệt thành công. Mục đích: phản hồi trực quan ngay trên danh sách pending cho người dùng tổ chức. */
+  useEffect(() => {
+    if (!recentlySignedRequestId) {
+      return;
+    }
+
+    const targetCardElement = pendingDisbursementCardElementByRequestIdRef.current[recentlySignedRequestId];
+    if (!targetCardElement) {
+      setRecentlySignedRequestId(null);
+      return;
+    }
+
+    targetCardElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedRequestId(recentlySignedRequestId);
+
+    const clearHighlightTimeout = window.setTimeout(() => {
+      setHighlightedRequestId(currentHighlightedRequestId => {
+        if (currentHighlightedRequestId === recentlySignedRequestId) {
+          return null;
+        }
+
+        return currentHighlightedRequestId;
+      });
+      setRecentlySignedRequestId(currentRecentlySignedRequestId => {
+        if (currentRecentlySignedRequestId === recentlySignedRequestId) {
+          return null;
+        }
+
+        return currentRecentlySignedRequestId;
+      });
+    }, 2200);
+
+    return () => {
+      window.clearTimeout(clearHighlightTimeout);
+    };
+  }, [pendingDisbursements, recentlySignedRequestId]);
+
+  /** Hàm ký duyệt request pending từ vai trò tổ chức. Mục đích: cho phép organization hoàn tất chữ ký của chính mình theo UC7.2. */
+  async function handleSignPendingDisbursementRequest(requestId: string): Promise<void> {
+    if (processingSignRequestId) {
+      return;
+    }
+
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setSignActionErrorMessageByRequestId(currentErrorMap => ({
+        ...currentErrorMap,
+        [requestId]: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để ký duyệt.'
+      }));
+      return;
+    }
+
+    setProcessingSignRequestId(requestId);
+    setSignActionErrorMessageByRequestId(currentErrorMap => {
+      const nextErrorMap = { ...currentErrorMap };
+      delete nextErrorMap[requestId];
+      return nextErrorMap;
+    });
+
+    try {
+      await fetchApi(buildApiUrl(`/api/disbursement/${encodeURIComponent(requestId)}/sign`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` },
+        body: JSON.stringify({ comment: 'Approved from organization dashboard' })
+      });
+
+      if (onRetryLoadDisbursements) {
+        await onRetryLoadDisbursements();
+      }
+
+      setRecentlySignedRequestId(requestId);
+    } catch (error: unknown) {
+      setSignActionErrorMessageByRequestId(currentErrorMap => ({
+        ...currentErrorMap,
+        [requestId]: resolveApiErrorMessage(error, 'Không thể ký duyệt yêu cầu giải ngân. Vui lòng thử lại sau.')
+      }));
+    } finally {
+      setProcessingSignRequestId(null);
+    }
+  }
 
   return (
     <SectionCard title="Yêu cầu giải ngân">
@@ -1253,9 +1369,18 @@ export function DisbursementSection({
               pendingDisbursements.map(disbursement => {
                 const adminSigned = disbursement.approvals.some(a => a.signerRole === 'ADMIN_SIGNER');
                 const orgSigned = disbursement.approvals.some(a => a.signerRole === 'ORG_SIGNER');
+                const orgSignedByCurrentUser = disbursement.approvals.some(a =>
+                  a.signerRole === 'ORG_SIGNER' && a.signerUserId === organizationUserId
+                );
                 const regSigned = disbursement.approvals.some(a => a.signerRole === 'REGULATORY_SIGNER');
                 return (
-                  <div key={disbursement.requestId} className="rounded-[12px] border border-[#E5E7EB] p-4">
+                  <div
+                    key={disbursement.requestId}
+                    ref={cardElement => {
+                      pendingDisbursementCardElementByRequestIdRef.current[disbursement.requestId] = cardElement;
+                    }}
+                    className={`rounded-[12px] border border-[#E5E7EB] p-4 transition ${highlightedRequestId === disbursement.requestId ? 'ring-2 ring-[#34D399] ring-offset-1' : ''}`}
+                  >
                     <div className="mb-3 flex items-start justify-between">
                       <div>
                         <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
@@ -1287,6 +1412,31 @@ export function DisbursementSection({
                       <p className="text-xs font-semibold text-[#B45309]">{statusLabelMap['pending']}</p>
                       <p className="text-xs font-semibold text-[#92400E]">{`${disbursement.approvals.length}/${disbursement.requiredApprovals} chữ ký`}</p>
                     </div>
+
+                    {!orgSigned ? (
+                      <div className="mt-3 space-y-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleSignPendingDisbursementRequest(disbursement.requestId);
+                          }}
+                          disabled={processingSignRequestId !== null}
+                          className="w-full rounded-[8px] bg-[#0E7C6B] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B675A] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {processingSignRequestId === disbursement.requestId ? 'Đang ký duyệt...' : 'Ký duyệt với vai trò tổ chức'}
+                        </button>
+
+                        {signActionErrorMessageByRequestId[disbursement.requestId] ? (
+                          <p className="text-xs font-medium text-[#DC2626]">{signActionErrorMessageByRequestId[disbursement.requestId]}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {orgSignedByCurrentUser ? (
+                      <p className="mt-3 rounded-[8px] border border-[#A7F3D0] bg-[#ECFDF5] px-3 py-2 text-xs font-semibold text-[#065F46]">
+                        ✅ Bạn đã ký duyệt yêu cầu này với vai trò đại diện tổ chức.
+                      </p>
+                    ) : null}
                   </div>
                 );
               })
@@ -1302,7 +1452,7 @@ export function DisbursementSection({
                   <div className="mb-3 flex items-start justify-between">
                     <div>
                       <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
-                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {disbursement.status}</p>
+                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {formatDisbursementStatusVietnamese(disbursement.status)}</p>
                       <p className="mt-1 text-xs text-[#4B5563]">Mục đích: {disbursement.usagePurpose}</p>
                     </div>
                     <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
@@ -2613,5 +2763,3 @@ export function CreateProjectModal({ onClose, onProjectCreated }: CreateProjectM
     </div>
   );
 }
-
-

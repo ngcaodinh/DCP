@@ -43,6 +43,11 @@ export function getNavigationItems(): NavigationItem[] {
       iconPath: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
     },
     {
+      key: 'systemErrorLog',
+      label: 'Log lỗi hệ thống',
+      iconPath: 'M12 9v2m0 4h.01m-7.938 4h15.876c1.38 0 2.243-1.495 1.553-2.688L13.553 4.688a1.75 1.75 0 00-3.106 0L2.509 16.312C1.819 17.505 2.682 19 4.062 19z',
+    },
+    {
       key: 'report',
       label: 'Báo cáo Tuân thủ',
       iconPath: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z',
