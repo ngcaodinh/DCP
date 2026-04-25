@@ -1,6 +1,6 @@
-'use client';
+﻿'use client';
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { buildApiUrl, fetchApi } from '../utils/apiClient';
 
@@ -29,7 +29,7 @@ const buildTransactionExplorerUrl = (transactionHashValue: string): string => {
   return `${blockchainExplorerTxBaseUrl.replace(/\/$/, '')}/${transactionHashValue}`;
 };
 
-export default function DonorsPage() {
+function DonorsPageContent() {
   const searchParams = useSearchParams();
   const selectedProjectId = String(searchParams.get('projectId') || '').trim();
   const [projectName, setProjectName] = useState('Dự án');
@@ -524,5 +524,13 @@ export default function DonorsPage() {
         {donorListContent}
       </div>
     </main>
+  );
+}
+/** Hàm trang danh sách nhà hảo tâm. Mục đích: bọc useSearchParams trong Suspense để Next.js prerender an toàn. */
+export default function DonorsPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-[#eefdf9] px-4 py-10 text-center text-sm font-semibold text-[#0f766e]">Đang tải danh sách nhà hảo tâm...</main>}>
+      <DonorsPageContent />
+    </Suspense>
   );
 }
