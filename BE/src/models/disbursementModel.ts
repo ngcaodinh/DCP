@@ -58,6 +58,7 @@ export type DisbursementRecord = {
     signerRole: 'ADMIN_SIGNER' | 'ORG_SIGNER' | 'REGULATORY_SIGNER';
     signerUserId: string;
     signerAddress: string;
+    transactionHash: string;
     signedAt: Date;
     comment?: string;
   }>;
@@ -86,6 +87,7 @@ const approvalSchema = new Schema({
   signerRole: { type: String, required: true },
   signerUserId: { type: String, required: true },
   signerAddress: { type: String, required: true },
+  transactionHash: { type: String, required: true },
   signedAt: { type: Date, required: true },
   comment: { type: String, default: null }
 }, { _id: false });

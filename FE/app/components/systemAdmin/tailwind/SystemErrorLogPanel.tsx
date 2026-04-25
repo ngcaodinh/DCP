@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { buildApiUrl, fetchApi } from '@/app/utils/apiClient';
@@ -44,6 +44,8 @@ const readStateFilterOptionList: Array<{ key: SystemErrorLogReadStateFilter; lab
   { key: 'unread', labelText: 'Chưa đọc' },
   { key: 'read', labelText: 'Đã đọc' }
 ];
+
+const pageSizeOptionList = [5, 10, 20, 50] as const;
 
 /**
  * Hàm chuẩn hóa chuỗi tìm kiếm.
@@ -148,6 +150,8 @@ export default function SystemErrorLogPanel({ onPushToast }: SystemErrorLogPanel
   const [isMarkingAllVisibleAsRead, setIsMarkingAllVisibleAsRead] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<SystemErrorLogCategory | 'all'>('all');
   const [selectedReadStateFilter, setSelectedReadStateFilter] = useState<SystemErrorLogReadStateFilter>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(10);
   const [logItemList, setLogItemList] = useState<SystemErrorLogItem[]>([]);
   const [summaryData, setSummaryData] = useState<SystemErrorLogApiResponse['summary']>({
     totalCount: 0,
@@ -369,6 +373,48 @@ export default function SystemErrorLogPanel({ onPushToast }: SystemErrorLogPanel
     [visibleLogItemList]
   );
 
+  const visibleLogCount = visibleLogItemList.length;
+  const totalPages = Math.max(1, Math.ceil(visibleLogCount / pageSize));
+
+  /** Danh sách log lỗi chỉ thuộc trang hiện tại. */
+  const paginatedVisibleLogItemList = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return visibleLogItemList.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, pageSize, visibleLogItemList]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchKeyword, selectedCategory, selectedReadStateFilter, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  /** Hàm chuyển sang trang trước nếu trang hiện tại chưa phải trang đầu. */
+  function handlePreviousPage(): void {
+    if (currentPage <= 1) return;
+    setCurrentPage(currentPage - 1);
+  }
+
+  /** Hàm chuyển sang trang sau nếu trang hiện tại chưa phải trang cuối. */
+  function handleNextPage(): void {
+    if (currentPage >= totalPages) return;
+    setCurrentPage(currentPage + 1);
+  }
+
+  /** Hàm chuyển tới trang được chọn trong danh sách phân trang. */
+  function handleGoToPage(pageNumber: number): void {
+    if (pageNumber < 1 || pageNumber > totalPages || pageNumber === currentPage) return;
+    setCurrentPage(pageNumber);
+  }
+
+  /** Hàm thay đổi số bản ghi trên mỗi trang. */
+  function handlePageSizeChange(nextPageSize: number): void {
+    setPageSize(nextPageSize);
+  }
+
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white p-5">
@@ -517,14 +563,14 @@ export default function SystemErrorLogPanel({ onPushToast }: SystemErrorLogPanel
                     </button>
                   </td>
                 </tr>
-              ) : visibleLogItemList.length === 0 ? (
+              ) : paginatedVisibleLogItemList.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-8 text-center text-xs text-slate-500">
                     Không có log lỗi phù hợp với bộ lọc hiện tại.
                   </td>
                 </tr>
               ) : (
-                visibleLogItemList.map((logItem) => {
+                paginatedVisibleLogItemList.map((logItem) => {
                   const isExpanded = expandedLogId === logItem.id;
 
                   return [
@@ -663,7 +709,68 @@ export default function SystemErrorLogPanel({ onPushToast }: SystemErrorLogPanel
             </tbody>
           </table>
         </div>
+
+        {!isLoading && !hasError && visibleLogCount > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-900/15 bg-slate-50 px-5 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-500">Hiển thị</span>
+              <select
+                value={pageSize}
+                onChange={(selectEvent) => handlePageSizeChange(Number(selectEvent.target.value))}
+                className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-[#1AAE97] focus:outline-none"
+                aria-label="Số bản ghi mỗi trang"
+              >
+                {pageSizeOptionList.map((pageSizeOption) => (
+                  <option key={pageSizeOption} value={pageSizeOption}>{pageSizeOption}</option>
+                ))}
+              </select>
+              <span className="text-xs text-slate-500">bản ghi / trang</span>
+              <span className="text-xs text-slate-400">
+                ({(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, visibleLogCount)} trên {visibleLogCount})
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handlePreviousPage}
+                disabled={currentPage <= 1}
+                className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Trang trước"
+              >
+                ‹
+              </button>
+
+              {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
+                <button
+                  key={pageNumber}
+                  type="button"
+                  onClick={() => handleGoToPage(pageNumber)}
+                  className={`h-7 min-w-7 rounded-md border text-xs font-medium transition ${pageNumber === currentPage
+                    ? 'border-[#0F2040] bg-[#0F2040] text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                    }`}
+                  aria-label={`Trang ${pageNumber}`}
+                  aria-current={pageNumber === currentPage ? 'page' : undefined}
+                >
+                  {pageNumber}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={handleNextPage}
+                disabled={currentPage >= totalPages}
+                className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Trang sau"
+              >
+                ›
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
 }
+

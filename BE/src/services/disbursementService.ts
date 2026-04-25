@@ -176,6 +176,7 @@ export type DisbursementResult = {
     signerRole: string;
     signerUserId: string;
     signerAddress: string;
+    transactionHash: string;
     signedAt: Date;
     comment?: string;
   }>;
@@ -1713,6 +1714,7 @@ export async function signDisbursementRequest(
       signerRole,
       signerUserId: effectiveUser.id,
       signerAddress: signerSmartAccountAddress,
+      transactionHash,
       signedAt: new Date(),
       comment
     }
@@ -1893,10 +1895,9 @@ export async function getLatestDisbursementApprovalLogs(
   const approvalLogWithSortValueList: DisbursementApprovalLogWithSortValue[] = [];
 
   for (const disbursementRecord of disbursementRecordList) {
-    const transactionHash = disbursementRecord.finalizeTransactionHash || disbursementRecord.transactionHash || null;
-
     for (let approvalIndex = 0; approvalIndex < disbursementRecord.approvals.length; approvalIndex += 1) {
       const approvalItem = disbursementRecord.approvals[approvalIndex];
+      const approvalTransactionHash = approvalItem.transactionHash || disbursementRecord.transactionHash || null;
       const signedAtDate = new Date(approvalItem.signedAt);
       const signedAtTimestamp = signedAtDate.getTime();
       if (!Number.isFinite(signedAtTimestamp)) {
@@ -1906,7 +1907,7 @@ export async function getLatestDisbursementApprovalLogs(
       approvalLogWithSortValueList.push({
         id: `${disbursementRecord.requestId}-sign-${approvalItem.signerRole}-${signedAtTimestamp}-${approvalIndex}`,
         requestId: disbursementRecord.requestId,
-        transactionHash,
+        transactionHash: approvalTransactionHash,
         amount: disbursementRecord.amount,
         status: 'SIGNED',
         actor: mapSignerRoleToApprovalActor(approvalItem.signerRole),
@@ -1916,6 +1917,7 @@ export async function getLatestDisbursementApprovalLogs(
     }
 
     if (disbursementRecord.rejection) {
+      const transactionHash = disbursementRecord.finalizeTransactionHash || disbursementRecord.transactionHash || null;
       const rejectedAtDate = new Date(disbursementRecord.rejection.rejectedAt);
       const rejectedAtTimestamp = rejectedAtDate.getTime();
       if (Number.isFinite(rejectedAtTimestamp)) {
@@ -1933,6 +1935,7 @@ export async function getLatestDisbursementApprovalLogs(
     }
 
     if (disbursementRecord.approvals.length === 0 && !disbursementRecord.rejection) {
+      const transactionHash = disbursementRecord.finalizeTransactionHash || disbursementRecord.transactionHash || null;
       const createdAtDate = new Date(disbursementRecord.createdAt);
       const createdAtTimestamp = createdAtDate.getTime();
 
