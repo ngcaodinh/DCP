@@ -1,6 +1,6 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 
-import { fetchApi } from "@/app/utils/apiClient";
+import { buildApiUrl, fetchApi } from "@/app/utils/apiClient";
 
 import type { ApiErrorResponse } from "@/app/utils/apiClient";
 
@@ -269,176 +269,165 @@ function DisbursementPanel({
 }: {
   onOpenDisbursementRequest?: (urgentRequestItem: UrgentRequestItem) => void;
 }) {
+  const [disbursementRequestItemList, setDisbursementRequestItemList] = useState<UrgentRequestItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isError, setIsError] = useState(false);
+
+  /** Hàm chuẩn hóa trạng thái chữ ký để hiển thị đúng ngưỡng ký động FR7 từ backend. */
+  function buildSignatureStateText(currentSignatures: number, requiredSignatures: number): string {
+    const safeRequiredSignatures = Math.max(1, requiredSignatures);
+    const safeCurrentSignatures = Math.min(Math.max(0, currentSignatures), safeRequiredSignatures);
+    return `${safeCurrentSignatures}/${safeRequiredSignatures}`;
+  }
+
+  /** Hàm chuẩn hóa thời hạn xử lý sang tiếng Việt để người dùng đọc nhanh mức ưu tiên. */
+  function buildDeadlineText(deadlineTimestamp: number): string {
+    const remainMilliseconds = deadlineTimestamp - Date.now();
+    if (remainMilliseconds <= 0) return "Đã quá hạn";
+
+    const remainMinutes = Math.floor(remainMilliseconds / (60 * 1000));
+    if (remainMinutes < 60) return `${remainMinutes} phút`;
+
+    const remainHours = Math.floor(remainMinutes / 60);
+    if (remainHours < 24) return `${remainHours} giờ`;
+
+    return `${Math.floor(remainHours / 24)} ngày`;
+  }
+
+  /** Hàm xác định mức cảnh báo thời hạn để bảng giải ngân dùng màu trạng thái phù hợp. */
+  function buildDeadlineLevel(deadlineTimestamp: number): "urgent" | "normal" | "ok" {
+    const remainMilliseconds = deadlineTimestamp - Date.now();
+    if (remainMilliseconds <= 60 * 60 * 1000) return "urgent";
+    if (remainMilliseconds <= 24 * 60 * 60 * 1000) return "normal";
+    return "ok";
+  }
+
+  /** Hàm tải danh sách yêu cầu giải ngân thật, tách riêng khỏi dashboard Tổng quan. */
+  const loadDisbursementRequestList = useCallback(async () => {
+    setIsLoading(true);
+    setIsError(false);
+
+    try {
+      const session = readAuthSession();
+      const response = await fetchApi<{
+        requests: {
+          id: string;
+          projectName: string;
+          organizationName: string;
+          amount: number;
+          requiredSignatures: number;
+          currentSignatures: number;
+          deadlineTimestamp: number;
+          usagePurpose?: string;
+          ipfsCid?: string;
+          fileName?: string;
+        }[];
+      }>(buildApiUrl("/api/disbursement/requests"), {
+        headers: { Authorization: `Bearer ${session.accessToken}` },
+      });
+
+      const requestItemList = response.data?.requests ?? [];
+      setDisbursementRequestItemList(requestItemList.map((requestItem) => ({
+        id: requestItem.id,
+        projectName: requestItem.projectName,
+        organizationName: requestItem.organizationName,
+        amountText: `${new Intl.NumberFormat("vi-VN").format(requestItem.amount)}₫`,
+        signatureState: buildSignatureStateText(requestItem.currentSignatures, requestItem.requiredSignatures),
+        deadlineText: buildDeadlineText(requestItem.deadlineTimestamp),
+        deadlineLevel: buildDeadlineLevel(requestItem.deadlineTimestamp),
+        usagePurpose: requestItem.usagePurpose,
+        ipfsCid: requestItem.ipfsCid,
+        fileName: requestItem.fileName,
+      })));
+    } catch {
+      setDisbursementRequestItemList([]);
+      setIsError(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDisbursementRequestList();
+  }, [loadDisbursementRequestList]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">
-            Ký duyệt Giải ngân
-          </h2>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Quản lý và ký xác nhận các yêu cầu giải ngân
-          </p>
+          <h2 className="text-lg font-bold text-slate-900">Yêu cầu giải ngân</h2>
+          <p className="mt-1 text-xs text-slate-500">Chỉ hiển thị các yêu cầu giải ngân đang chờ ký duyệt từ backend</p>
         </div>
 
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-lg border border-emerald-900/15 bg-[#0E7C6B] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0A5C50] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1AAE97]/40 active:translate-y-px"
+          onClick={() => void loadDisbursementRequestList()}
+          className="rounded-lg border border-emerald-900/15 px-3 py-2 text-xs font-semibold text-[#0E7C6B] transition hover:bg-[#0E7C6B] hover:text-white"
         >
-          <svg
-            viewBox="0 0 16 16"
-            className="h-3.5 w-3.5"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path d="M8 1v9M5 7l3 3 3-3M2 12v2h12v-2" />
-          </svg>
-          Xuất báo cáo
+          Làm mới
         </button>
-      </div>
-
-      <div className="grid gap-2 rounded-xl border border-emerald-900/15 bg-white p-3 sm:grid-cols-2 xl:grid-cols-5">
-        <select className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700">
-          <option>Tất cả loại yêu cầu</option>
-          <option>Giải ngân</option>
-          <option>Hoàn trả</option>
-        </select>
-
-        <select className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700">
-          <option>Tất cả trạng thái</option>
-          <option>Đã phê duyệt</option>
-          <option>Đang chờ ký</option>
-          <option>Bị từ chối</option>
-        </select>
-
-        <select className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700">
-          <option>30 ngày gần nhất</option>
-          <option>7 ngày gần nhất</option>
-          <option>Tháng này</option>
-        </select>
-
-        <input
-          type="text"
-          placeholder="Tìm theo mã yêu cầu"
-          className="h-9 rounded-lg border border-slate-200 px-2.5 text-xs text-slate-700 placeholder:text-slate-400"
-        />
-
-        <button
-          type="button"
-          className="h-9 rounded-lg bg-[#1AAE97] px-4 text-xs font-semibold text-[#0A5C50] transition hover:bg-[#129b86] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1AAE97]/40 active:translate-y-px"
-        >
-          Tìm kiếm
-        </button>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {disbursementMetricItemList.map((disbursementMetricItem) => (
-          <div
-            key={disbursementMetricItem.labelText}
-            className="rounded-xl border border-emerald-900/15 bg-white p-4"
-          >
-            <p className="text-2xl font-bold text-slate-900">
-              {disbursementMetricItem.valueText}
-            </p>
-
-            <span
-              className={`mt-1 inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${disbursementMetricItem.toneClassName}`}
-            >
-              {disbursementMetricItem.labelText}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <MonthlyDisbursementCard />
-        <RecentRequestCard />
       </div>
 
       <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
-        <div className="border-b border-emerald-900/15 px-5 py-3 text-sm font-bold text-slate-900">
-          Danh sách yêu cầu giải ngân
-        </div>
-
         <div className="overflow-x-auto">
           <table className="min-w-full text-left">
             <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
               <tr>
                 <th className="px-5 py-2.5 font-semibold">Mã yêu cầu</th>
-
                 <th className="px-5 py-2.5 font-semibold">Dự án / Tổ chức</th>
-
                 <th className="px-5 py-2.5 font-semibold">Số tiền</th>
-
-                <th className="px-5 py-2.5 font-semibold">Thời gian</th>
-
-                <th className="px-5 py-2.5 font-semibold">Trạng thái</th>
-
-                <th className="px-5 py-2.5 font-semibold text-right">
-                  Hành động
-                </th>
+                <th className="px-5 py-2.5 font-semibold">Chữ ký</th>
+                <th className="px-5 py-2.5 font-semibold">Hạn xử lý</th>
+                <th className="px-5 py-2.5 font-semibold text-right">Hành động</th>
               </tr>
             </thead>
 
             <tbody>
-              {disbursementTableItemList.map((disbursementTableItem) => {
-                const urgentRequestItem = buildUrgentRequestItem(
-                  disbursementTableItem,
-                );
-
-                // Logic này giúp nút hành động dùng đúng luồng mở drawer giống tab Tổng quan.
-
-                const handleOpenRequest = () =>
-                  onOpenDisbursementRequest?.(urgentRequestItem);
-
-                return (
-                  <tr
-                    key={disbursementTableItem.requestCodeText}
-                    className="border-t border-slate-100 text-sm hover:bg-slate-50"
-                  >
-                    <td className="px-5 py-3 font-mono text-[12px] text-cyan-700">
-                      {disbursementTableItem.requestCodeText}
-                    </td>
-
+              {isLoading ? (
+                Array.from({ length: 4 }).map((_, rowIndex) => (
+                  <tr key={rowIndex} className="border-t border-slate-100">
+                    {Array.from({ length: 6 }).map((__, cellIndex) => (
+                      <td key={cellIndex} className="px-5 py-3">
+                        <div className="h-4 w-full max-w-[160px] animate-pulse rounded bg-slate-200" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : isError ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-10 text-center text-sm font-semibold text-red-700">
+                    Không thể tải danh sách yêu cầu giải ngân. Vui lòng thử lại.
+                  </td>
+                </tr>
+              ) : disbursementRequestItemList.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-500">
+                    Không có yêu cầu giải ngân nào đang chờ ký duyệt.
+                  </td>
+                </tr>
+              ) : (
+                disbursementRequestItemList.map((requestItem) => (
+                  <tr key={requestItem.id} className="border-t border-slate-100 text-sm hover:bg-slate-50">
+                    <td className="px-5 py-3 font-mono text-[12px] text-cyan-700">{requestItem.id}</td>
                     <td className="px-5 py-3 align-middle">
-                      <p className="text-[13px] font-semibold leading-5 text-slate-900">
-                        {disbursementTableItem.projectNameText}
-                      </p>
-
-                      <p className="mt-0.5 text-[12px] leading-4 text-slate-500">
-                        {disbursementTableItem.organizationNameText}
-                      </p>
+                      <p className="text-[13px] font-semibold leading-5 text-slate-900">{requestItem.projectName}</p>
+                      <p className="mt-0.5 text-[12px] leading-4 text-slate-500">{requestItem.organizationName}</p>
                     </td>
-
-                    <td className="px-5 py-3 font-mono text-[13px] font-semibold text-slate-800">
-                      {disbursementTableItem.amountText}
-                    </td>
-
-                    <td className="px-5 py-3 text-xs text-slate-600">
-                      {disbursementTableItem.createdTimeText}
-                    </td>
-
-                    <td className="px-5 py-3">
-                      <span
-                        className={`inline-flex rounded-md px-2.5 py-1 text-[11px] font-semibold ${disbursementTableItem.statusClassName}`}
-                      >
-                        {disbursementTableItem.statusText}
-                      </span>
-                    </td>
-
+                    <td className="px-5 py-3 font-mono text-[13px] font-semibold text-slate-800">{requestItem.amountText}</td>
+                    <td className="px-5 py-3 font-mono text-[12px] text-slate-700">{requestItem.signatureState}</td>
+                    <td className="px-5 py-3 text-[12px] text-slate-700">{requestItem.deadlineText}</td>
                     <td className="px-5 py-3 text-right">
                       <button
                         type="button"
-                        onClick={handleOpenRequest}
-                        className="rounded-md bg-[#1AAE97] px-3 py-1.5 text-[11px] font-bold leading-none text-[#0A5C50] transition hover:bg-[#129b86] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1AAE97]/40 active:translate-y-px"
+                        onClick={() => onOpenDisbursementRequest?.(requestItem)}
+                        className="rounded-md bg-[#1AAE97] px-3 py-1.5 text-[11px] font-bold leading-none text-[#0A5C50] transition hover:bg-[#129b86]"
                       >
                         Xem & Ký
                       </button>
                     </td>
                   </tr>
-                );
-              })}
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -446,7 +435,6 @@ function DisbursementPanel({
     </div>
   );
 }
-
 type KycSubmissionFileItem = {
   cid: string;
 
@@ -2656,4 +2644,6 @@ export default function NonDashboardPanel({
     </div>
   );
 }
+
+
 

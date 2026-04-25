@@ -30,7 +30,7 @@ export type UrgentRequestItem = {
   projectName: string;
   organizationName: string;
   amountText: string;
-  signatureState: '1/3' | '2/3' | '3/3';
+  signatureState: string;
   deadlineText: string;
   deadlineLevel: 'urgent' | 'normal' | 'ok';
   ipfsCid?: string;
@@ -40,18 +40,17 @@ export type UrgentRequestItem = {
 
 /** Một dòng trong bảng audit log. */
 export type AuditLogItem = {
-  id: string;
-  timestamp: string;
-  action: string;
-  module: string;
-  actor: string;
-  ipAddress: string;
-  details: string;
+  transactionId: string;
+  requestId: string;
+  amountText: string;
+  statusText: string;
+  actorText: string;
+  timeText: string;
 };
 
 /** Một sự kiện trong timeline hoạt động. */
 export type TimelineItem = {
-  id: string;
+  id?: string;
   type: 'sign' | 'view' | 'reject' | 'login';
   actionText: string;
   detailText: string;
@@ -63,7 +62,7 @@ export type ToastItem = {
   id: string;
   titleText: string;
   bodyText: string;
-  tone: 'success' | 'error' | 'warning';
+  tone: 'success' | 'error' | 'warning' | 'info';
 };
 
 /** Nhóm lỗi hiển thị trong bảng log lỗi hệ thống. */
@@ -201,4 +200,5 @@ export type SybilToggleResult = {
   message: string;
   timestamp?: string;
 };
+
 

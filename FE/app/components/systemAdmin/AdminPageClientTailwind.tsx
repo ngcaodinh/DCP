@@ -14,7 +14,6 @@ import Topbar from './tailwind/Topbar';
 import MetricCard from './tailwind/MetricCard';
 import UrgentTable from './tailwind/UrgentTable';
 import DisbursementStatusCard from './tailwind/DisbursementStatusCard';
-import TimelineCard from './tailwind/TimelineCard';
 import AuditTable from './tailwind/AuditTable';
 import RequestDrawer from './tailwind/RequestDrawer';
 import ToastStack from './tailwind/ToastStack';
@@ -24,7 +23,7 @@ import { readAuthSession, clearAuthSession } from '@/app/utils/authSession';
 import { fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { getPageTitle } from './tailwind/helpers';
 import type { PageKey, ToastItem, UrgentRequestItem, DrawerTabKey } from './tailwind/types';
-import type { AuditLogItem, TimelineItem } from './tailwind/types';
+import type { AuditLogItem } from './tailwind/types';
 
 // =============================================================================
 // TYPES for Dashboard API responses
@@ -37,6 +36,36 @@ type MetricCardData = {
   trendText: string;
   trendClassName: 'trend-up' | 'trend-dn';
   colorVariant: 'amber' | 'cyan' | 'green' | 'teal';
+};
+
+type DisbursementSummaryItem = {
+  id: string;
+  projectName: string;
+  organizationName: string;
+  amount: number;
+  requiredSignatures: number;
+  currentSignatures: number;
+  deadlineTimestamp: number;
+  usagePurpose?: string;
+  ipfsCid?: string;
+  fileName?: string;
+  requestMode: 'NORMAL' | 'EMERGENCY';
+};
+
+type DisbursementApprovalLogResponseItem = {
+  id: string;
+  requestId: string;
+  transactionHash: string | null;
+  amount: number;
+  status: 'SIGNED' | 'PENDING' | 'REJECTED';
+  actor: string;
+  actionTimestamp: number;
+};
+
+type SigningStatusSummary = {
+  fullySignedRequestCount: number;
+  partiallySignedRequestCount: number;
+  unsignedRequestCount: number;
 };
 
 // =============================================================================
@@ -61,8 +90,12 @@ export default function AdminPageClientTailwind() {
   // Dashboard real API state
   const [dashboardMetrics, setDashboardMetrics] = useState<MetricCardData[]>([]);
   const [dashboardUrgentRequests, setDashboardUrgentRequests] = useState<UrgentRequestItem[]>([]);
-  const [dashboardTimeline, setDashboardTimeline] = useState<TimelineItem[]>([]);
   const [dashboardAuditLogs, setDashboardAuditLogs] = useState<AuditLogItem[]>([]);
+  const [signingStatusSummary, setSigningStatusSummary] = useState<SigningStatusSummary>({
+    fullySignedRequestCount: 0,
+    partiallySignedRequestCount: 0,
+    unsignedRequestCount: 0,
+  });
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [dashboardError, setDashboardError] = useState(false);
 
@@ -130,20 +163,55 @@ export default function AdminPageClientTailwind() {
     return 'ok';
   };
 
-  /** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: bảo đảm dữ liệu API luôn khớp union type mà UI hỗ trợ. */
-  const normalizeSignatureState = (currentSignatures: number, requiredSignatures: number): '1/3' | '2/3' | '3/3' => {
-    const safeRequiredSignatures = requiredSignatures === 3 ? 3 : 3;
-    const safeCurrentSignatures = Math.min(Math.max(currentSignatures, 1), safeRequiredSignatures);
+  /** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: hiển thị đúng ngưỡng chữ ký động FR7 từ backend. */
+  const normalizeSignatureState = (currentSignatures: number, requiredSignatures: number): string => {
+    const safeRequiredSignatures = Math.max(1, requiredSignatures);
+    const safeCurrentSignatures = Math.min(Math.max(0, currentSignatures), safeRequiredSignatures);
+    return `${safeCurrentSignatures}/${safeRequiredSignatures}`;
+  };
 
-    if (safeCurrentSignatures >= 3) {
-      return '3/3';
-    }
+  /** Hàm tạo metric ký duyệt từ danh sách yêu cầu thật để đồng bộ admin với regulatory-bodies. */
+  const buildDisbursementMetricList = (requestItemList: DisbursementSummaryItem[]): MetricCardData[] => {
+    const pendingRequestCount = requestItemList.length;
+    const emergencyRequestCount = requestItemList.filter((item) => item.requestMode === 'EMERGENCY').length;
+    const almostApprovedRequestCount = requestItemList.filter((item) => item.currentSignatures + 1 >= item.requiredSignatures).length;
+    const urgentDeadlineRequestCount = requestItemList.filter((item) => normalizeDeadlineLevel(item.deadlineTimestamp) === 'urgent').length;
 
-    if (safeCurrentSignatures === 2) {
-      return '2/3';
-    }
+    return [
+      { colorVariant: 'amber', valueText: String(pendingRequestCount), labelText: 'Yêu cầu chờ ký', trendText: 'Dữ liệu thật từ backend', trendClassName: 'trend-up' },
+      { colorVariant: 'cyan', valueText: String(emergencyRequestCount), labelText: 'Yêu cầu khẩn cấp', trendText: 'Ưu tiên xử lý ngay', trendClassName: emergencyRequestCount > 0 ? 'trend-dn' : 'trend-up' },
+      { colorVariant: 'green', valueText: String(almostApprovedRequestCount), labelText: 'Sắp đủ chữ ký', trendText: 'Theo ngưỡng chữ ký động', trendClassName: 'trend-up' },
+      { colorVariant: 'teal', valueText: String(urgentDeadlineRequestCount), labelText: 'Hạn dưới 1 giờ', trendText: urgentDeadlineRequestCount > 0 ? 'Cần xử lý gấp' : 'Không có quá hạn gần', trendClassName: urgentDeadlineRequestCount > 0 ? 'trend-dn' : 'trend-up' },
+    ];
+  };
 
-    return '1/3';
+  /** Hàm tạo thống kê tiến độ chữ ký từ dữ liệu backend để card trạng thái không còn dùng số liệu cứng. */
+  const buildSigningStatusSummary = (requestItemList: DisbursementSummaryItem[]): SigningStatusSummary => {
+    return requestItemList.reduce<SigningStatusSummary>((summary, item) => {
+      if (item.currentSignatures <= 0) {
+        return { ...summary, unsignedRequestCount: summary.unsignedRequestCount + 1 };
+      }
+
+      if (item.currentSignatures >= item.requiredSignatures) {
+        return { ...summary, fullySignedRequestCount: summary.fullySignedRequestCount + 1 };
+      }
+
+      return { ...summary, partiallySignedRequestCount: summary.partiallySignedRequestCount + 1 };
+    }, { fullySignedRequestCount: 0, partiallySignedRequestCount: 0, unsignedRequestCount: 0 });
+  };
+
+  /** Hàm ánh xạ trạng thái nhật ký ký duyệt sang tiếng Việt để bảng admin dễ đọc. */
+  const mapApprovalLogStatusToText = (status: 'SIGNED' | 'PENDING' | 'REJECTED'): string => {
+    if (status === 'SIGNED') return 'Đã ký';
+    if (status === 'REJECTED') return 'Bị từ chối';
+    return 'Chờ ký';
+  };
+
+  /** Hàm định dạng thời gian nhật ký ký duyệt theo chuẩn Việt Nam. */
+  const buildApprovalLogTimeText = (actionTimestamp: number): string => {
+    const actionDate = new Date(actionTimestamp);
+    if (!Number.isFinite(actionDate.getTime())) return 'Không xác định';
+    return actionDate.toLocaleString('vi-VN');
   };
 
   /** Hàm gọi API dashboard từng h?p cho Admin — lấy metrics, urgent requests, timeline, audit logs. */
@@ -154,57 +222,21 @@ export default function AdminPageClientTailwind() {
     const authHeaders = { Authorization: `Bearer ${session.accessToken}` };
 
     try {
-      // Gọi song song 4 API endpoint d? từi uu th?i gian từi dashboard
-      const [metricsResp, urgentResp, timelineResp, auditResp] = await Promise.allSettled([
+      // Gọi song song API giải ngân để dashboard admin dùng dữ liệu thật, cùng nguồn với regulatory-bodies.
+      const [urgentResp, auditResp] = await Promise.allSettled([
         fetchApi<{
-          pendingProjects: number;
-          pendingKycs: number;
-          newUsersThisMonth: number;
-          totalTransactionAmount: number;
-        }>(buildApiUrl('/api/admin/dashboard/metrics'), { headers: authHeaders }),
-        fetchApi<{
-          requests: {
-            id: string;
-            projectName: string;
-            organizationName: string;
-            amount: number;
-            requiredSignatures: number;
-            currentSignatures: number;
-            deadlineTimestamp: number;
-            usagePurpose?: string;
-            ipfsCid?: string;
-            fileName?: string;
-          }[];
+          requests: DisbursementSummaryItem[];
         }>(buildApiUrl('/api/disbursement/requests'), { headers: authHeaders }),
         fetchApi<{
-          events: { id: string; type: string; actionText: string; detailText: string; timestamp: string }[];
-        }>(buildApiUrl('/api/admin/dashboard/timeline'), { headers: authHeaders }),
-        fetchApi<{
-          logs: { id: string; timestamp: string; action: string; module: string; actor: string; ipAddress: string; details: string }[];
-        }>(buildApiUrl('/api/admin/dashboard/audit-logs'), { headers: authHeaders }),
+          logs: DisbursementApprovalLogResponseItem[];
+        }>(buildApiUrl('/api/disbursement/approval-logs'), { headers: authHeaders }),
       ]);
-
-      // Xử lý metrics — fallback 0 nếu API lỗi
-      if (metricsResp.status === 'fulfilled') {
-        const m = metricsResp.value.data;
-        setDashboardMetrics([
-          { colorVariant: 'amber', valueText: String(m.pendingProjects), labelText: 'Dự án chờ duyệt', trendText: '↺ Cập nhật theo thời gian thực', trendClassName: 'trend-up' },
-          { colorVariant: 'cyan', valueText: String(m.pendingKycs), labelText: 'Hồ sơ KYC chờ duyệt', trendText: '↺ Cập nhật theo thời gian thực', trendClassName: 'trend-up' },
-          { colorVariant: 'green', valueText: String(m.newUsersThisMonth), labelText: 'Người dùng mới tháng này', trendText: '↺ Cập nhật theo thời gian thực', trendClassName: 'trend-up' },
-          { colorVariant: 'teal', valueText: m.totalTransactionAmount >= 1e12 ? `${(m.totalTransactionAmount / 1e12).toFixed(1)}T` : `${(m.totalTransactionAmount / 1e9).toFixed(1)}B`, labelText: 'Tổng giá trị giao dịch (VNĐ)', trendText: '↺ Cập nhật theo thời gian thực', trendClassName: 'trend-up' },
-        ]);
-      } else {
-        setDashboardMetrics([
-          { colorVariant: 'amber', valueText: '—', labelText: 'Dự án chờ duyệt', trendText: 'Không thể tải', trendClassName: 'trend-dn' },
-          { colorVariant: 'cyan', valueText: '—', labelText: 'Hồ sơ KYC chờ duyệt', trendText: 'Không thể tải', trendClassName: 'trend-dn' },
-          { colorVariant: 'green', valueText: '—', labelText: 'Người dùng mới tháng này', trendText: 'Không thể tải', trendClassName: 'trend-dn' },
-          { colorVariant: 'teal', valueText: '—', labelText: 'Tổng giá trị giao dịch (VNĐ)', trendText: 'Không thể tải', trendClassName: 'trend-dn' },
-        ]);
-      }
 
       // Xử lý urgent requests — chuyển đổi từ raw API sang UrgentRequestItem
       if (urgentResp.status === 'fulfilled') {
         const rawRequests = urgentResp.value.data.requests ?? [];
+        setDashboardMetrics(buildDisbursementMetricList(rawRequests));
+        setSigningStatusSummary(buildSigningStatusSummary(rawRequests));
         setDashboardUrgentRequests(rawRequests.map((r) => ({
           id: r.id,
           projectName: r.projectName,
@@ -218,34 +250,21 @@ export default function AdminPageClientTailwind() {
           usagePurpose: r.usagePurpose,
         })));
       } else {
+        setDashboardMetrics(buildDisbursementMetricList([]));
+        setSigningStatusSummary(buildSigningStatusSummary([]));
         setDashboardUrgentRequests([]);
       }
 
-      // Xử lý timeline — chuẩn hóa từ API sang TimelineItem
-      if (timelineResp.status === 'fulfilled') {
-        const rawEvents = timelineResp.value.data.events ?? [];
-        setDashboardTimeline(rawEvents.map((e, idx) => ({
-          id: e.id || `TL-${idx + 1}`,
-          type: e.type as TimelineItem['type'],
-          actionText: e.actionText,
-          detailText: e.detailText,
-          timeText: e.timestamp,
-        })));
-      } else {
-        setDashboardTimeline([]);
-      }
-
-      // Xử lý audit logs — chuẩn hóa từ API sang AuditLogItem
+      // Xử lý nhật ký ký duyệt gần nhất từ API thật.
       if (auditResp.status === 'fulfilled') {
         const rawLogs = auditResp.value.data.logs ?? [];
         setDashboardAuditLogs(rawLogs.map((l) => ({
-          id: l.id,
-          timestamp: l.timestamp,
-          action: l.action,
-          module: l.module,
-          actor: l.actor,
-          ipAddress: l.ipAddress,
-          details: l.details,
+          transactionId: l.transactionHash || l.id,
+          requestId: l.requestId,
+          amountText: new Intl.NumberFormat('vi-VN').format(l.amount) + '₫',
+          statusText: mapApprovalLogStatusToText(l.status),
+          actorText: l.actor,
+          timeText: buildApprovalLogTimeText(l.actionTimestamp),
         })));
       } else {
         setDashboardAuditLogs([]);
@@ -255,14 +274,14 @@ export default function AdminPageClientTailwind() {
       // Fallback: đặt rỗng để tránh hiển thị mock data
       setDashboardMetrics([]);
       setDashboardUrgentRequests([]);
-      setDashboardTimeline([]);
       setDashboardAuditLogs([]);
+      setSigningStatusSummary(buildSigningStatusSummary([]));
     } finally {
       setDashboardLoading(false);
     }
   }, []);
 
-  // từi dashboard data khi auth dă xác thực thành công
+  // Tải dashboard data khi auth đã xác thực thành công.
   useEffect(() => {
     if (authVerified) {
       loadDashboardData();
@@ -289,11 +308,10 @@ export default function AdminPageClientTailwind() {
   // =============================================================================
 
   /** Mở drawer với item được chọn. */
-  const handleOpenDrawer = useCallback((requestId: string) => {
-    const item = dashboardUrgentRequests.find((r) => r.id === requestId) ?? null;
+  const handleOpenDrawer = useCallback((item: UrgentRequestItem) => {
     setSelectedUrgentRequestItem(item);
     setDrawerTabKey('overview');
-  }, [dashboardUrgentRequests]);
+  }, []);
 
   /** Đóng drawer — reset state về null. */
   const handleCloseDrawer = useCallback(() => {
@@ -393,7 +411,7 @@ export default function AdminPageClientTailwind() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#0E7C6B] border-t-transparent" />
-          <p className="text-sm text-slate-500">Đang xác thực quy?n truy c?p...</p>
+          <p className="text-sm text-slate-500">Đang xác thực quyền truy cập...</p>
         </div>
       </div>
     );
@@ -463,7 +481,7 @@ export default function AdminPageClientTailwind() {
                 ))
               ) : (
                 <div className="col-span-4 overflow-hidden rounded-xl border border-red-200 bg-red-50 px-6 py-8 text-center text-sm text-red-700">
-                  Không thể tải metric. Vui ḷng thử lại.
+                  Không thể tải metric. Vui lòng thử lại.
                 </div>
               )}
             </div>
@@ -471,27 +489,15 @@ export default function AdminPageClientTailwind() {
             {/* Main dashboard grid */}
             <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
               {/* Left: Urgent table */}
-              <UrgentTable urgentRequestItemList={dashboardUrgentRequests} onOpenDrawer={(requestId) => {
-                const item = dashboardUrgentRequests.find((r) => r.id === requestId) ?? null;
-                setSelectedUrgentRequestItem(item);
-                setDrawerTabKey('overview');
-              }} />
+              <UrgentTable urgentRequestItemList={dashboardUrgentRequests} onOpenDrawer={handleOpenDrawer} />
 
-              {/* Right: Disbursement status + Timeline */}
+              {/* Right: Disbursement status */}
               <div className="space-y-4">
-                <DisbursementStatusCard completedCount={dashboardUrgentRequests.filter(r => r.signatureState === "3/3" || r.signatureState === "2/3").length} pendingCount={dashboardUrgentRequests.filter(r => r.signatureState !== "3/3" && r.signatureState !== "2/3").length} totalCount={dashboardUrgentRequests.length} />
-                {dashboardLoading ? (
-                  <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white p-5">
-                    <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
-                    <div className="mt-4 space-y-3">
-                      {Array.from({ length: 3 }).map((_, idx) => (
-                        <div key={idx} className="h-12 animate-pulse rounded-lg bg-slate-100" />
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <TimelineCard timelineItemList={dashboardTimeline} />
-                )}
+                <DisbursementStatusCard
+                  fullySignedRequestCount={signingStatusSummary.fullySignedRequestCount}
+                  partiallySignedRequestCount={signingStatusSummary.partiallySignedRequestCount}
+                  unsignedRequestCount={signingStatusSummary.unsignedRequestCount}
+                />
               </div>
             </div>
 
@@ -517,7 +523,7 @@ export default function AdminPageClientTailwind() {
                   onClick={() => loadDashboardData()}
                   className="rounded-lg border border-emerald-900/15 bg-[#0E7C6B] px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-[#0d6b5c]"
                 >
-                  ? từi l?i d? li?u từng quan
+                  Tải lại dữ liệu tổng quan
                 </button>
               </div>
             )}
@@ -597,3 +603,5 @@ export default function AdminPageClientTailwind() {
     </main>
   );
 }
+
+

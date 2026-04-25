@@ -1,192 +1,236 @@
-'use client';
-
-// =============================================================================
-// AuditTable cho System Admin Page
-// Clone from: FE/app/components/regulatoryBodies/tailwind/AuditTable.tsx
-// Mục đích: Bảng log kiểm toán với search, filter, phân trang, export
-// =============================================================================
-
-import { useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
+import { getShortHash, getStatusBadgeClass } from './helpers';
 import type { AuditLogItem } from './types';
 
 type AuditTableProps = {
   auditLogItemList: AuditLogItem[];
 };
 
+/** Danh sách lựa chọn cho bộ lọc trạng thái ký duyệt. */
+const statusFilterOptionList = ['Tất cả trạng thái', 'Đã ký', 'Chờ ký', 'Bị từ chối'] as const;
+
+/** Danh sách lựa chọn số bản ghi trên mỗi trang. */
+const pageSizeOptionList = [5, 10, 20, 50] as const;
+
+/** Hàm tạo đường dẫn block explorer cho transaction hash. */
+function buildTransactionExplorerUrl(transactionHashValue: string): string {
+  if (!transactionHashValue) return '';
+  const blockchainExplorerTxBaseUrl = String(
+    process.env.NEXT_PUBLIC_BLOCKCHAIN_EXPLORER_TX_BASE_URL || 'https://amoy.polygonscan.com/tx'
+  ).trim();
+  return `${blockchainExplorerTxBaseUrl.replace(/\/$/, '')}/${transactionHashValue}`;
+}
+
+/** Hàm component AuditTable để hiển thị nhật ký ký duyệt bằng dữ liệu thật từ backend, không dùng dữ liệu cố định. */
 export default function AuditTable({ auditLogItemList }: AuditTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterModule, setFilterModule] = useState('all');
-  const [filterAction, setFilterAction] = useState('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('Tất cả trạng thái');
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 5;
+  const [pageSize, setPageSize] = useState<number>(10);
 
-  // Lấy danh sách module/action duy nhất
-  const modules = ['all', ...Array.from(new Set(auditLogItemList.map((l) => l.module)))];
-  const actions = ['all', ...Array.from(new Set(auditLogItemList.map((l) => l.action)))];
+  /** Danh sách nhật ký đã được lọc theo trạng thái và từ khóa tìm kiếm. */
+  const filteredAuditLogItemList = useMemo(() => {
+    return auditLogItemList.filter((auditLogItem) => {
+      const isMatchingStatus =
+        selectedStatusFilter === 'Tất cả trạng thái' || auditLogItem.statusText === selectedStatusFilter;
+      const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+      const isMatchingSearch =
+        normalizedSearchQuery === '' ||
+        auditLogItem.transactionId.toLowerCase().includes(normalizedSearchQuery) ||
+        auditLogItem.requestId.toLowerCase().includes(normalizedSearchQuery);
+      return isMatchingStatus && isMatchingSearch;
+    });
+  }, [auditLogItemList, selectedStatusFilter, searchQuery]);
 
-  // Lọc theo search + filter
-  const filtered = auditLogItemList.filter((log) => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      !searchQuery ||
-      log.actor.toLowerCase().includes(q) ||
-      log.details.toLowerCase().includes(q) ||
-      log.ipAddress.includes(q);
-    const matchesModule = filterModule === 'all' || log.module === filterModule;
-    const matchesAction = filterAction === 'all' || log.action === filterAction;
-    return matchesSearch && matchesModule && matchesAction;
-  });
+  const totalAuditLogCount = auditLogItemList.length;
+  const filteredAuditLogCount = filteredAuditLogItemList.length;
+  const totalPages = Math.max(1, Math.ceil(filteredAuditLogCount / pageSize));
+  const displayedStartIndex = filteredAuditLogCount > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+  const displayedEndIndex = Math.min(currentPage * pageSize, filteredAuditLogCount);
 
-  // Phân trang
-  const totalPages = Math.ceil(filtered.length / pageSize);
-  const paginated = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  /** Danh sách nhật ký chỉ thuộc trang hiện tại. */
+  const paginatedAuditLogItemList = useMemo(() => {
+    const startIndex = (currentPage - 1) * pageSize;
+    return filteredAuditLogItemList.slice(startIndex, startIndex + pageSize);
+  }, [currentPage, filteredAuditLogItemList, pageSize]);
 
-  const handleExport = () => {
-    const csv = [
-      ['ID', 'Thời gian', 'Hành động', 'Module', 'Actor', 'IP', 'Chi tiết'].join(','),
-      ...filtered.map((l) =>
-        [l.id, l.timestamp, l.action, l.module, l.actor, l.ipAddress, `"${l.details}"`].join(',')
-      ),
-    ].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `audit_log_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedStatusFilter, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  /** Hàm chuyển sang trang trước nếu trang hiện tại chưa phải trang đầu. */
+  function handlePreviousPage(): void {
+    if (currentPage <= 1) return;
+    setCurrentPage(currentPage - 1);
+  }
+
+  /** Hàm chuyển sang trang sau nếu trang hiện tại chưa phải trang cuối. */
+  function handleNextPage(): void {
+    if (currentPage >= totalPages) return;
+    setCurrentPage(currentPage + 1);
+  }
+
+  /** Hàm chuyển tới trang được chọn trong danh sách phân trang. */
+  function handleGoToPage(pageNumber: number): void {
+    if (pageNumber < 1 || pageNumber > totalPages || pageNumber === currentPage) return;
+    setCurrentPage(pageNumber);
+  }
+
+  /** Hàm thay đổi số bản ghi trên mỗi trang. */
+  function handlePageSizeChange(nextPageSize: number): void {
+    setPageSize(nextPageSize);
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-        <div>
-          <h3 className="text-sm font-bold text-slate-800">Nhật ký kiểm toán</h3>
-          <p className="mt-0.5 text-xs text-slate-500">{filtered.length} bản ghi</p>
-        </div>
-        <button
-          type="button"
-          onClick={handleExport}
-          className="flex items-center gap-1.5 rounded-lg border border-emerald-900/15 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-emerald-50"
-        >
-          <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-          </svg>
-          Export CSV
-        </button>
+      <div className="border-b border-emerald-900/15 px-6 py-3.5">
+        <h2 className="text-[14px] font-bold leading-5 text-slate-900">Nhật ký ký duyệt gần nhất</h2>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
-        <div className="relative flex-1 min-w-40">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-emerald-900/15 bg-slate-50 px-6 py-3">
+        <div className="relative w-full md:w-[300px]">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">⌕</span>
           <input
-            type="search"
+            placeholder="Tìm mã yêu cầu / Tx hash"
             value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-            placeholder="Tìm actor, chi tiết..."
-            className="h-8 w-full rounded-lg border border-slate-200 bg-white pl-7 pr-3 text-xs text-slate-700 placeholder-slate-400 focus:border-[#1AAE97] focus:outline-none focus:ring-1 focus:ring-[#1AAE97]/30"
+            onChange={(inputEvent) => setSearchQuery(inputEvent.target.value)}
+            className="h-8 w-full rounded-lg border border-emerald-900/15 bg-white pl-7 pr-3 text-[12px] outline-none transition focus:border-cyan-500"
           />
         </div>
         <select
-          value={filterModule}
-          onChange={(e) => { setFilterModule(e.target.value); setCurrentPage(1); }}
-          className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 focus:border-[#1AAE97] focus:outline-none"
+          value={selectedStatusFilter}
+          onChange={(selectEvent) => setSelectedStatusFilter(selectEvent.target.value)}
+          className="h-8 min-w-[156px] rounded-lg border border-emerald-900/15 bg-white px-3 text-[12px] text-slate-700 outline-none transition focus:border-cyan-500"
         >
-          {modules.map((m) => (
-            <option key={m} value={m}>{m === 'all' ? 'Tất cả Module' : m}</option>
-          ))}
-        </select>
-        <select
-          value={filterAction}
-          onChange={(e) => { setFilterAction(e.target.value); setCurrentPage(1); }}
-          className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 focus:border-[#1AAE97] focus:outline-none"
-        >
-          {actions.map((a) => (
-            <option key={a} value={a}>{a === 'all' ? 'Tất cả Hành động' : a}</option>
+          {statusFilterOptionList.map((statusOption) => (
+            <option key={statusOption} value={statusOption}>{statusOption}</option>
           ))}
         </select>
       </div>
 
-      {/* Table */}
       <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
+        <table className="min-w-full text-left">
+          <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.1em] text-slate-500">
             <tr>
-              <th className="px-5 py-2.5 font-semibold">Thời gian</th>
-              <th className="px-5 py-2.5 font-semibold">Hành động</th>
-              <th className="px-5 py-2.5 font-semibold">Module</th>
-              <th className="px-5 py-2.5 font-semibold">Actor</th>
-              <th className="px-5 py-2.5 font-semibold">IP</th>
-              <th className="px-5 py-2.5 font-semibold">Chi tiết</th>
+              {['Tx hash', 'Yêu cầu', 'Số tiền', 'Trạng thái', 'Đơn vị thao tác', 'Thời gian'].map((headerLabel) => (
+                <th key={headerLabel} className="px-6 py-2.5 font-semibold">{headerLabel}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {paginated.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-12 text-center text-xs text-slate-500">
-                  Không có bản ghi nào phù hợp
+            {paginatedAuditLogItemList.length === 0 ? (
+              <tr className="border-t border-slate-100">
+                <td colSpan={6} className="px-6 py-6 text-center text-sm text-slate-500">
+                  {auditLogItemList.length === 0
+                    ? 'Chưa có dữ liệu nhật ký ký duyệt từ backend.'
+                    : 'Không tìm thấy bản ghi phù hợp với bộ lọc.'}
                 </td>
               </tr>
-            ) : (
-              paginated.map((log, idx) => (
-                <tr
-                  key={log.id}
-                  className={`border-t border-slate-100 text-xs ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}`}
-                >
-                  <td className="px-5 py-2.5 font-mono text-[10px] text-slate-500">{log.timestamp}</td>
-                  <td className="px-5 py-2.5">
-                    <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-700">
-                      {log.action}
+            ) : paginatedAuditLogItemList.map((auditLogItem) => {
+              const transactionExplorerUrl = buildTransactionExplorerUrl(auditLogItem.transactionId);
+              return (
+                <tr key={`${auditLogItem.transactionId}-${auditLogItem.requestId}-${auditLogItem.timeText}`} className="border-t border-slate-100 text-sm transition hover:bg-slate-50/80">
+                  <td className="px-6 py-3 font-mono text-[12px] leading-4">
+                    {transactionExplorerUrl ? (
+                      <a
+                        href={transactionExplorerUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="inline-flex items-center gap-1 text-cyan-700 hover:text-cyan-900 hover:underline"
+                        title={auditLogItem.transactionId}
+                      >
+                        <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                        </svg>
+                        <span>{getShortHash(auditLogItem.transactionId)}</span>
+                      </a>
+                    ) : (
+                      <span className="text-cyan-700">{getShortHash(auditLogItem.transactionId)}</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3 text-[13px] leading-4 text-slate-800">{auditLogItem.requestId}</td>
+                  <td className="px-6 py-3 font-mono text-[13px] font-semibold leading-4 text-slate-800">{auditLogItem.amountText}</td>
+                  <td className="px-6 py-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold leading-none ${getStatusBadgeClass(auditLogItem.statusText)}`}>
+                      {auditLogItem.statusText}
                     </span>
                   </td>
-                  <td className="px-5 py-2.5 text-slate-700">{log.module}</td>
-                  <td className="px-5 py-2.5 font-semibold text-slate-800">{log.actor}</td>
-                  <td className="px-5 py-2.5 font-mono text-[10px] text-slate-500">{log.ipAddress}</td>
-                  <td className="px-5 py-2.5 text-slate-600">{log.details}</td>
+                  <td className="px-6 py-3 text-[13px] leading-4 text-slate-700">{auditLogItem.actorText}</td>
+                  <td className="px-6 py-3 font-mono text-[12px] leading-4 text-slate-600">{auditLogItem.timeText}</td>
                 </tr>
-              ))
-            )}
+              );
+            })}
           </tbody>
         </table>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
-          <span className="text-xs text-slate-500">
-            Trang {currentPage}/{totalPages}
-          </span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-emerald-900/15 bg-slate-50 px-6 py-2.5 text-[12px] text-slate-600">
+        <p>Hiển thị {displayedStartIndex}-{displayedEndIndex} trên {filteredAuditLogCount} bản ghi{filteredAuditLogCount !== totalAuditLogCount ? ` (tổng ${totalAuditLogCount})` : ''}</p>
+        <p className="font-medium text-slate-500">Đồng bộ thời gian thực từ backend</p>
+      </div>
+
+      {filteredAuditLogCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-900/15 bg-slate-50 px-5 py-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">Hiển thị</span>
+            <select
+              value={pageSize}
+              onChange={(selectEvent) => handlePageSizeChange(Number(selectEvent.target.value))}
+              className="h-7 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-[#1AAE97] focus:outline-none"
+              aria-label="Số bản ghi mỗi trang"
+            >
+              {pageSizeOptionList.map((pageSizeOption) => (
+                <option key={pageSizeOption} value={pageSizeOption}>{pageSizeOption}</option>
+              ))}
+            </select>
+            <span className="text-xs text-slate-500">bản ghi / trang</span>
+          </div>
+
           <div className="flex items-center gap-1">
             <button
               type="button"
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onClick={handlePreviousPage}
               disabled={currentPage <= 1}
-              className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:opacity-40"
-            >‹</button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Trang trước"
+            >
+              ‹
+            </button>
+
+            {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
               <button
-                key={p}
+                key={pageNumber}
                 type="button"
-                onClick={() => setCurrentPage(p)}
-                className={`h-7 min-w-7 rounded-md border text-xs font-medium transition ${p === currentPage ? 'border-[#0E7C6B]/30 bg-[#0E7C6B] border border-[#0E7C6B]/30 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                onClick={() => handleGoToPage(pageNumber)}
+                className={`h-7 min-w-7 rounded-md border text-xs font-medium transition ${pageNumber === currentPage
+                  ? 'border-[#0F2040] bg-[#0F2040] text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
                   }`}
+                aria-label={`Trang ${pageNumber}`}
+                aria-current={pageNumber === currentPage ? 'page' : undefined}
               >
-                {p}
+                {pageNumber}
               </button>
             ))}
+
             <button
               type="button"
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              onClick={handleNextPage}
               disabled={currentPage >= totalPages}
-              className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:opacity-40"
-            >›</button>
+              className="h-7 w-7 rounded-md border border-slate-200 bg-white text-xs text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="Trang sau"
+            >
+              ›
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

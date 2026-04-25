@@ -88,20 +88,11 @@ function normalizeDeadlineLevel(
   return "ok";
 }
 
-/** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: ép dữ liệu API về đúng 3 trạng thái UI hỗ trợ để tránh lỗi TypeScript. */
-function normalizeSignatureState(currentSignatures: number, requiredSignatures: number): '1/3' | '2/3' | '3/3' {
-  const safeRequiredSignatures = requiredSignatures === 3 ? 3 : 3;
-  const safeCurrentSignatures = Math.min(Math.max(currentSignatures, 1), safeRequiredSignatures);
-
-  if (safeCurrentSignatures >= 3) {
-    return '3/3';
-  }
-
-  if (safeCurrentSignatures === 2) {
-    return '2/3';
-  }
-
-  return '1/3';
+/** Hàm chuẩn hóa trạng thái chữ ký. Mục đích: hiển thị đúng tiến độ chữ ký theo ngưỡng động FR7 từ backend. */
+function normalizeSignatureState(currentSignatures: number, requiredSignatures: number): string {
+  const safeRequiredSignatures = Math.max(1, requiredSignatures);
+  const safeCurrentSignatures = Math.min(Math.max(0, currentSignatures), safeRequiredSignatures);
+  return `${safeCurrentSignatures}/${safeRequiredSignatures}`;
 }
 
 type DisbursementPanelProps = {
@@ -110,6 +101,34 @@ type DisbursementPanelProps = {
   onOpenDrawer?: (urgentRequestItem: UrgentRequestItem) => void;
 };
 
+type DisbursementSummaryItem = {
+  id: string;
+  projectName: string;
+  organizationName: string;
+  amount: number;
+  requiredSignatures: number;
+  currentSignatures: number;
+  deadlineTimestamp: number;
+  usagePurpose?: string;
+  ipfsCid?: string;
+  fileName?: string;
+  requestMode?: "NORMAL" | "EMERGENCY";
+};
+
+/** Hàm tách số chữ ký đã có và tổng chữ ký cần có để hiển thị đúng ngưỡng động FR7. */
+function getSignatureProgress(signatureState: string): { signedCount: number; totalCount: number } {
+  const [signedCountText, totalCountText] = signatureState.split("/");
+  const signedCount = Number(signedCountText);
+  const totalCount = Number(totalCountText);
+
+  // Chặn dữ liệu sai định dạng để UI không vỡ khi backend trả giá trị bất thường.
+  if (!Number.isFinite(signedCount) || !Number.isFinite(totalCount) || totalCount <= 0) {
+    return { signedCount: 0, totalCount: 3 };
+  }
+
+  return { signedCount, totalCount };
+}
+
 function DisbursementPanel({
   onPushToast,
   onOpenDrawer,
@@ -117,6 +136,7 @@ function DisbursementPanel({
   const [disbursementList, setDisbursementList] = useState<UrgentRequestItem[]>(
     [],
   );
+
 
   const [loading, setLoading] = useState(true);
 
@@ -133,32 +153,13 @@ function DisbursementPanel({
       const session = readAuthSession();
 
       const response = await fetchApi<{
-        requests: {
-          id: string;
-
-          projectName: string;
-
-          organizationName: string;
-
-          amount: number;
-
-          requiredSignatures: number;
-
-          currentSignatures: number;
-
-          deadlineTimestamp: number;
-
-          usagePurpose?: string;
-
-          ipfsCid?: string;
-
-          fileName?: string;
-        }[];
+        requests: DisbursementSummaryItem[];
       }>(buildApiUrl("/api/disbursement/requests"), {
         headers: { Authorization: `Bearer ${session.accessToken}` },
       });
 
       const rawRequests = response.data?.requests ?? [];
+
 
       setDisbursementList(
         rawRequests.map((r) => ({
@@ -189,6 +190,7 @@ function DisbursementPanel({
       setLoading(false);
     }
   }, []);
+
 
   useEffect(() => {
     loadDisbursementList();
@@ -225,31 +227,36 @@ function DisbursementPanel({
     <div className="space-y-4">
       {/* Header */}
 
-      <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white px-6 py-4">
-        <h2 className="text-sm font-bold text-slate-800">Ký duyệt Giải ngân</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-900/15 bg-white px-5 py-4">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">Yêu cầu giải ngân</h2>
+          <p className="mt-1 text-xs text-slate-500">Chỉ hiển thị các yêu cầu giải ngân đang chờ ký duyệt từ backend</p>
+        </div>
 
-        <p className="mt-0.5 text-xs text-slate-500">
-          Danh sách yêu cầu giải ngân cần ký duyệt — dữ liệu từ backend
-        </p>
+        <button
+          type="button"
+          onClick={() => loadDisbursementList()}
+          className="rounded-lg border border-emerald-900/15 px-3 py-2 text-xs font-semibold text-[#0E7C6B] transition hover:bg-[#0E7C6B] hover:text-white"
+        >
+          Làm mới
+        </button>
       </div>
-
-      {/* Table */}
 
       <div className="overflow-hidden rounded-xl border border-emerald-900/15 bg-white">
         <table className="min-w-full text-left text-xs">
           <thead className="bg-slate-50 text-[10px] uppercase tracking-[0.08em] text-slate-500">
             <tr>
-              <th className="px-5 py-2.5 font-semibold">Mã</th>
+              <th className="px-5 py-2.5 font-semibold">Mã yêu cầu</th>
 
-              <th className="px-5 py-2.5 font-semibold">Dự án</th>
+              <th className="px-5 py-2.5 font-semibold">Dự án / Tổ chức</th>
 
               <th className="px-5 py-2.5 font-semibold">Số tiền</th>
 
               <th className="px-5 py-2.5 font-semibold">Chữ ký</th>
 
-              <th className="px-5 py-2.5 font-semibold">Deadline</th>
+              <th className="px-5 py-2.5 font-semibold">Hạn xử lý</th>
 
-              <th className="px-5 py-2.5 font-semibold"></th>
+              <th className="px-5 py-2.5 font-semibold text-right">Hành động</th>
             </tr>
           </thead>
 
@@ -335,7 +342,10 @@ function DisbursementPanel({
                     {r.id}
                   </td>
 
-                  <td className="px-5 py-3 text-slate-800">{r.projectName}</td>
+                  <td className="px-5 py-3 align-middle">
+                    <p className="text-[13px] font-semibold leading-5 text-slate-900">{r.projectName}</p>
+                    <p className="mt-0.5 text-[12px] leading-4 text-slate-500">{r.organizationName}</p>
+                  </td>
 
                   <td className="px-5 py-3 font-mono text-xs font-semibold text-slate-900">
                     {r.amountText}
@@ -343,12 +353,17 @@ function DisbursementPanel({
 
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1.5">
-                      {[1, 2, 3].map((d) => (
-                        <div
-                          key={d}
-                          className={`h-2.5 w-2.5 rounded-full ${d <= parseInt(r.signatureState) ? "bg-[#0E7C6B]" : "bg-slate-200"}`}
-                        />
-                      ))}
+                      {Array.from({ length: getSignatureProgress(r.signatureState).totalCount }).map((_, dotIndex) => {
+                        const signatureProgress = getSignatureProgress(r.signatureState);
+                        const isSigned = dotIndex < signatureProgress.signedCount;
+
+                        return (
+                          <div
+                            key={dotIndex}
+                            className={`h-2.5 w-2.5 rounded-full ${isSigned ? "bg-[#0E7C6B]" : "bg-slate-200"}`}
+                          />
+                        );
+                      })}
 
                       <span className="ml-1 font-mono text-[10px] text-slate-500">
                         {r.signatureState}
@@ -364,7 +379,7 @@ function DisbursementPanel({
                     </span>
                   </td>
 
-                  <td className="px-5 py-3">
+                  <td className="px-5 py-3 text-right">
                     <button
                       type="button"
                       onClick={() => {
@@ -1745,6 +1760,15 @@ export default function NonDashboardPanel({
       return null;
   }
 }
+
+
+
+
+
+
+
+
+
 
 
 

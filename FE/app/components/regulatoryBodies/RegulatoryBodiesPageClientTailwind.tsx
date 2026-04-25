@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,10 +12,9 @@ import MetricCard from './tailwind/MetricCard';
 import NonDashboardPanel from './tailwind/NonDashboardPanel';
 import RequestDrawer from './tailwind/RequestDrawer';
 import Sidebar from './tailwind/Sidebar';
-import TimelineCard from './tailwind/TimelineCard';
 import ToastStack from './tailwind/ToastStack';
 import Topbar from './tailwind/Topbar';
-import type { AuditLogItem, DrawerTabKey, PageKey, TimelineItem, ToastItem, UrgentRequestItem } from './tailwind/types';
+import type { AuditLogItem, DrawerTabKey, PageKey, ToastItem, UrgentRequestItem } from './tailwind/types';
 import UrgentTable from './tailwind/UrgentTable';
 
 type DashboardMetricItem = {
@@ -180,13 +179,13 @@ function buildMetricItemList(disbursementSummaryItemList: DisbursementSummaryIte
     {
       valueText: String(almostApprovedRequestCount),
       labelText: 'Sắp đủ chữ ký',
-      trendText: 'Theo ngưỡng chữ ký động FR7',
+      trendText: 'Theo ngưỡng chữ ký động',
       trendClassName: 'trend-up',
       colorVariant: 'green'
     },
     {
       valueText: String(urgentDeadlineRequestCount),
-      labelText: 'Deadline dưới 1 giờ',
+      labelText: 'Hạn dưới 1 giờ',
       trendText: urgentDeadlineRequestCount > 0 ? 'Cần xử lý gấp' : 'Không có quá hạn gần',
       trendClassName: urgentDeadlineRequestCount > 0 ? 'trend-dn' : 'trend-up',
       colorVariant: 'navy'
@@ -194,15 +193,6 @@ function buildMetricItemList(disbursementSummaryItemList: DisbursementSummaryIte
   ];
 }
 
-/** Hàm tạo timeline từ dữ liệu request thật để hiển thị hoạt động gần đây không dùng mock. */
-function buildTimelineItemList(disbursementSummaryItemList: DisbursementSummaryItem[]): TimelineItem[] {
-  return disbursementSummaryItemList.slice(0, 4).map((item) => ({
-    actionText: item.requestMode === 'EMERGENCY' ? 'Yêu cầu khẩn cấp chờ ký' : 'Yêu cầu giải ngân chờ ký',
-    detailText: `${item.id} · ${item.projectName}`,
-    timeText: `Hạn còn ${buildDeadlineText(item.deadlineTimestamp)}`,
-    type: item.currentSignatures > 0 ? 'sign' : 'view'
-  }));
-}
 
 /** Hàm tạo thống kê tiến độ chữ ký từ danh sách request thật để card trạng thái không dùng số liệu cứng. */
 function buildSigningStatusSummary(disbursementSummaryItemList: DisbursementSummaryItem[]): SigningStatusSummary {
@@ -272,17 +262,13 @@ export default function RegulatoryBodiesPageClientTailwind() {
     [disbursementSummaryItemList]
   );
 
-  const timelineItemList = useMemo(
-    () => buildTimelineItemList(disbursementSummaryItemList),
-    [disbursementSummaryItemList]
-  );
 
   const signingStatusSummary = useMemo(
     () => buildSigningStatusSummary(disbursementSummaryItemList),
     [disbursementSummaryItemList]
   );
 
-  const shouldRenderSigningDashboard = selectedPageKey === 'dashboard' || selectedPageKey === 'disbursement';
+  const shouldRenderSigningDashboard = selectedPageKey === 'dashboard';
 
   /** Hàm đồng bộ khóa cuộn nền khi mở lớp phủ để trải nghiệm mobile ổn định hơn. */
   useEffect(() => {
@@ -600,7 +586,6 @@ export default function RegulatoryBodiesPageClientTailwind() {
                       partiallySignedRequestCount={signingStatusSummary.partiallySignedRequestCount}
                       unsignedRequestCount={signingStatusSummary.unsignedRequestCount}
                     />
-                    <TimelineCard timelineItemList={timelineItemList} />
                   </div>
                 </div>
               )}
@@ -631,4 +616,5 @@ export default function RegulatoryBodiesPageClientTailwind() {
     </main>
   );
 }
+
 
