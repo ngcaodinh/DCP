@@ -93,6 +93,15 @@ export function createDisbursementRoutes(): Router {
   );
 
   /**
+   * GET /api/disbursement/project/:projectId
+   * Lay lich su giai ngan theo du an.
+   * Quyen: cong khai (khong can dang nhap).
+   */
+  router.get(
+    '/project/:projectId',
+    handleGetDisbursementsByProject
+  );
+  /**
    * GET /api/disbursement/:requestId
    * Lay chi tiet yeu cau.
    * Quyen: admin, regulatory, organizations.
@@ -128,15 +137,6 @@ export function createDisbursementRoutes(): Router {
     handleRejectDisbursementRequest
   );
 
-  /**
-   * GET /api/disbursement/project/:projectId
-   * Lay lich su giai ngan theo du an.
-   * Quyen: cong khai (khong can dang nhap).
-   */
-  router.get(
-    '/project/:projectId',
-    handleGetDisbursementsByProject
-  );
 
   /**
    * GET /api/disbursement/max-withdrawable/:projectId
@@ -152,3 +152,4 @@ export function createDisbursementRoutes(): Router {
 
   return router;
 }
+

@@ -1617,12 +1617,18 @@ export default function HomePage() {
                       <p className="mt-1.5 text-sm leading-5 text-[#374151] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5] overflow-hidden">
                         {selectedProjectDetail.description}
                       </p>
-                      <div className="mt-3 border-t border-[#eef2f7] pt-3">
+                      <div className="mt-3 flex flex-col gap-2 border-t border-[#eef2f7] pt-3">
                         <a
                           href={`/donors?projectId=${encodeURIComponent(selectedProjectDetail.projectId)}`}
                           className="inline-flex items-center text-sm font-semibold text-[#0e7c6b] transition hover:text-[#0b6759] hover:underline"
                         >
                           Xem danh sách nhà hảo tâm đã quyên góp →
+                        </a>
+                        <a
+                          href={`/disbursements?projectId=${encodeURIComponent(selectedProjectDetail.projectId)}`}
+                          className="inline-flex items-center text-sm font-semibold text-[#0e7c6b] transition hover:text-[#0b6759] hover:underline"
+                        >
+                          Xem toàn bộ quá trình giải ngân →
                         </a>
                       </div>
                     </div>

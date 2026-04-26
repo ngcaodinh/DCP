@@ -67,3 +67,7 @@ BE\.env.example
 CLAUDE.md
 AGENTS.md
 .editorconfig
+
+
+\production-deployment-plan.md
+\beginner-docker-vps-deploy-guide.md
