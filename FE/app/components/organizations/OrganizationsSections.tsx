@@ -1110,8 +1110,8 @@ export function ProjectsSection({
       ) : null}
 
       {selectedProjectDetail ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-[680px] rounded-[16px] bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+          <div className="my-4 max-h-[calc(100vh-2rem)] w-full max-w-[680px] overflow-y-auto rounded-[16px] bg-white p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3 border-b border-[#F3F4F6] pb-3">
               <div>
                 <p className="text-lg font-bold text-[#111827]">{isUpdateModalVisible ? 'Cập nhật dự án' : 'Chi tiết dự án'}</p>
