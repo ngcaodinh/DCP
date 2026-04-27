@@ -4,7 +4,7 @@ import { transparencyTransactionRows } from './mockData';
 import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
 import { readAuthSession } from '@/app/utils/authSession';
 import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
-import { DashboardDonationHistoryItem, DashboardFeaturedProject, ProjectSummary, StatisticItem, TimelineItem } from './types';
+import { DashboardDonationHistoryItem, DashboardFeaturedProject, NotificationItem, ProjectSummary, StatisticItem, TimelineItem } from './types';
 
 type DisbursementSectionProps = {
   activeDisbursementTab: 'eligible' | 'pending' | 'history';
@@ -49,7 +49,10 @@ type ProjectsSectionProps = {
 };
 
 type NotificationDropdownProps = {
-  hasUnreadNotification: boolean;
+  notificationItemList: NotificationItem[];
+  unreadNotificationCount: number;
+  isNotificationLoading: boolean;
+  notificationErrorMessage: string | null;
   onMarkAllAsRead: () => void;
   onRequestClose: () => void;
 };
@@ -1831,8 +1834,13 @@ export function CreateDisbursementModal({
             </div>
           </div>
 
-          <div className="rounded-[12px] border border-[#D1FAE5] bg-[#ECFDF5] px-3 py-2 text-xs text-[#065F46]">
-            Yêu cầu sau khi tạo sẽ ở trạng thái chờ ký duyệt. Ngưỡng chữ ký do contract tự xác định: 2/3 hoặc 3/3 theo mode và tỷ lệ raised/goal.
+          <div className="space-y-1 rounded-[12px] border border-[#D1FAE5] bg-[#ECFDF5] px-3 py-2 text-xs text-[#065F46]">
+            <p>Yêu cầu sau khi tạo sẽ chờ ký duyệt.</p>
+            {formData.requestMode === 'EMERGENCY' ? (
+              <p>Chế độ khẩn cấp luôn cần đủ 3/3 chữ ký: tổ chức, quản trị viên và cơ quan giám sát.</p>
+            ) : (
+              <p>Chế độ thông thường cần 2/3 chữ ký khi dự án đạt ngưỡng gây quỹ nhanh; nếu chưa đạt ngưỡng này, yêu cầu cần đủ 3/3 chữ ký.</p>
+            )}
           </div>
 
           {submitErrorMessage ? <p className="rounded border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-xs text-[#B91C1C]">{submitErrorMessage}</p> : null}
@@ -2601,9 +2609,44 @@ export function SettingsSection({
   );
 }
 
-/** Hàm render dropdown thông báo. Mục đích: mô phỏng popup thông báo như HTML gốc. */
-export function NotificationDropdown({ hasUnreadNotification, onMarkAllAsRead, onRequestClose }: NotificationDropdownProps) {
+/** Hàm chọn icon thông báo. Mục đích: giúp người dùng nhận diện nhanh loại thông báo. */
+function getNotificationIcon(notificationType: NotificationItem['notificationType']): string {
+  const notificationIconMap: Record<NotificationItem['notificationType'], string> = {
+    DONATION_RECEIVED: '💚',
+    PROJECT_APPROVED: '🔵',
+    KYC_EXPIRING: '📝',
+    SYSTEM: '🔔'
+  };
+
+  return notificationIconMap[notificationType] || notificationIconMap.SYSTEM;
+}
+
+/** Hàm định dạng thời gian thông báo. Mục đích: hiển thị mốc thời gian thật ngắn gọn, dễ đọc. */
+function formatNotificationTime(createdAt: string): string {
+  const createdDate = new Date(createdAt);
+  if (Number.isNaN(createdDate.getTime())) {
+    return 'Không rõ thời gian';
+  }
+
+  return createdDate.toLocaleString('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit'
+  });
+}
+
+/** Hàm render dropdown thông báo. Mục đích: hiển thị thông báo thật từ backend theo trạng thái realtime. */
+export function NotificationDropdown({
+  notificationItemList,
+  unreadNotificationCount,
+  isNotificationLoading,
+  notificationErrorMessage,
+  onMarkAllAsRead,
+  onRequestClose
+}: NotificationDropdownProps) {
   const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+  const hasUnreadNotification = unreadNotificationCount > 0;
 
   useEffect(() => {
     /** Hàm xử lý click ra ngoài dropdown. Mục đích: đóng dropdown khi người dùng bấm ngoài vùng popup. */
@@ -2635,33 +2678,23 @@ export function NotificationDropdown({ hasUnreadNotification, onMarkAllAsRead, o
           <p className="font-semibold">Thông báo</p>
           {hasUnreadNotification ? <span className="inline-flex h-2 w-2 rounded-full bg-[#EF4444]" /> : null}
         </div>
-        <button type="button" onClick={onMarkAllAsRead} className="text-xs text-[#0E7C6B]">Đánh dấu đã đọc</button>
+        <button type="button" onClick={onMarkAllAsRead} disabled={!hasUnreadNotification} className="text-xs font-semibold text-[#0E7C6B] disabled:cursor-not-allowed disabled:text-[#9CA3AF]">Đánh dấu đã đọc</button>
       </div>
 
       <div className="space-y-0">
-        <div className="flex gap-3 border-b border-[#F3F4F6] bg-[#F2FBFA] p-3">
-          <span className="text-lg">💚</span>
-          <div>
-            <p className="text-sm"><strong>Nhận 1,200,000 ₫ quyên góp</strong> từ 0x9f...2a</p>
-            <p className="text-xs text-[#9CA3AF]">5 phút trước</p>
+        {isNotificationLoading ? <p className="p-4 text-sm text-[#6B7280]">Đang tải thông báo...</p> : null}
+        {!isNotificationLoading && notificationErrorMessage ? <p className="p-4 text-sm text-[#B91C1C]">{notificationErrorMessage}</p> : null}
+        {!isNotificationLoading && !notificationErrorMessage && notificationItemList.length === 0 ? <p className="p-4 text-sm text-[#6B7280]">Chưa có thông báo mới.</p> : null}
+        {!isNotificationLoading && !notificationErrorMessage ? notificationItemList.map(notificationItem => (
+          <div key={notificationItem.notificationId} className={`flex gap-3 border-b border-[#F3F4F6] p-3 last:border-b-0 ${notificationItem.isRead ? 'bg-white' : 'bg-[#F2FBFA]'}`}>
+            <span className="text-lg" aria-hidden="true">{getNotificationIcon(notificationItem.notificationType)}</span>
+            <div>
+              <p className="text-sm font-semibold text-[#111827]">{notificationItem.title}</p>
+              <p className="mt-0.5 text-sm text-[#374151]">{notificationItem.content}</p>
+              <p className="mt-1 text-xs text-[#9CA3AF]">{formatNotificationTime(notificationItem.createdAt)}</p>
+            </div>
           </div>
-        </div>
-
-        <div className="flex gap-3 border-b border-[#F3F4F6] bg-[#F2FBFA] p-3">
-          <span className="text-lg">🔵</span>
-          <div>
-            <p className="text-sm">Dự án Học bổng vùng cao vừa được phê duyệt</p>
-            <p className="text-xs text-[#9CA3AF]">2 giờ trước</p>
-          </div>
-        </div>
-
-        <div className="flex gap-3 p-3">
-          <span className="text-lg">📝</span>
-          <div>
-            <p className="text-sm">Hồ sơ KYC của tổ chức sẽ hết hạn sau <strong>30 ngày</strong></p>
-            <p className="text-xs text-[#9CA3AF]">3 ngày trước</p>
-          </div>
-        </div>
+        )) : null}
       </div>
     </div>
   );

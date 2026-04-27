@@ -21,6 +21,7 @@ import {
   DashboardFeaturedProject,
   DisbursementResult,
   NavigationItem,
+  NotificationItem,
   OrganizationPageKey,
   ProjectSummary,
   StatisticItem,
@@ -82,6 +83,11 @@ type DonationHistoryApiItem = {
   amount: number;
   timestamp: string;
   isAnonymous: boolean;
+};
+
+type NotificationListResponse = {
+  notifications: NotificationItem[];
+  unreadCount: number;
 };
 
 /** Hàm định dạng số tiền rút gọn theo chuẩn Việt Nam. Mục đích: hiển thị nhanh số lớn trên thẻ thống kê Tổng quan. */
@@ -190,7 +196,10 @@ export default function OrganizationsPageView() {
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [selectedDisbursementProject, setSelectedDisbursementProject] = useState<ProjectSummary | null>(null);
   const [isBankSetupHighlighted, setIsBankSetupHighlighted] = useState(false);
-  const [hasUnreadNotification, setHasUnreadNotification] = useState(true);
+  const [notificationItemList, setNotificationItemList] = useState<NotificationItem[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [isNotificationLoading, setIsNotificationLoading] = useState(false);
+  const [notificationErrorMessage, setNotificationErrorMessage] = useState<string | null>(null);
   const [createdProjects, setCreatedProjects] = useState<ProjectSummary[]>([]);
   const [disbursements, setDisbursements] = useState<import('./types').DisbursementResult[]>([]);
   const [isDisbursementsLoading, setIsDisbursementsLoading] = useState(false);
@@ -354,6 +363,36 @@ export default function OrganizationsPageView() {
 
     setIsNotificationOpen(currentState => !currentState);
   };
+
+  /** Hàm cập nhật state thông báo. Mục đích: đồng bộ danh sách và badge chưa đọc từ response thật. */
+  const applyNotificationResponse = useCallback((notificationResponse: NotificationListResponse) => {
+    setNotificationItemList(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+    setUnreadNotificationCount(Number.isFinite(notificationResponse.unreadCount) ? Math.max(0, notificationResponse.unreadCount) : 0);
+  }, []);
+
+  /** Hàm tải thông báo từ backend. Mục đích: lấy snapshot ban đầu trước khi nhận realtime. */
+  const loadNotificationsFromApi = useCallback(async () => {
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setNotificationErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    setIsNotificationLoading(true);
+    setNotificationErrorMessage(null);
+
+    try {
+      const response = await fetchApi<NotificationListResponse>(buildApiUrl('/api/notifications'), {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+      applyNotificationResponse(response.data);
+    } catch (error: unknown) {
+      setNotificationErrorMessage(resolveApiErrorMessage(error, 'Không thể tải thông báo. Vui lòng thử lại sau.'));
+    } finally {
+      setIsNotificationLoading(false);
+    }
+  }, [applyNotificationResponse]);
 
   /** Hàm tải danh sách giải ngân từ backend. Mục đích: đồng bộ dữ liệu thật cho màn hình "Giải ngân". */
   const loadDisbursementsFromApi = async () => {
@@ -829,10 +868,10 @@ export default function OrganizationsPageView() {
       // Logic này chỉ gắn badge cho item thông báo để reset số khi người dùng đánh dấu đã đọc.
       return {
         ...item,
-        badge: hasUnreadNotification ? '3' : undefined
+        badge: unreadNotificationCount > 0 ? String(unreadNotificationCount) : undefined
       };
     });
-  }, [hasUnreadNotification]);
+  }, [unreadNotificationCount]);
 
   /** Hàm xử lý chọn trang từ sidebar. Mục đích: điều hướng trang và tắt trạng thái nhấn mạnh cài đặt ngân hàng khi rời trang. */
   const handleSelectPage = (page: OrganizationPageKey) => {
@@ -934,9 +973,23 @@ export default function OrganizationsPageView() {
       setIsLogoutProcessing(false);
     }
   }, [backendBaseUrl, isLogoutProcessing, router]);
-  /** Hàm đánh dấu toàn bộ thông báo đã đọc. Mục đích: cập nhật trạng thái thông báo về đã đọc. */
-  const handleMarkAllNotificationsAsRead = () => {
-    setHasUnreadNotification(false);
+  /** Hàm đánh dấu toàn bộ thông báo đã đọc. Mục đích: cập nhật trạng thái thông báo thật và xóa badge. */
+  const handleMarkAllNotificationsAsRead = async () => {
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      setNotificationErrorMessage('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return;
+    }
+
+    try {
+      const response = await fetchApi<NotificationListResponse>(buildApiUrl('/api/notifications/read-all'), {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${authSession.accessToken}` }
+      });
+      applyNotificationResponse(response.data);
+    } catch (error: unknown) {
+      setNotificationErrorMessage(resolveApiErrorMessage(error, 'Không thể đánh dấu thông báo đã đọc. Vui lòng thử lại sau.'));
+    }
   };
 
   /** Hàm đóng dropdown thông báo. Mục đích: gom một điểm xử lý đóng popup để tái sử dụng. */
@@ -967,12 +1020,6 @@ export default function OrganizationsPageView() {
   }, [activePage]);
 
   useEffect(() => {
-    if (!hasUnreadNotification) {
-      setIsNotificationOpen(false);
-    }
-  }, [hasUnreadNotification]);
-
-  useEffect(() => {
     if (isAccessChecking) {
       return;
     }
@@ -982,9 +1029,80 @@ export default function OrganizationsPageView() {
       loadCreateProjectEligibility(),
       loadOrganizationKycSubmissions(),
       loadDisbursementsFromApi(),
-      loadRankingFromApi()
+      loadRankingFromApi(),
+      loadNotificationsFromApi()
     ]);
-  }, [isAccessChecking]);
+  }, [isAccessChecking, loadNotificationsFromApi]);
+
+  useEffect(() => {
+    if (isAccessChecking) {
+      return;
+    }
+
+    const authSession = readAuthSession();
+    if (!authSession?.accessToken) {
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    /** Hàm xử lý từng gói SSE. Mục đích: parse snapshot realtime và cập nhật badge thông báo. */
+    const handleNotificationStreamChunk = (streamChunk: string) => {
+      const dataLine = streamChunk.split('\n').find(lineItem => lineItem.startsWith('data: '));
+      if (!dataLine) {
+        return;
+      }
+
+      try {
+        applyNotificationResponse(JSON.parse(dataLine.replace('data: ', '')) as NotificationListResponse);
+        setNotificationErrorMessage(null);
+      } catch (_error) {
+        setNotificationErrorMessage('Không thể đọc dữ liệu thông báo realtime.');
+      }
+    };
+
+    /** Hàm kết nối stream thông báo. Mục đích: nhận realtime bằng Authorization header thay vì đưa token lên URL. */
+    const connectNotificationStream = async () => {
+      try {
+        const streamResponse = await fetch(buildApiUrl('/api/notifications/stream'), {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${authSession.accessToken}` },
+          signal: abortController.signal
+        });
+
+        if (!streamResponse.ok || !streamResponse.body) {
+          setNotificationErrorMessage('Kết nối thông báo realtime tạm thời gián đoạn.');
+          return;
+        }
+
+        const streamReader = streamResponse.body.getReader();
+        const textDecoder = new TextDecoder();
+        let bufferedText = '';
+
+        while (true) {
+          const { value, done } = await streamReader.read();
+          if (done) {
+            break;
+          }
+
+          bufferedText += textDecoder.decode(value, { stream: true });
+          const streamChunkList = bufferedText.split('\n\n');
+          bufferedText = streamChunkList.pop() || '';
+          streamChunkList.forEach(handleNotificationStreamChunk);
+        }
+      } catch (error: unknown) {
+        if (!abortController.signal.aborted) {
+          setNotificationErrorMessage('Kết nối thông báo realtime tạm thời gián đoạn.');
+        }
+      }
+    };
+
+    void connectNotificationStream();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [applyNotificationResponse, isAccessChecking]);
 
   useEffect(() => {
     if (isAccessChecking) {
@@ -1108,6 +1226,7 @@ export default function OrganizationsPageView() {
             userDisplayName={userDisplayName}
             userEmail={userEmail}
             userWalletAddress={userWalletAddress}
+            notificationCount={unreadNotificationCount}
             onOpenMobileMenu={handleOpenMobileMenu}
             onOpenNotification={handleOpenTopbarNotification}
             onLogout={() => {
@@ -1165,7 +1284,10 @@ export default function OrganizationsPageView() {
 
       {isNotificationOpen ? (
         <NotificationDropdown
-          hasUnreadNotification={hasUnreadNotification}
+          notificationItemList={notificationItemList}
+          unreadNotificationCount={unreadNotificationCount}
+          isNotificationLoading={isNotificationLoading}
+          notificationErrorMessage={notificationErrorMessage}
           onMarkAllAsRead={handleMarkAllNotificationsAsRead}
           onRequestClose={handleCloseNotificationDropdown}
         />

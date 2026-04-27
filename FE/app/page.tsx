@@ -5,7 +5,14 @@ import { flushSync } from 'react-dom';
 import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
 import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
+import { buildIpfsGatewayUrl, getIpfsContentType, resolveIpfsPreviewKind } from './utils/ipfs';
 
+
+type HomeProjectEvidenceFile = {
+  cid: string;
+  fileName: string;
+  mimeType: string;
+};
 
 type HomeSupportProject = {
   projectId: string;
@@ -13,6 +20,8 @@ type HomeSupportProject = {
   description: string;
   goalAmount: number;
   status: string;
+  evidenceCids: string[];
+  evidenceFiles?: HomeProjectEvidenceFile[];
   updatedAt: string;
   createdAt: string;
 };
@@ -25,7 +34,7 @@ type HomeSupportProjectDetail = {
   status: string;
   lastDonationAt: string | null;
   evidenceCids: string[];
-  evidenceFiles?: { cid: string; fileName: string; mimeType: string }[];
+  evidenceFiles?: HomeProjectEvidenceFile[];
   creatorName: string | null;
 };
 
@@ -322,6 +331,30 @@ const getProjectVisualByIndex = (indexNumber: number): { icon: string; backgroun
   return { icon, background };
 };
 
+/** Hàm lấy CID ảnh đầu tiên theo metadata dự án. Mục đích: ưu tiên thông tin mimeType/fileName đã có sẵn từ backend. */
+const getFirstProjectImageCidFromMetadata = (projectItem: HomeSupportProject): string => {
+  const evidenceFileList = projectItem.evidenceFiles || [];
+  const firstImageEvidenceFile = evidenceFileList.find(fileItem =>
+    resolveIpfsPreviewKind({ mimeType: fileItem.mimeType, fileName: fileItem.fileName }) === 'image'
+  );
+
+  return firstImageEvidenceFile?.cid || '';
+};
+
+/** Hàm tìm CID ảnh đầu tiên qua danh sách CID Pinata. Mục đích: kiểm tra song song để giảm độ trễ nhưng vẫn giữ đúng thứ tự ảnh đầu tiên. */
+const resolveFirstProjectImageCid = async (projectItem: HomeSupportProject): Promise<string> => {
+  const imageCidFromMetadata = getFirstProjectImageCidFromMetadata(projectItem);
+  if (imageCidFromMetadata) {
+    return imageCidFromMetadata;
+  }
+
+  const evidenceCidList = (projectItem.evidenceCids || []).filter(evidenceCid => Boolean(evidenceCid?.trim()));
+  const evidenceContentTypeList = await Promise.all(evidenceCidList.map(evidenceCid => getIpfsContentType(evidenceCid)));
+  const firstImageIndex = evidenceContentTypeList.findIndex(contentType => resolveIpfsPreviewKind({ contentType }) === 'image');
+
+  return firstImageIndex >= 0 ? evidenceCidList[firstImageIndex] : '';
+};
+
 /**
  * Hàm tính toán đường biểu đồ để vẽ SVG.
  * Mục đích: đồng bộ đường line và vùng fill giống file mẫu.
@@ -361,6 +394,7 @@ export default function HomePage() {
     ranking: false
   });
   const [supportProjectList, setSupportProjectList] = useState<HomeSupportProject[]>([]);
+  const [supportProjectCoverImageUrlById, setSupportProjectCoverImageUrlById] = useState<Record<string, string>>({});
   const [isSupportProjectsLoading, setIsSupportProjectsLoading] = useState(true);
   const [supportProjectsErrorMessage, setSupportProjectsErrorMessage] = useState('');
   const [isShowingAllSupportProjects, setIsShowingAllSupportProjects] = useState(false);
@@ -540,6 +574,42 @@ export default function HomePage() {
   useEffect(() => {
     void loadSupportProjectList(false);
   }, [loadSupportProjectList]);
+
+  useEffect(() => {
+    let isCoverResolveCancelled = false;
+
+    /** Hàm resolve ảnh bìa từ IPFS cho danh sách dự án. Mục đích: tìm CID ảnh đầu tiên thật sự trước khi set background card. */
+    const resolveSupportProjectCoverImageUrls = async (): Promise<void> => {
+      const coverImageEntryList = await Promise.all(
+        supportProjectList.map(async projectItem => {
+          const imageCid = await resolveFirstProjectImageCid(projectItem);
+          return [projectItem.projectId, buildIpfsGatewayUrl(imageCid)] as const;
+        })
+      );
+
+      if (isCoverResolveCancelled) {
+        return;
+      }
+
+      setSupportProjectCoverImageUrlById(Object.fromEntries(coverImageEntryList));
+    };
+
+    if (supportProjectList.length === 0) {
+      setSupportProjectCoverImageUrlById({});
+      return;
+    }
+
+    resolveSupportProjectCoverImageUrls().catch(error => {
+      console.error('Resolve support project cover image failed.', error);
+      if (!isCoverResolveCancelled) {
+        setSupportProjectCoverImageUrlById({});
+      }
+    });
+
+    return () => {
+      isCoverResolveCancelled = true;
+    };
+  }, [supportProjectList]);
 
 
   /** Hàm tải bảng xếp hạng QF. Mục đích: đồng bộ dữ liệu ranking từ backend để hiển thị realtime trên Home. */
@@ -1285,6 +1355,10 @@ export default function HomePage() {
             !supportProjectsErrorMessage &&
             supportProjectList.map((project, projectIndex) => {
               const projectVisual = getProjectVisualByIndex(projectIndex);
+              const projectCoverImageUrl = supportProjectCoverImageUrlById[project.projectId] || '';
+              const projectCoverStyle = projectCoverImageUrl
+                ? { backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${projectCoverImageUrl})` }
+                : { background: projectVisual.background };
               return (
                 <div
                   className="pcard visible"
@@ -1294,8 +1368,8 @@ export default function HomePage() {
                   data-group="projects"
                 >
                   <div className="pcard-img">
-                    <div className="pcard-img-bg" style={{ background: projectVisual.background }}>
-                      {projectVisual.icon}
+                    <div className={`pcard-img-bg ${projectCoverImageUrl ? 'pcard-img-bg-cover' : ''}`} style={projectCoverStyle}>
+                      {projectCoverImageUrl ? null : projectVisual.icon}
                     </div>
                     <div className="pcard-status status-active">● {getPublicProjectStatusLabel(project.status)}</div>
                   </div>

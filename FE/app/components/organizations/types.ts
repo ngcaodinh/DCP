@@ -39,6 +39,15 @@ export type TimelineItem = {
   time: string;
 };
 
+export type NotificationItem = {
+  notificationId: string;
+  notificationType: 'DONATION_RECEIVED' | 'PROJECT_APPROVED' | 'KYC_EXPIRING' | 'SYSTEM';
+  title: string;
+  content: string;
+  isRead: boolean;
+  createdAt: string;
+};
+
 export type DashboardFeaturedProject = {
   projectId: string;
   name: string;

@@ -77,6 +77,8 @@ export type PublicSupportProjectResult = {
   description: string;
   goalAmount: number;
   status: ProjectStatus;
+  evidenceCids: string[];
+  evidenceFiles: ProjectEvidenceFileRecord[];
   updatedAt: Date;
   createdAt: Date;
 };
@@ -645,6 +647,8 @@ export async function getPublicSupportProjects(limitCount = 6): Promise<PublicSu
     description: projectRecord.description,
     goalAmount: projectRecord.goalAmount,
     status: projectRecord.status,
+    evidenceCids: projectRecord.evidenceCids,
+    evidenceFiles: projectRecord.evidenceFiles || [],
     updatedAt: projectRecord.updatedAt,
     createdAt: projectRecord.createdAt
   }));

@@ -52,4 +52,3 @@ export function createAuthenticationMiddleware() {
 }
 
 export type { AuthenticatedRequest };
-

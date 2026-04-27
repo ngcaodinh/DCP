@@ -10,6 +10,7 @@ import { createRankingRoutes } from './routes/rankingRoutes';
 import { createSybilRoutes } from './routes/sybilRoutes';
 import { createDisbursementRoutes } from './routes/disbursementRoutes';
 import { createAdminDashboardRoutes } from './routes/adminDashboardRoutes';
+import { createNotificationRoutes } from './routes/notificationRoutes';
 
 const application = express();
 
@@ -48,6 +49,7 @@ function registerRoutes(): void {
   application.use('/api/sybil', createSybilRoutes());
   application.use('/api/disbursement', createDisbursementRoutes());
   application.use('/api/admin/dashboard', createAdminDashboardRoutes());
+  application.use('/api/notifications', createNotificationRoutes());
 }
 
 configureMiddlewares();
