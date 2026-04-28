@@ -73,3 +73,5 @@ AGENTS.md
 \beginner-docker-vps-deploy-guide.md
 
 docs
+# môi trường framework kiểm thử tự động bằng NUnit + Selenium.
+E2E.Tests

@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import jsonWebToken from 'jsonwebtoken';
-import { getJsonWebTokenSecret } from '../config/jsonWebToken';
+import { getJsonWebTokenConfig, getJsonWebTokenSecret } from '../config/jsonWebToken';
 import { sendErrorResponse } from '../utils/apiResponse';
 
 type JwtClaims = {
@@ -39,7 +39,12 @@ export function createAuthenticationMiddleware() {
 
     try {
       const jwtSecret = getJsonWebTokenSecret();
-      const decodedPayload = jsonWebToken.verify(bearerToken, jwtSecret) as JwtClaims;
+      const jsonWebTokenConfig = getJsonWebTokenConfig();
+      const decodedPayload = jsonWebToken.verify(bearerToken, jwtSecret, {
+        issuer: jsonWebTokenConfig.issuer,
+        audience: jsonWebTokenConfig.audience,
+        algorithms: ['HS256']
+      }) as JwtClaims;
       request.authenticatedUser = {
         userId: decodedPayload.userId,
         role: decodedPayload.role

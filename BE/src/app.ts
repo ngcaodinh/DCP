@@ -20,6 +20,7 @@ const application = express();
  */
 function configureMiddlewares(): void {
   const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:3000';
+  const requestBodyLimit = getRequestBodyLimit();
 
   application.use(
     cors({
@@ -29,10 +30,17 @@ function configureMiddlewares(): void {
   );
   application.use(helmet());
 
-  // Logic này tăng giới hạn body để hỗ trợ upload file minh chứng dạng base64 từ frontend.
-  // Ghi chú: base64 làm kích thước payload tăng khoảng 33%, nên cần limit đủ lớn để tránh lỗi 413.
-  application.use(express.json({ limit: '25mb' }));
-  application.use(express.urlencoded({ extended: true, limit: '25mb' }));
+  // Logic này giữ giới hạn body thống nhất giữa local và production để tránh OOM trên VPS ít RAM.
+  application.use(express.json({ limit: requestBodyLimit }));
+  application.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
+}
+
+/**
+ * Hàm lấy giới hạn body request từ biến môi trường.
+ * Mục đích: tách cấu hình local và production mà không hardcode trong code.
+ */
+function getRequestBodyLimit(): string {
+  return process.env.REQUEST_BODY_LIMIT || '5mb';
 }
 
 /**
