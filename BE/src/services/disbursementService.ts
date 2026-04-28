@@ -19,6 +19,7 @@ import {
 import { AuthUser, findUserById, updateUser } from '../models/authModel';
 import { findSubmissionsByOrganizationId } from '../models/organizationKycModel';
 import { findProjectById } from '../repositories/projectRepository';
+import { createUserNotification } from './notificationService';
 import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
 import {
   createPayosTransfer,
@@ -336,6 +337,30 @@ function mapSignerRoleToApprovalActor(signerRole: string): string {
   }
 
   return signerRole;
+}
+
+/** Hàm tạo thông báo chữ ký giải ngân cho tổ chức. Mục đích: báo realtime khi admin hoặc kiểm soát viên đã ký request. */
+async function createDisbursementSignatureNotification(record: DisbursementRecord, signerRole: string): Promise<void> {
+  if (signerRole !== 'ADMIN_SIGNER' && signerRole !== 'REGULATORY_SIGNER') {
+    return;
+  }
+
+  const signerLabel = signerRole === 'ADMIN_SIGNER' ? 'Quản trị viên' : 'Kiểm soát viên';
+
+  await createUserNotification({
+    userId: record.organizationId,
+    notificationType: 'DISBURSEMENT_SIGNED',
+    title: `${signerLabel} đã ký giải ngân`,
+    content: `${signerLabel} đã ký yêu cầu giải ngân ${record.requestId} cho dự án ${record.projectId}.`,
+    deduplicationKey: `DISBURSEMENT_SIGNED:${record.requestId}:${signerRole}`,
+    metadata: {
+      requestId: record.requestId,
+      projectId: record.projectId,
+      signerRole,
+      signerLabel,
+      amount: record.amount
+    }
+  });
 }
 
 /** Hàm ánh xạ trạng thái request sang trạng thái nhật ký để frontend hiển thị badge thống nhất. */
@@ -1731,6 +1756,8 @@ export async function signDisbursementRequest(
   if (!updatedRecord) {
     throw new ApplicationError('Không thể cập nhật trạng thái ký duyệt.', 500, 'INTERNAL_ERROR');
   }
+
+  await createDisbursementSignatureNotification(updatedRecord, signerRole);
 
   if (updatedRecord.status === 'APPROVED') {
     void triggerAutoTransferForApprovedRequest(updatedRecord.requestId)

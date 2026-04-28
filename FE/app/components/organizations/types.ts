@@ -41,7 +41,7 @@ export type TimelineItem = {
 
 export type NotificationItem = {
   notificationId: string;
-  notificationType: 'DONATION_RECEIVED' | 'PROJECT_APPROVED' | 'KYC_EXPIRING' | 'SYSTEM';
+  notificationType: 'DONATION_RECEIVED' | 'DISBURSEMENT_SIGNED';
   title: string;
   content: string;
   isRead: boolean;

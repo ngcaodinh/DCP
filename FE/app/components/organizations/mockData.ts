@@ -6,8 +6,7 @@ export const primaryNavigationItems: NavigationItem[] = [
 ];
 
 export const financeNavigationItems: NavigationItem[] = [
-  { icon: '💰', label: 'Giải ngân', page: 'disbursement' },
-  { icon: '📊', label: 'Minh bạch', page: 'transparency' }
+  { icon: '💰', label: 'Giải ngân', page: 'disbursement' }
 ];
 
 export const systemNavigationItems: NavigationItem[] = [

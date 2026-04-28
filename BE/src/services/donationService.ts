@@ -15,6 +15,8 @@ import { createKernelClientFromEncryptedOwnerKey } from './zeroDevService';
 import { ApplicationError } from '../utils/applicationError';
 import { applyDonationToMetrics } from './rankingIncrementalService';
 import { invalidateRankingCache } from './rankingCacheService';
+import { findProjectByProjectId } from '../models/projectModel';
+import { createUserNotification } from './notificationService';
 
 const logger = getLogger();
 
@@ -90,6 +92,54 @@ const donationContractAbi = [
     outputs: [{ name: '', type: 'bool' }]
   }
 ] as const;
+
+/** Hàm tạo thông báo quyên góp cho tổ chức. Mục đích: báo realtime khi dự án của tổ chức nhận donation mới. */
+async function createDonationReceivedNotification(donationEventRecord: DonationEventLog): Promise<void> {
+  const projectRecord = await findProjectByProjectId(donationEventRecord.projectId);
+  if (!projectRecord) {
+    logger.warn(`Không tạo được thông báo quyên góp vì không tìm thấy dự án. projectId=${donationEventRecord.projectId} transactionHash=${donationEventRecord.transactionHash}`);
+    return;
+  }
+
+  await createUserNotification({
+    userId: projectRecord.organizationId,
+    notificationType: 'DONATION_RECEIVED',
+    title: 'Dự án vừa nhận quyên góp',
+    content: `Dự án ${projectRecord.name} vừa nhận ${donationEventRecord.amount.toLocaleString('vi-VN')} token quyên góp.`,
+    deduplicationKey: `DONATION_RECEIVED:${donationEventRecord.transactionHash}`,
+    metadata: {
+      projectId: donationEventRecord.projectId,
+      projectName: projectRecord.name,
+      amount: donationEventRecord.amount,
+      transactionHash: donationEventRecord.transactionHash,
+      donorAddress: donationEventRecord.isAnonymous ? null : donationEventRecord.donorAddress
+    }
+  });
+}
+
+/** Hàm tạo thông báo quyên góp sau khi submit giao dịch. Mục đích: báo cho tổ chức ngay cả khi bước index chạy nền chưa hoàn tất. */
+async function createSubmittedDonationNotification(projectId: string, amount: number, transactionHash: string, donorAddress: string): Promise<void> {
+  const projectRecord = await findProjectByProjectId(projectId);
+  if (!projectRecord) {
+    logger.warn(`Không tạo được thông báo quyên góp sau submit vì không tìm thấy dự án. projectId=${projectId} transactionHash=${transactionHash}`);
+    return;
+  }
+
+  await createUserNotification({
+    userId: projectRecord.organizationId,
+    notificationType: 'DONATION_RECEIVED',
+    title: 'Dự án vừa nhận quyên góp',
+    content: `Dự án ${projectRecord.name} vừa nhận ${amount.toLocaleString('vi-VN')} token quyên góp.`,
+    deduplicationKey: `DONATION_RECEIVED:${transactionHash}`,
+    metadata: {
+      projectId,
+      projectName: projectRecord.name,
+      amount,
+      transactionHash,
+      donorAddress
+    }
+  });
+}
 
 /** Hàm chuẩn hóa projectId sang bigint. Mục đích: hỗ trợ cả mã số thuần và mã dạng PRJ-1001 cho call on-chain. */
 function normalizeProjectIdToBigInt(projectId: string): bigint {
@@ -221,6 +271,13 @@ export async function executeOneClickDonation(authenticatedUserId: string, proje
   }
 
   logger.info('One-click donation transaction submitted.', { transactionHash });
+  await createSubmittedDonationNotification(
+    projectIdAsBigInt.toString(),
+    Number(donationAmountAsBigInt),
+    transactionHash,
+    paymasterEnabledKernelClientAccount.address.toLowerCase()
+  );
+
   return {
     transactionHash,
     projectId: projectIdAsBigInt.toString(),
@@ -368,6 +425,7 @@ export async function syncDonationEventsFromBlockchain() {
   for (const donationEvent of donationEventList) {
     // Ghi chú logic phức tạp: sử dụng upsert theo transactionHash để đảm bảo đồng bộ idempotent khi job chạy lặp.
     await upsertDonationRecordByTransactionHash(donationEvent);
+    await createDonationReceivedNotification(donationEvent);
     // Incremental update running totals — O(1) thay vì full recalculate.
     // Mỗi event từ blockchain được cập nhật running totals ngay lập tức.
     await applyDonationToMetrics(donationEvent.projectId, donationEvent.amount, donationEvent.donorAddress);
@@ -462,6 +520,7 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
 
     // Ghi chú logic phức tạp: bắt buộc ví người ký on-chain trùng ví đã xác thực để chặn giả mạo txHash giữa các tài khoản.
     if (!authenticatedUserWalletAddress || donorAddressOnChain !== authenticatedUserWalletAddress) {
+      logger.warn(`Donation record bị chặn vì donor không khớp user. userId=${normalizedAuthenticatedUserId} donorOnChain=${donorAddressOnChain} userWallet=${authenticatedUserWalletAddress} transactionHash=${normalizedTransactionHash}`);
       throw new ApplicationError('Ví người gửi giao dịch không khớp với ví của tài khoản đăng nhập.', 403, 'FORBIDDEN');
     }
 
@@ -491,6 +550,7 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
   }
 
   await upsertDonationRecordByTransactionHash(donationEventRecord);
+  await createDonationReceivedNotification(donationEventRecord);
 
   // Ghi chú logic phức tạp: incremental update — O(1) update running totals thay vì
   // recalculate toàn bộ donations (trước đây dùng triggerRealtimeRankingUpdate + enqueueRankingRecalculate).

@@ -198,6 +198,7 @@ export default function OrganizationsPageView() {
   const [isBankSetupHighlighted, setIsBankSetupHighlighted] = useState(false);
   const [notificationItemList, setNotificationItemList] = useState<NotificationItem[]>([]);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [realtimeToastNotification, setRealtimeToastNotification] = useState<NotificationItem | null>(null);
   const [isNotificationLoading, setIsNotificationLoading] = useState(false);
   const [notificationErrorMessage, setNotificationErrorMessage] = useState<string | null>(null);
   const [createdProjects, setCreatedProjects] = useState<ProjectSummary[]>([]);
@@ -224,6 +225,8 @@ export default function OrganizationsPageView() {
   const [userEmail, setUserEmail] = useState('');
   const [userWalletAddress, setUserWalletAddress] = useState('');
   const latestEligibilityRequestRef = useRef(0);
+  const knownNotificationIdSetRef = useRef<Set<string>>(new Set());
+  const hasInitializedNotificationSnapshotRef = useRef(false);
 
   /** Hàm lấy tài khoản thụ hưởng đã duyệt. Mục đích: dùng đúng tài khoản ngân hàng đã qua phê duyệt khi tạo yêu cầu giải ngân. */
   const approvedBeneficiaryBankAccount = useMemo<ApprovedBeneficiaryBankAccount | null>(() => {
@@ -362,12 +365,27 @@ export default function OrganizationsPageView() {
     }
 
     setIsNotificationOpen(currentState => !currentState);
+    void loadNotificationsFromApi();
   };
 
   /** Hàm cập nhật state thông báo. Mục đích: đồng bộ danh sách và badge chưa đọc từ response thật. */
   const applyNotificationResponse = useCallback((notificationResponse: NotificationListResponse) => {
-    setNotificationItemList(Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : []);
+    const nextNotificationItemList = Array.isArray(notificationResponse.notifications) ? notificationResponse.notifications : [];
+    const newUnreadNotification = nextNotificationItemList.find(notificationItem =>
+      !notificationItem.isRead && !knownNotificationIdSetRef.current.has(notificationItem.notificationId)
+    );
+
+    setNotificationItemList(nextNotificationItemList);
     setUnreadNotificationCount(Number.isFinite(notificationResponse.unreadCount) ? Math.max(0, notificationResponse.unreadCount) : 0);
+
+    if (hasInitializedNotificationSnapshotRef.current && newUnreadNotification) {
+      setRealtimeToastNotification(newUnreadNotification);
+    }
+
+    nextNotificationItemList.forEach(notificationItem => {
+      knownNotificationIdSetRef.current.add(notificationItem.notificationId);
+    });
+    hasInitializedNotificationSnapshotRef.current = true;
   }, []);
 
   /** Hàm tải thông báo từ backend. Mục đích: lấy snapshot ban đầu trước khi nhận realtime. */
@@ -1000,6 +1018,7 @@ export default function OrganizationsPageView() {
   /** Hàm mở thông báo từ topbar. Mục đích: đồng bộ thao tác chuông thông báo giữa topbar và sidebar. */
   const handleOpenTopbarNotification = () => {
     setIsNotificationOpen(currentState => !currentState);
+    void loadNotificationsFromApi();
   };
 
   /** Hàm mở menu mobile. Mục đích: giữ tương thích API của Topbar trong khi sidebar hiện tại là desktop cố định. */
@@ -1045,6 +1064,19 @@ export default function OrganizationsPageView() {
     }
 
     const abortController = new AbortController();
+    let pollingInterval: ReturnType<typeof setInterval> | null = null;
+
+    /** Hàm bật polling dự phòng. Mục đích: vẫn nhận thông báo khi stream bị proxy/trình duyệt ngắt. */
+    const startFallbackPolling = () => {
+      if (pollingInterval) {
+        return;
+      }
+
+      void loadNotificationsFromApi();
+      pollingInterval = setInterval(() => {
+        void loadNotificationsFromApi();
+      }, 5000);
+    };
 
     /** Hàm xử lý từng gói SSE. Mục đích: parse snapshot realtime và cập nhật badge thông báo. */
     const handleNotificationStreamChunk = (streamChunk: string) => {
@@ -1057,7 +1089,7 @@ export default function OrganizationsPageView() {
         applyNotificationResponse(JSON.parse(dataLine.replace('data: ', '')) as NotificationListResponse);
         setNotificationErrorMessage(null);
       } catch (_error) {
-        setNotificationErrorMessage('Không thể đọc dữ liệu thông báo realtime.');
+        startFallbackPolling();
       }
     };
 
@@ -1071,7 +1103,7 @@ export default function OrganizationsPageView() {
         });
 
         if (!streamResponse.ok || !streamResponse.body) {
-          setNotificationErrorMessage('Kết nối thông báo realtime tạm thời gián đoạn.');
+          startFallbackPolling();
           return;
         }
 
@@ -1092,7 +1124,7 @@ export default function OrganizationsPageView() {
         }
       } catch (error: unknown) {
         if (!abortController.signal.aborted) {
-          setNotificationErrorMessage('Kết nối thông báo realtime tạm thời gián đoạn.');
+          startFallbackPolling();
         }
       }
     };
@@ -1101,8 +1133,11 @@ export default function OrganizationsPageView() {
 
     return () => {
       abortController.abort();
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
     };
-  }, [applyNotificationResponse, isAccessChecking]);
+  }, [applyNotificationResponse, isAccessChecking, loadNotificationsFromApi]);
 
   useEffect(() => {
     if (isAccessChecking) {
@@ -1291,6 +1326,47 @@ export default function OrganizationsPageView() {
           onMarkAllAsRead={handleMarkAllNotificationsAsRead}
           onRequestClose={handleCloseNotificationDropdown}
         />
+      ) : null}
+      {realtimeToastNotification ? (
+        <button
+          type="button"
+          onClick={() => {
+            setRealtimeToastNotification(null);
+            setIsNotificationOpen(true);
+            void loadNotificationsFromApi();
+          }}
+          className="fixed right-6 top-20 z-50 w-[360px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#D1FAE5] bg-white p-4 text-left shadow-[0_18px_55px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_65px_rgba(15,23,42,0.22)]"
+        >
+          <div className="flex items-start gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ECFDF5] text-lg" aria-hidden="true">
+              {realtimeToastNotification.notificationType === 'DONATION_RECEIVED' ? '💚' : '✍️'}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-[#064E3B]">{realtimeToastNotification.title}</p>
+              <p className="mt-1 text-sm leading-5 text-[#374151]">{realtimeToastNotification.content}</p>
+              <p className="mt-2 text-xs font-semibold text-[#0F766E]">Bấm để xem danh sách thông báo</p>
+            </div>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={event => {
+                event.stopPropagation();
+                setRealtimeToastNotification(null);
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setRealtimeToastNotification(null);
+                }
+              }}
+              className="rounded-full px-2 text-lg leading-none text-[#9CA3AF] hover:bg-[#F3F4F6] hover:text-[#374151]"
+              aria-label="Đóng thông báo realtime"
+            >
+              ×
+            </span>
+          </div>
+        </button>
       ) : null}
       {isCreateProjectOpen ? (
         <CreateProjectModal

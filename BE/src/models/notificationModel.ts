@@ -1,6 +1,6 @@
 import mongoose, { Schema } from 'mongoose';
 
-export type NotificationType = 'DONATION_RECEIVED' | 'PROJECT_APPROVED' | 'KYC_EXPIRING' | 'SYSTEM';
+export type NotificationType = 'DONATION_RECEIVED' | 'DISBURSEMENT_SIGNED' | 'PROJECT_APPROVED' | 'KYC_EXPIRING' | 'SYSTEM';
 
 export type Notification = {
   notificationId: string;
@@ -31,4 +31,3 @@ notificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, createdAt: -1 });
 
 export const NotificationModel = mongoose.models.Notification || mongoose.model<Notification>('Notification', notificationSchema);
-

@@ -2,6 +2,9 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/authenticationMiddleware';
 import { getUserNotifications, markAllUserNotificationsAsRead } from '../services/notificationService';
 import { sendErrorFromUnknown, sendErrorResponse, sendSuccessResponse } from '../utils/apiResponse';
+import { getLogger } from '../config/logger';
+
+const logger = getLogger();
 
 /** Hàm lấy userId đã xác thực. Mục đích: chặn request thiếu thông tin đăng nhập trước khi truy vấn thông báo. */
 function getAuthenticatedUserId(request: AuthenticatedRequest, response: Response): string | null {
@@ -54,13 +57,20 @@ export async function streamNotificationsController(request: AuthenticatedReques
   response.setHeader('Content-Type', 'text/event-stream');
   response.setHeader('Cache-Control', 'no-cache, no-transform');
   response.setHeader('Connection', 'keep-alive');
+  response.setHeader('X-Accel-Buffering', 'no');
   response.flushHeaders?.();
 
   /** Hàm gửi snapshot thông báo. Mục đích: đồng bộ realtime bằng dữ liệu MongoDB mới nhất. */
   const sendNotificationSnapshot = async (): Promise<void> => {
-    const notificationResult = await getUserNotifications(authenticatedUserId);
-    response.write(`event: notifications\n`);
-    response.write(`data: ${JSON.stringify(notificationResult)}\n\n`);
+    try {
+      const notificationResult = await getUserNotifications(authenticatedUserId);
+      response.write(`event: notifications\n`);
+      response.write(`data: ${JSON.stringify(notificationResult)}\n\n`);
+    } catch (error) {
+      logger.warn(`Không thể gửi snapshot thông báo SSE. userId=${authenticatedUserId} error=${(error as Error).message}`);
+      response.write(`event: heartbeat\n`);
+      response.write(`data: {}\n\n`);
+    }
   };
 
   await sendNotificationSnapshot();

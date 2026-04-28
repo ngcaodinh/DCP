@@ -57,6 +57,10 @@ type NotificationDropdownProps = {
   onRequestClose: () => void;
 };
 
+type NotificationDateFilter = 'day' | 'week' | 'month';
+
+const donationHistoryPageSizeOptionList = [8, 16, 24] as const;
+
 type DashboardSectionProps = {
   onLinkBankAccount: () => void;
   hasApprovedBeneficiaryBankAccount: boolean;
@@ -316,6 +320,27 @@ function formatDisbursementStatusVietnamese(disbursement: import('./types').Disb
   return 'Đã hủy';
 }
 
+/** Hàm chọn màu thẻ trạng thái giải ngân. Mục đích: giúp lịch sử yêu cầu giải ngân dễ quét và nhận diện trạng thái nhanh hơn. */
+function getDisbursementStatusBadgeClassName(disbursement: import('./types').DisbursementResult): string {
+  if (disbursement.payosTransferStatus === 'SUCCESS' || disbursement.status === 'COMPLETED') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+
+  if (disbursement.payosTransferStatus === 'FAILED' || disbursement.status === 'REJECTED' || disbursement.status === 'CANCELLED' || disbursement.status === 'EXPIRED') {
+    return 'border-rose-200 bg-rose-50 text-rose-700';
+  }
+
+  if (disbursement.payosTransferStatus === 'MANUAL_REVIEW' || disbursement.status === 'APPROVED') {
+    return 'border-sky-200 bg-sky-50 text-sky-700';
+  }
+
+  if (disbursement.payosTransferStatus === 'PROCESSING' || disbursement.status === 'EXECUTING') {
+    return 'border-blue-200 bg-blue-50 text-blue-700';
+  }
+
+  return 'border-amber-200 bg-amber-50 text-amber-700';
+}
+
 /** Hàm định dạng thời gian hiển thị tiếng Việt. Mục đích: hiển thị timestamp dự án dễ đọc trong modal chi tiết. */
 function formatDateTimeVietnamese(dateValue: string | null): string {
   if (!dateValue) {
@@ -560,6 +585,8 @@ export function DashboardSection({
   onRetryLoadDonationHistory = () => undefined
 }: DashboardSectionProps) {
   const [selectedDonationHistoryFilter, setSelectedDonationHistoryFilter] = useState<'day' | 'week' | 'month'>('day');
+  const [selectedDonationHistoryPageSize, setSelectedDonationHistoryPageSize] = useState<number>(8);
+  const [donationHistoryPageByFilter, setDonationHistoryPageByFilter] = useState<Record<'day' | 'week' | 'month', number>>({ day: 1, week: 1, month: 1 });
 
   const filteredDashboardDonationHistoryItemList = useMemo(() => {
     const nowTimestampValue = Date.now();
@@ -581,14 +608,49 @@ export function DashboardSection({
     });
   }, [dashboardDonationHistoryItemList, selectedDonationHistoryFilter]);
 
-  /** Hàm giới hạn số bản ghi hiển thị sau khi đã lọc. Mục đích: giữ giao diện gọn và vẫn phản ánh đúng kết quả theo mốc thời gian. */
+  const donationHistoryCurrentPage = donationHistoryPageByFilter[selectedDonationHistoryFilter];
+
+  const donationHistoryTotalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredDashboardDonationHistoryItemList.length / selectedDonationHistoryPageSize));
+  }, [filteredDashboardDonationHistoryItemList.length, selectedDonationHistoryPageSize]);
+
+  useEffect(() => {
+    setDonationHistoryPageByFilter(currentPageByFilter => {
+      const currentFilterPage = currentPageByFilter[selectedDonationHistoryFilter];
+      if (currentFilterPage <= donationHistoryTotalPages) {
+        return currentPageByFilter;
+      }
+
+      return {
+        ...currentPageByFilter,
+        [selectedDonationHistoryFilter]: donationHistoryTotalPages
+      };
+    });
+  }, [donationHistoryTotalPages, selectedDonationHistoryFilter]);
+
+  /** Hàm lấy danh sách lịch sử quyên góp theo trang hiện tại. Mục đích: phân trang riêng cho từng bộ lọc Ngày/Tuần/Tháng. */
   const displayedDashboardDonationHistoryItemList = useMemo(() => {
-    return filteredDashboardDonationHistoryItemList.slice(0, 8);
-  }, [filteredDashboardDonationHistoryItemList]);
+    const startIndex = (donationHistoryCurrentPage - 1) * selectedDonationHistoryPageSize;
+    return filteredDashboardDonationHistoryItemList.slice(startIndex, startIndex + selectedDonationHistoryPageSize);
+  }, [donationHistoryCurrentPage, filteredDashboardDonationHistoryItemList, selectedDonationHistoryPageSize]);
 
   /** Hàm xử lý chọn bộ lọc thời gian lịch sử quyên góp. Mục đích: cập nhật mốc thời gian để danh sách hiển thị theo Ngày/Tuần/Tháng. */
   const handleSelectDonationHistoryFilter = (nextFilter: 'day' | 'week' | 'month') => {
     setSelectedDonationHistoryFilter(nextFilter);
+  };
+
+  /** Hàm đổi số dòng mỗi trang lịch sử quyên góp. Mục đích: quay về trang đầu cho từng filter để tránh vượt quá tổng trang mới. */
+  const handleChangeDonationHistoryPageSize = (nextPageSize: number) => {
+    setSelectedDonationHistoryPageSize(nextPageSize);
+    setDonationHistoryPageByFilter({ day: 1, week: 1, month: 1 });
+  };
+
+  /** Hàm chuyển trang lịch sử quyên góp. Mục đích: cập nhật trang hiện tại theo đúng filter đang chọn. */
+  const handleChangeDonationHistoryPage = (nextPage: number) => {
+    setDonationHistoryPageByFilter(currentPageByFilter => ({
+      ...currentPageByFilter,
+      [selectedDonationHistoryFilter]: Math.min(donationHistoryTotalPages, Math.max(1, nextPage))
+    }));
   };
 
   const donationHistoryEmptyMessage = useMemo(() => {
@@ -686,19 +748,72 @@ export function DashboardSection({
               </button>
             </div>
           ) : displayedDashboardDonationHistoryItemList.length > 0 ? (
-            <div className="space-y-2">
-              {displayedDashboardDonationHistoryItemList.map(historyItem => (
-                <div key={historyItem.transactionHash} className="flex items-center justify-between gap-2 rounded-[10px] border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-semibold text-[#111827]">{historyItem.projectName}</p>
-                    <p className="truncate text-[11px] text-[#6B7280]">{`${historyItem.donorLabel} · ${historyItem.timestamp}`}</p>
+            <div className="space-y-3">
+              <div className="space-y-2">
+                {displayedDashboardDonationHistoryItemList.map(historyItem => (
+                  <div key={historyItem.transactionHash} className="flex items-center justify-between gap-2 rounded-[10px] border border-[#E5E7EB] bg-[#F9FAFB] px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-semibold text-[#111827]">{historyItem.projectName}</p>
+                      <p className="truncate text-[11px] text-[#6B7280]">{`${historyItem.donorLabel} · ${historyItem.timestamp}`}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[12px] font-semibold text-[#0E7C6B]">{`${formatCurrencyFromNumber(historyItem.amount)} ₫`}</p>
+                      <p className="text-[10px] text-[#9CA3AF]">{historyItem.transactionHash}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-[12px] font-semibold text-[#0E7C6B]">{`${formatCurrencyFromNumber(historyItem.amount)} ₫`}</p>
-                    <p className="text-[10px] text-[#9CA3AF]">{historyItem.transactionHash}</p>
+                ))}
+              </div>
+
+              <div className="rounded-[12px] border border-[#99f6e4] bg-gradient-to-br from-white via-[#f7fffd] to-[#ecfdf5] p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(126px,auto)_1fr] sm:items-center sm:gap-3">
+                    <label htmlFor="donationHistoryPageSizeSelect" className="text-xs font-semibold text-[#0f766e]">
+                      Số dòng mỗi trang
+                    </label>
+                    <select
+                      id="donationHistoryPageSizeSelect"
+                      value={selectedDonationHistoryPageSize}
+                      onChange={event => handleChangeDonationHistoryPageSize(Number(event.target.value))}
+                      disabled={isDonationHistoryLoading}
+                      className="h-10 w-full min-w-[112px] rounded-xl border border-[#99f6e4] bg-[#f0fdfa] px-3 text-xs font-semibold text-[#0f766e] outline-none transition hover:border-[#5eead4] hover:bg-[#ccfbf1] focus-visible:ring-2 focus-visible:ring-[#14b8a6] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#f8fafc] disabled:text-[#94a3b8]"
+                    >
+                      {donationHistoryPageSizeOptionList.map(pageSizeOption => (
+                        <option key={pageSizeOption} value={pageSizeOption}>
+                          {pageSizeOption}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(108px,auto)_1fr_minmax(108px,auto)] sm:items-center sm:gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleChangeDonationHistoryPage(donationHistoryCurrentPage - 1)}
+                      disabled={donationHistoryCurrentPage <= 1 || isDonationHistoryLoading}
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#99f6e4] bg-[#f0fdfa] px-3 text-xs font-semibold text-[#0f766e] transition hover:border-[#5eead4] hover:bg-[#ccfbf1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14b8a6] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#f8fafc] disabled:text-[#94a3b8]"
+                    >
+                      <span aria-hidden="true">←</span>
+                      <span>Trang trước</span>
+                    </button>
+
+                    {/* Ghi chú logic UI: aria-live giúp trình đọc màn hình nhận biết trang lịch sử đã thay đổi mà không cần tải lại toàn bộ trang. */}
+                    <div aria-live="polite" className="flex h-10 min-w-[150px] items-center justify-center rounded-xl border border-[#99f6e4] bg-[#ecfeff] px-3 text-center text-xs font-semibold text-[#0f766e]">
+                      <span className={`mr-2 inline-block h-2.5 w-2.5 rounded-full ${isDonationHistoryLoading ? 'animate-pulse bg-[#0d9488]' : 'bg-[#10b981]'}`} />
+                      {isDonationHistoryLoading ? 'Đang tải...' : `Trang ${donationHistoryCurrentPage} / ${donationHistoryTotalPages}`}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleChangeDonationHistoryPage(donationHistoryCurrentPage + 1)}
+                      disabled={donationHistoryCurrentPage >= donationHistoryTotalPages || isDonationHistoryLoading}
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-[#99f6e4] bg-[#f0fdfa] px-3 text-xs font-semibold text-[#0f766e] transition hover:border-[#5eead4] hover:bg-[#ccfbf1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#14b8a6] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#f8fafc] disabled:text-[#94a3b8]"
+                    >
+                      <span>Trang sau</span>
+                      <span aria-hidden="true">→</span>
+                    </button>
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
           ) : (
             <div className="rounded-[10px] border border-dashed border-[#D1D5DB] bg-[#F8FAFB] p-3 text-xs text-[#6B7280]">
@@ -1474,7 +1589,12 @@ export function DisbursementSection({
                   <div className="mb-3 flex items-start justify-between">
                     <div>
                       <p className="font-semibold">{getProjectName(disbursement.projectId, createdProjects)}</p>
-                      <p className="text-xs text-[#6B7280]">Yêu cầu rút tiền · {formatDisbursementStatusVietnamese(disbursement)}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#6B7280]">
+                        <span>Yêu cầu rút tiền</span>
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-none ${getDisbursementStatusBadgeClassName(disbursement)}`}>
+                          {formatDisbursementStatusVietnamese(disbursement)}
+                        </span>
+                      </div>
                       <p className="mt-1 text-xs text-[#4B5563]">Mục đích: {disbursement.usagePurpose}</p>
                     </div>
                     <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
@@ -2613,12 +2733,10 @@ export function SettingsSection({
 function getNotificationIcon(notificationType: NotificationItem['notificationType']): string {
   const notificationIconMap: Record<NotificationItem['notificationType'], string> = {
     DONATION_RECEIVED: '💚',
-    PROJECT_APPROVED: '🔵',
-    KYC_EXPIRING: '📝',
-    SYSTEM: '🔔'
+    DISBURSEMENT_SIGNED: '✍️'
   };
 
-  return notificationIconMap[notificationType] || notificationIconMap.SYSTEM;
+  return notificationIconMap[notificationType] || '🔔';
 }
 
 /** Hàm định dạng thời gian thông báo. Mục đích: hiển thị mốc thời gian thật ngắn gọn, dễ đọc. */
@@ -2636,6 +2754,26 @@ function formatNotificationTime(createdAt: string): string {
   });
 }
 
+/** Hàm kiểm tra thông báo thuộc bộ lọc thời gian. Mục đích: lọc nhanh theo ngày, tuần hoặc tháng hiện tại. */
+function isNotificationInsideDateFilter(createdAt: string, selectedDateFilter: NotificationDateFilter): boolean {
+  const createdDate = new Date(createdAt);
+  if (Number.isNaN(createdDate.getTime())) {
+    return false;
+  }
+
+  const currentDate = new Date();
+  if (selectedDateFilter === 'day') {
+    return createdDate.toDateString() === currentDate.toDateString();
+  }
+
+  const currentDateStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate());
+  const filterRangeInDays = selectedDateFilter === 'week' ? 7 : 30;
+  const filterStartDate = new Date(currentDateStart);
+  filterStartDate.setDate(currentDateStart.getDate() - filterRangeInDays + 1);
+
+  return createdDate >= filterStartDate && createdDate <= currentDate;
+}
+
 /** Hàm render dropdown thông báo. Mục đích: hiển thị thông báo thật từ backend theo trạng thái realtime. */
 export function NotificationDropdown({
   notificationItemList,
@@ -2647,6 +2785,25 @@ export function NotificationDropdown({
 }: NotificationDropdownProps) {
   const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
   const hasUnreadNotification = unreadNotificationCount > 0;
+  const [selectedDateFilter, setSelectedDateFilter] = useState<NotificationDateFilter>('day');
+  const [currentNotificationPage, setCurrentNotificationPage] = useState(1);
+  const notificationPageSize = 5;
+
+  const filteredNotificationItemList = useMemo(() => {
+    return notificationItemList.filter(notificationItem => isNotificationInsideDateFilter(notificationItem.createdAt, selectedDateFilter));
+  }, [notificationItemList, selectedDateFilter]);
+
+  const totalNotificationPages = Math.max(1, Math.ceil(filteredNotificationItemList.length / notificationPageSize));
+  const paginatedNotificationItemList = useMemo(() => {
+    const startNotificationIndex = (currentNotificationPage - 1) * notificationPageSize;
+    return filteredNotificationItemList.slice(startNotificationIndex, startNotificationIndex + notificationPageSize);
+  }, [currentNotificationPage, filteredNotificationItemList]);
+
+  /** Hàm đổi bộ lọc thời gian. Mục đích: reset về trang đầu khi người dùng chuyển ngày, tuần hoặc tháng. */
+  const handleChangeDateFilter = (nextDateFilter: NotificationDateFilter) => {
+    setSelectedDateFilter(nextDateFilter);
+    setCurrentNotificationPage(1);
+  };
 
   useEffect(() => {
     /** Hàm xử lý click ra ngoài dropdown. Mục đích: đóng dropdown khi người dùng bấm ngoài vùng popup. */
@@ -2668,33 +2825,80 @@ export function NotificationDropdown({
     };
   }, [onRequestClose]);
 
+  useEffect(() => {
+    if (currentNotificationPage > totalNotificationPages) {
+      setCurrentNotificationPage(totalNotificationPages);
+    }
+  }, [currentNotificationPage, totalNotificationPages]);
+
   return (
     <div
       ref={dropdownContainerRef}
-      className="fixed right-6 top-16 z-30 w-[340px] overflow-hidden rounded-[14px] border border-[#E5E7EB] bg-white shadow-2xl"
+      className="fixed right-4 top-16 z-30 max-h-[calc(100vh-88px)] w-[calc(100vw-32px)] max-w-[420px] overflow-hidden rounded-[18px] border border-[#D1FAE5] bg-white shadow-2xl sm:right-6"
     >
-      <div className="flex items-center justify-between border-b border-[#F3F4F6] p-4">
+      <div className="flex items-center justify-between border-b border-[#D1FAE5] bg-[#F8FFFD] p-4">
         <div className="flex items-center gap-2">
-          <p className="font-semibold">Thông báo</p>
+          <p className="font-semibold text-[#064E3B]">Thông báo</p>
           {hasUnreadNotification ? <span className="inline-flex h-2 w-2 rounded-full bg-[#EF4444]" /> : null}
         </div>
         <button type="button" onClick={onMarkAllAsRead} disabled={!hasUnreadNotification} className="text-xs font-semibold text-[#0E7C6B] disabled:cursor-not-allowed disabled:text-[#9CA3AF]">Đánh dấu đã đọc</button>
       </div>
 
-      <div className="space-y-0">
+      <div className="border-b border-[#E5F7F2] bg-white px-4 py-3">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[#ECFDF5] p-1">
+          {([
+            { key: 'day', label: 'Ngày' },
+            { key: 'week', label: 'Tuần' },
+            { key: 'month', label: 'Tháng' }
+          ] as Array<{ key: NotificationDateFilter; label: string }>).map(dateFilterItem => (
+            <button
+              key={dateFilterItem.key}
+              type="button"
+              onClick={() => handleChangeDateFilter(dateFilterItem.key)}
+              className={`rounded-xl px-3 py-2 text-xs font-bold transition ${selectedDateFilter === dateFilterItem.key ? 'bg-white text-[#047857] shadow-sm' : 'text-[#0F766E] hover:bg-white/70'}`}
+            >
+              {dateFilterItem.label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-[#6B7280]">Chỉ hiển thị quyên góp dự án và chữ ký giải ngân.</p>
+      </div>
+
+      <div className="max-h-[420px] space-y-0 overflow-y-auto">
         {isNotificationLoading ? <p className="p-4 text-sm text-[#6B7280]">Đang tải thông báo...</p> : null}
         {!isNotificationLoading && notificationErrorMessage ? <p className="p-4 text-sm text-[#B91C1C]">{notificationErrorMessage}</p> : null}
-        {!isNotificationLoading && !notificationErrorMessage && notificationItemList.length === 0 ? <p className="p-4 text-sm text-[#6B7280]">Chưa có thông báo mới.</p> : null}
-        {!isNotificationLoading && !notificationErrorMessage ? notificationItemList.map(notificationItem => (
+        {!isNotificationLoading && !notificationErrorMessage && filteredNotificationItemList.length === 0 ? <p className="p-4 text-sm text-[#6B7280]">Chưa có thông báo trong bộ lọc này.</p> : null}
+        {!isNotificationLoading && !notificationErrorMessage ? paginatedNotificationItemList.map(notificationItem => (
           <div key={notificationItem.notificationId} className={`flex gap-3 border-b border-[#F3F4F6] p-3 last:border-b-0 ${notificationItem.isRead ? 'bg-white' : 'bg-[#F2FBFA]'}`}>
             <span className="text-lg" aria-hidden="true">{getNotificationIcon(notificationItem.notificationType)}</span>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-[#111827]">{notificationItem.title}</p>
               <p className="mt-0.5 text-sm text-[#374151]">{notificationItem.content}</p>
               <p className="mt-1 text-xs text-[#9CA3AF]">{formatNotificationTime(notificationItem.createdAt)}</p>
             </div>
           </div>
         )) : null}
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-[#D1FAE5] bg-[#F8FFFD] p-3">
+        <button
+          type="button"
+          onClick={() => setCurrentNotificationPage(previousPage => Math.max(1, previousPage - 1))}
+          disabled={currentNotificationPage <= 1 || isNotificationLoading}
+          className="inline-flex h-9 items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF]"
+        >
+          Trang trước
+        </button>
+        <span className="text-xs font-semibold text-[#0F766E]" aria-live="polite">
+          Trang {currentNotificationPage} / {totalNotificationPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => setCurrentNotificationPage(previousPage => Math.min(totalNotificationPages, previousPage + 1))}
+          disabled={currentNotificationPage >= totalNotificationPages || isNotificationLoading}
+          className="inline-flex h-9 items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF]"
+        >
+          Trang sau
+        </button>
       </div>
     </div>
   );
