@@ -352,6 +352,13 @@ export default function RegisterPage() {
     setCurrentStep(1);
   };
 
+  useEffect(() => {
+    const roleFromUrl = new URLSearchParams(window.location.search).get("role");
+    if (roleFromUrl === "donor" || roleFromUrl === "organization") {
+      handleRoleSelect(roleFromUrl);
+    }
+  }, []);
+
   // Ghi chú: Điều hướng đến bước mong muốn và reset checkbox khi quay lại.
   const handleGoToStep = (step: number) => {
     setCurrentStep(step);

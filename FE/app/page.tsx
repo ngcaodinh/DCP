@@ -2052,12 +2052,12 @@ export default function HomePage() {
         </h2>
         <p>Tạo tài khoản miễn phí — chỉ cần email hoặc Google, không cần biết về Blockchain</p>
         <div className="cta-actions">
-          <button className="btn-white" type="button">
+          <a className="btn-white" href="/register?role=donor">
             🚀 Tạo tài khoản miễn phí
-          </button>
-          <button className="btn-outline-white" type="button">
+          </a>
+          <a className="btn-outline-white" href="/register?role=organization">
             🏢 Tôi là tổ chức từ thiện
-          </button>
+          </a>
         </div>
       </section>
 
@@ -2079,16 +2079,16 @@ export default function HomePage() {
               Nền tảng từ thiện phi tập trung đầu tiên tại Việt Nam, kết hợp Blockchain và hệ thống thanh toán truyền thống.
             </p>
             <div className="social-links">
-              <a href="#" className="social-btn">
+              <a href="https://zalo.me/0367400325" className="social-btn" target="_blank" rel="noopener noreferrer">
                 𝕏
               </a>
-              <a href="#" className="social-btn">
+              <a href="https://zalo.me/0367400325" className="social-btn" target="_blank" rel="noopener noreferrer">
                 f
               </a>
-              <a href="#" className="social-btn">
+              <a href="https://zalo.me/0367400325" className="social-btn" target="_blank" rel="noopener noreferrer">
                 in
               </a>
-              <a href="#" className="social-btn">
+              <a href="https://zalo.me/0367400325" className="social-btn" target="_blank" rel="noopener noreferrer">
                 ⛓
               </a>
             </div>
@@ -2137,10 +2137,10 @@ export default function HomePage() {
                 <a href="#">Chính sách bảo mật</a>
               </li>
               <li>
-                <a href="#">Liên hệ</a>
+                <a href="tel:0367400325">Liên hệ: 0367400325</a>
               </li>
               <li>
-                <a href="#">FAQ</a>
+                <a href="https://zalo.me/0367400325" target="_blank" rel="noopener noreferrer">Zalo: 0367400325</a>
               </li>
             </ul>
           </div>
