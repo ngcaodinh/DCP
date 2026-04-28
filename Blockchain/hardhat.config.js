@@ -1,4 +1,6 @@
 import '@nomicfoundation/hardhat-ethers';
+import '@nomicfoundation/hardhat-mocha';
+import '@nomicfoundation/hardhat-toolbox-mocha-ethers';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -37,7 +39,16 @@ function createNetworksConfig() {
 }
 
 const hardhatUserConfig = {
-  solidity: '0.8.20',
+  solidity: {
+    version: '0.8.20',
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200
+      },
+      viaIR: true
+    }
+  },
   networks: createNetworksConfig()
 };
 

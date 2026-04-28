@@ -57,3 +57,21 @@ Blockchain/ignition/deployments/
 
 #document
 document.md
+
+#key
+keygoogle.json
+BE\.env.example
+
+#file setting
+\doan1_hethongbophieu
+CLAUDE.md
+AGENTS.md
+.editorconfig
+
+
+\production-deployment-plan.md
+\beginner-docker-vps-deploy-guide.md
+
+docs
+# môi trường framework kiểm thử tự động bằng NUnit + Selenium.
+E2E.Tests
