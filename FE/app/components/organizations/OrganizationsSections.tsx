@@ -1354,7 +1354,7 @@ export function DisbursementSection({
   const [signActionErrorMessageByRequestId, setSignActionErrorMessageByRequestId] = useState<Record<string, string>>({});
   const [recentlySignedRequestId, setRecentlySignedRequestId] = useState<string | null>(null);
   const [highlightedRequestId, setHighlightedRequestId] = useState<string | null>(null);
-  
+
   // Lọc các dự án ACTIVE và không có yêu cầu PENDING nào
   const eligibleProjects = createdProjects.filter(p => {
     if (p.status !== 'ACTIVE') return false;
@@ -1526,7 +1526,7 @@ export function DisbursementSection({
                       </div>
                       <p className="text-lg font-bold text-[#0E7C6B]">{formatCurrencyFromNumber(disbursement.amount)} ₫</p>
                     </div>
-                    
+
                     <div className="space-y-2 text-xs">
                       <div className={`rounded border p-2.5 ${adminSigned ? 'border-[#E5E7EB] bg-[#F9FAFB]' : 'border-[#FCD34D] bg-[#FFFBEB]'}`}>
                         <p className={`font-medium ${adminSigned ? '' : 'text-[#92400E]'}`}>
@@ -1864,7 +1864,7 @@ export function CreateDisbursementModal({
           <div>
             <p className="mb-1 text-2xl">🏦</p>
             <p className="text-lg font-bold">Tạo yêu cầu giải ngân</p>
-            
+
           </div>
           <button type="button" onClick={onClose} className="h-8 w-8 rounded-full bg-[#F3F4F6]">✕</button>
         </div>
@@ -2258,7 +2258,7 @@ function BankSettingsPanel({
         {/* Thông báo cảnh báo khi chưa liên kết */}
         {bankStatus === null && !isOrganizationKycLoading ? (
           <div className="rounded-lg border border-[#FEF9C3] bg-[#FEFCE8] px-3 py-2.5 text-xs text-[#854D0E]">
-            Tổ chức chưa liên kết tài khoản ngân hàng. Hãy điền thông tin bên dưới để bắt đầu nhận giải ngân.
+            Tổ chức chưa liên kết tài khoản ngân hàng. Hãy điền thông tin thật chính xác và cẩn thận bên dưới để bắt đầu nhận giải ngân.
           </div>
         ) : null}
 
@@ -3058,6 +3058,7 @@ export function CreateProjectModal({ onClose, onProjectCreated }: CreateProjectM
             <div className="md:col-span-2">
               <input type="file" multiple accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={handleSelectEvidenceFiles} className="w-full rounded border border-[#D1D5DB] px-3 py-2" />
               <p className="mt-1 text-xs text-[#6B7280]">Tối đa 10 file: PDF, PNG, JPG, JPEG, DOCX.</p>
+              <p className="mt-1 text-xs font-semibold text-[#D97706]">Lưu ý: Tấm ảnh đầu tiên sẽ được lấy làm ảnh bìa dự án.</p>
               {formErrors.evidenceFiles ? <p className="mt-1 text-xs text-[#DC2626]">{formErrors.evidenceFiles}</p> : null}
               {selectedEvidenceFiles.length > 0 ? (
                 <div className="mt-2 space-y-1">
