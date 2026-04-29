@@ -147,6 +147,15 @@ const DisbursementMongoModel = mongoose.model<DisbursementRecord>('Disbursement'
 
 // ============ CRUD FUNCTIONS ============
 
+/** Chuẩn hóa payload cập nhật. Mục đích: tránh ghi trùng updatedAt gây xung đột MongoDB. */
+function buildDisbursementUpdatePayload(payload: Partial<DisbursementRecord>): Partial<DisbursementRecord> {
+  const { updatedAt: _ignoredUpdatedAt, ...safePayload } = payload;
+  return {
+    ...safePayload,
+    updatedAt: new Date()
+  };
+}
+
 /** Tìm bản ghi theo requestId. Mục đích: truy vấn chi tiết một yêu cầu giải ngân. */
 export async function findDisbursementByRequestId(requestId: string): Promise<DisbursementRecord | null> {
   return DisbursementMongoModel.findOne({ requestId }).lean<DisbursementRecord>().exec();
@@ -214,7 +223,7 @@ export async function updateDisbursementByRequestId(
 ): Promise<DisbursementRecord | null> {
   const updated = await DisbursementMongoModel.findOneAndUpdate(
     { requestId },
-    { ...payload, updatedAt: new Date() },
+    { $set: buildDisbursementUpdatePayload(payload) },
     { returnDocument: 'after' }
   ).exec();
   return updated ? (updated.toObject() as DisbursementRecord) : null;
@@ -228,7 +237,7 @@ export async function updateDisbursementByRequestIdWithCondition(
 ): Promise<DisbursementRecord | null> {
   const updated = await DisbursementMongoModel.findOneAndUpdate(
     { requestId, ...condition },
-    { ...payload, updatedAt: new Date() },
+    { $set: buildDisbursementUpdatePayload(payload) },
     { returnDocument: 'after' }
   ).exec();
 

@@ -480,6 +480,8 @@ function KycPanel() {
 
   const [rejectReason, setRejectReason] = useState("");
 
+  const [isRejectFormVisible, setIsRejectFormVisible] = useState(false);
+
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
   const [isApproveConfirmModalVisible, setIsApproveConfirmModalVisible] =
@@ -504,7 +506,12 @@ function KycPanel() {
         { headers: { Authorization: `Bearer ${session.accessToken}` } },
       );
 
-      const normalized = (response.data?.submissions ?? []).map((s: any) => ({
+      // Backend hiện trả payload dạng { submissions }, trong khi fetchApi cũng hỗ trợ dạng chuẩn { data }.
+      const responsePayload = (response.data ?? response) as {
+        submissions?: unknown[];
+      };
+
+      const normalized = (responsePayload.submissions ?? []).map((s: any) => ({
         ...s,
 
         organizationName: s.organizationName || s.organizationId,
@@ -590,6 +597,8 @@ function KycPanel() {
         }
 
         setRejectReason("");
+
+        setIsRejectFormVisible(false);
 
         setSuccessMessage(
           action === "approve"
@@ -724,41 +733,68 @@ function KycPanel() {
                   </div>
               </div>
 
-              <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <label className="block text-xs font-semibold text-amber-800">
-                  Lý do từ chối (bắt buộc khi từ chối)
-                </label>
+              {isRejectFormVisible ? (
+                <>
+                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <label className="block text-xs font-semibold text-amber-800">
+                      Lý do từ chối (bắt buộc khi từ chối)
+                    </label>
 
-                <textarea
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  rows={3}
-                  className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
-                  placeholder="Nhập lý do từ chối..."
-                />
-              </div>
+                    <textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      rows={3}
+                      className="w-full rounded border border-amber-200 px-2 py-1 text-xs outline-none"
+                      placeholder="Nhập lý do từ chối..."
+                    />
+                  </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={isSubmittingReview}
-                  onClick={() => submitKycReview("reject")}
-                  className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                >
-                  Từ chối
-                </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      disabled={isSubmittingReview}
+                      onClick={() => submitKycReview("reject")}
+                      className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                    >
+                      Xác nhận từ chối
+                    </button>
 
-                <button
-                  type="button"
-                  disabled={isSubmittingReview}
-                  onClick={() => {
-                    setIsApproveConfirmModalVisible(true);
-                  }}
-                  className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
-                >
-                  Chấp nhận
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      disabled={isSubmittingReview}
+                      onClick={() => {
+                        setIsRejectFormVisible(false);
+                        setRejectReason("");
+                      }}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={isSubmittingReview}
+                    onClick={() => setIsRejectFormVisible(true)}
+                    className="rounded bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    Từ chối
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSubmittingReview}
+                    onClick={() => {
+                      setIsApproveConfirmModalVisible(true);
+                    }}
+                    className="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                  >
+                    Chấp nhận
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-xs text-slate-500">
@@ -1295,13 +1331,18 @@ function BankAccountApprovalPanel() {
     try {
       const session = readAuthSession();
 
-      const response = await fetchApi<{ submissions: unknown[] }>(
+      const response = (await fetchApi<{ submissions: unknown[] }>(
         buildApiUrl("/auth/organization/kyc-submissions/pending"),
 
         { headers: { Authorization: `Bearer ${session.accessToken}` } },
-      );
+      )) as unknown as { data?: { submissions?: unknown[] }; submissions?: unknown[] };
 
-      const normalized = (response.data?.submissions ?? [])
+      // Ghi chú logic phức tạp: endpoint pending hiện trả trực tiếp { submissions },
+      // nhưng một số API mới dùng envelope { data }, nên cần hỗ trợ cả hai để Admin không mất danh sách chờ duyệt.
+      const pendingSubmissionList =
+        response.data?.submissions ?? response.submissions ?? [];
+
+      const normalized = pendingSubmissionList
 
         .filter(
           (s: any) => "beneficiaryBankAccount" in s && s.beneficiaryBankAccount,

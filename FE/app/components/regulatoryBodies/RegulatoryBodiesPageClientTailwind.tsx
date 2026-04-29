@@ -424,13 +424,17 @@ export default function RegulatoryBodiesPageClientTailwind() {
     }
 
     if (action === 'approve') {
-      await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/sign`), {
+      const signResponse = await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/sign`), {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${sessionPayload.accessToken}`
         },
         body: JSON.stringify({ comment: 'Approved from regulatory dashboard' })
       });
+
+      if (!signResponse.success) {
+        throw new Error('SIGN_DISBURSEMENT_FAILED');
+      }
       return;
     }
 
@@ -469,22 +473,22 @@ export default function RegulatoryBodiesPageClientTailwind() {
     }
   }, [isActionProcessing, loadDashboardData, selectedUrgentRequestItem, submitDisbursementAction]);
 
-  /** Hàm từ chối từ drawer, bắt buộc nhập lý do để đảm bảo audit trail rõ ràng. */
-  const handleRejectFromDrawer = useCallback(async (): Promise<void> => {
+  /** Hàm từ chối từ drawer, nhận lý do đã được nhập trong form để đảm bảo audit trail rõ ràng. */
+  const handleRejectFromDrawer = useCallback(async (rejectReason: string): Promise<void> => {
     const requestId = selectedUrgentRequestItem?.id;
     if (!requestId || isActionProcessing) {
       return;
     }
 
-    const rejectReason = window.prompt('Nhập lý do từ chối (tối thiểu 5 ký tự):', 'Thiếu thông tin chứng từ minh chứng.');
-    if (!rejectReason || rejectReason.trim().length < 5) {
+    const normalizedRejectReason = rejectReason.trim();
+    if (normalizedRejectReason.length < 5) {
       pushToast('Thiếu lý do từ chối', 'Bạn cần nhập lý do từ chối tối thiểu 5 ký tự.', 'info');
       return;
     }
 
     setIsActionProcessing(true);
     try {
-      await submitDisbursementAction(requestId, 'reject', rejectReason.trim());
+      await submitDisbursementAction(requestId, 'reject', normalizedRejectReason);
       setSelectedUrgentRequestItem(null);
       await loadDashboardData();
       pushToast('Đã từ chối yêu cầu', `Yêu cầu ${requestId} đã được cập nhật trạng thái từ chối.`, 'info');

@@ -480,14 +480,18 @@ export async function submitBeneficiaryBankAccount(
     throw new Error('Số tài khoản phải là chữ số và có độ dài từ 8 đến 20 ký tự.');
   }
 
-  // Ràng buộc logic: kiểm tra số tài khoản ngân hàng chưa được liên kết với tổ chức nào khác.
+  // Ràng buộc logic: chỉ xem là trùng khi đồng thời trùng số tài khoản và tên ngân hàng.
   // Chỉ kiểm tra các bản ghi APPROVED hoặc PENDING_REVIEW — bản ghi REJECTED thì cho phép tái sử dụng.
-  const existingBankAccountOwner = await findExistingBankAccountOwner(normalizedBankAccountNumber, organizationUser.id);
+  const existingBankAccountOwner = await findExistingBankAccountOwner(
+    normalizedBankAccountNumber,
+    normalizedBankName,
+    organizationUser.id
+  );
   if (existingBankAccountOwner) {
     const existingStatusLabel = existingBankAccountOwner.status === 'APPROVED'
       ? 'đã được phê duyệt'
       : 'đang chờ phê duyệt';
-    throw new Error(`Tài khoản ngân hàng này đã được liên kết với tổ chức khác (${existingBankAccountOwner.organizationName}) và ${existingStatusLabel}. Mỗi tài khoản ngân hàng chỉ được liên kết duy nhất với một tổ chức.`);
+    throw new Error(`Tài khoản ngân hàng này đã được liên kết với tổ chức khác và ${existingStatusLabel}. Mỗi tài khoản ngân hàng chỉ được liên kết duy nhất với một tổ chức.`);
   }
 
   const existingSubmissionList = await findSubmissionsByOrganizationId(organizationUser.id);
@@ -697,4 +701,3 @@ export async function reviewOrganizationKycSubmission(
     throw new Error(error instanceof Error ? error.message : 'Phê duyệt hồ sơ thất bại do lỗi cập nhật role tài khoản.');
   }
 }
-

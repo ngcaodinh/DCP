@@ -18,7 +18,7 @@ type RequestDrawerProps = {
   onClose: () => void;
   onChangeTab: (drawerTabKey: DrawerTabKey) => void;
   onApprove: () => Promise<void>;
-  onReject: () => Promise<void>;
+  onReject: (rejectReason: string) => Promise<void>;
 };
 
 type SignerRole = 'ADMIN_SIGNER' | 'ORG_SIGNER' | 'REGULATORY_SIGNER';
@@ -450,6 +450,9 @@ export default function RequestDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [detailErrorText, setDetailErrorText] = useState('');
+  const [isRejectReasonVisible, setIsRejectReasonVisible] = useState(false);
+  const [rejectReasonText, setRejectReasonText] = useState('');
+  const [rejectReasonErrorText, setRejectReasonErrorText] = useState('');
   const [disbursementDetailItem, setDisbursementDetailItem] = useState<DisbursementDetailItem | null>(null);
 
   const selectedRequestId = selectedUrgentRequestItem?.id?.trim() || '';
@@ -493,6 +496,12 @@ export default function RequestDrawer({
     void loadDisbursementDetail();
   }, [loadDisbursementDetail]);
 
+  useEffect(() => {
+    setIsRejectReasonVisible(false);
+    setRejectReasonText('');
+    setRejectReasonErrorText('');
+  }, [selectedRequestId]);
+
   const currentUserSignerRole = mapUserRoleToSignerRole(readAuthSession().userRole);
 
   const signatureDisplayItemList = useMemo(
@@ -518,10 +527,23 @@ export default function RequestDrawer({
     }
   };
 
+  /** Hàm xử lý từ chối bất đồng bộ, yêu cầu nhập lý do trước khi gửi lên backend. */
   const handleReject = async () => {
+    if (!isRejectReasonVisible) {
+      setIsRejectReasonVisible(true);
+      setRejectReasonErrorText('');
+      return;
+    }
+
+    const normalizedRejectReason = rejectReasonText.trim();
+    if (normalizedRejectReason.length < 5) {
+      setRejectReasonErrorText('Lý do từ chối phải có tối thiểu 5 ký tự.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await onReject();
+      await onReject(normalizedRejectReason);
     } finally {
       setIsSubmitting(false);
     }
@@ -773,23 +795,46 @@ export default function RequestDrawer({
         </div>
 
         {/* Footer actions */}
-        <div className="flex gap-3 border-t border-emerald-900/15 bg-slate-50 px-6 py-4">
-          <button
-            type="button"
-            onClick={handleReject}
-            disabled={isSubmitting}
-            className="flex-1 rounded-lg border-2 border-red-600 py-2 text-sm font-bold text-red-600 transition hover:bg-red-600 hover:text-white disabled:opacity-50"
-          >
-            Từ chối
-          </button>
-          <button
-            type="button"
-            onClick={handleApprove}
-            disabled={isSubmitting}
-            className="flex-[2] rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 py-2 text-sm font-bold text-white transition hover:from-emerald-600 hover:to-emerald-700 disabled:opacity-50"
-          >
-            {isSubmitting ? 'Đang xử lý...' : 'Xác nhận ký duyệt'}
-          </button>
+        <div className="space-y-3 border-t border-emerald-900/15 bg-slate-50 px-6 py-4">
+          {isRejectReasonVisible ? (
+            <div>
+              <label htmlFor="admin-reject-reason" className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Lý do từ chối
+              </label>
+              <textarea
+                id="admin-reject-reason"
+                value={rejectReasonText}
+                onChange={(event) => {
+                  setRejectReasonText(event.target.value);
+                  setRejectReasonErrorText('');
+                }}
+                disabled={isSubmitting}
+                maxLength={500}
+                rows={3}
+                placeholder="Nhập lý do từ chối yêu cầu giải ngân..."
+                className="mt-2 w-full resize-none rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              />
+              {rejectReasonErrorText ? <p className="mt-1 text-xs font-medium text-red-600">{rejectReasonErrorText}</p> : null}
+            </div>
+          ) : null}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={handleReject}
+              disabled={isSubmitting}
+              className="flex-1 rounded-lg border-2 border-red-600 py-2 text-sm font-bold text-red-600 transition hover:bg-red-600 hover:text-white disabled:opacity-50"
+            >
+              {isRejectReasonVisible ? 'Xác nhận từ chối' : 'Từ chối'}
+            </button>
+            <button
+              type="button"
+              onClick={handleApprove}
+              disabled={isSubmitting}
+              className="flex-[2] rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 py-2 text-sm font-bold text-white transition hover:from-emerald-600 hover:to-emerald-700 disabled:opacity-50"
+            >
+              {isSubmitting ? 'Đang xử lý...' : 'Xác nhận ký duyệt'}
+            </button>
+          </div>
         </div>
       </aside>
     </>
