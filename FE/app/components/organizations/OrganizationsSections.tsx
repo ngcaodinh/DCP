@@ -1873,7 +1873,7 @@ export function CreateDisbursementModal({
           <div className="grid gap-3 md:grid-cols-2">
             <div className="md:col-span-2 rounded-[12px] border border-[#E5E7EB] bg-[#F9FAFB] p-4">
               <p className="font-semibold text-[#111827]">{project.name}</p>
-              <p className="mt-1 text-xs text-[#6B7280]">Yêu cầu được duyệt theo ngưỡng chữ ký động của FR7 (2/3 hoặc 3/3).</p>
+              <p className="mt-1 text-xs text-[#6B7280]">Yêu cầu được duyệt theo ngưỡng chữ ký động của(2/3 hoặc 3/3).</p>
             </div>
 
             <div>
