@@ -327,15 +327,23 @@ export default function AdminPageClientTailwind() {
     const session = readAuthSession();
     if (!session.accessToken) {
       addToast({ titleText: 'Phiên đăng nhập hết hạn', bodyText: 'Vui lòng đăng nhập lại để tiếp tục ký duyệt.', tone: 'error' });
-      return;
+
+      throw new Error('SESSION_EXPIRED');
     }
 
     if (action === 'approve') {
-      await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/sign`), {
+      const signResponse = await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/sign`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${session.accessToken}` },
         body: JSON.stringify({ comment: 'Approved from admin dashboard' })
       });
+
+      if (!signResponse.success) {
+
+        throw new Error('SIGN_DISBURSEMENT_FAILED');
+
+      }
+
       addToast({ titleText: 'Ký duyệt thành công', bodyText: `Đã ký duyệt yêu cầu ${requestId}.`, tone: 'success' });
     } else {
       await fetchApi(buildApiUrl(`/api/disbursement/${requestId}/reject`), {
@@ -364,21 +372,21 @@ export default function AdminPageClientTailwind() {
     }
   }, [addToast, selectedUrgentRequestItem, submitDisbursementAction]);
 
-  /** Hàm xử lý từ chối từ drawer. Mục đích: bắt buộc nhập lý do và đồng bộ trạng thái reject với backend. */
-  const handleRejectFromDrawer = useCallback(async (): Promise<void> => {
+  /** Hàm xử lý từ chối từ drawer. Mục đích: nhận lý do đã nhập trong form và đồng bộ trạng thái reject với backend. */
+  const handleRejectFromDrawer = useCallback(async (rejectReason: string): Promise<void> => {
     const requestId = selectedUrgentRequestItem?.id;
     if (!requestId) {
       return;
     }
 
-    const rejectReason = window.prompt('Nhập lý do từ chối (tối thiểu 5 ký tự):', 'Thiếu thông tin chứng từ minh chứng.');
-    if (!rejectReason || rejectReason.trim().length < 5) {
+    const normalizedRejectReason = rejectReason.trim();
+    if (normalizedRejectReason.length < 5) {
       addToast({ titleText: 'Thiếu lý do từ chối', bodyText: 'Bạn cần nhập lý do từ chối tối thiểu 5 ký tự.', tone: 'warning' });
       return;
     }
 
     try {
-      await submitDisbursementAction(requestId, 'reject', rejectReason.trim());
+      await submitDisbursementAction(requestId, 'reject', normalizedRejectReason);
       setSelectedUrgentRequestItem(null);
     } catch {
       addToast({ titleText: 'Từ chối thất bại', bodyText: 'Không thể cập nhật trạng thái yêu cầu. Vui lòng thử lại.', tone: 'error' });

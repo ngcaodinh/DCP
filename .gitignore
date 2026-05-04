@@ -68,6 +68,8 @@ CLAUDE.md
 AGENTS.md
 .editorconfig
 
+production-deployment.md
+dcp-terms-of-service.md
 
 \production-deployment-plan.md
 \beginner-docker-vps-deploy-guide.md

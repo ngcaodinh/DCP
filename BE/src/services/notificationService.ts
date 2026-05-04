@@ -25,7 +25,6 @@ function createNotificationId(): string {
 /** Hàm tạo thông báo cho người dùng. Mục đích: lưu một notification mới và tránh trùng theo khóa nghiệp vụ nếu có. */
 export async function createUserNotification(payload: CreateNotificationPayload): Promise<Notification> {
   const notificationId = payload.deduplicationKey || createNotificationId();
-  const now = new Date();
 
   const notification = await NotificationModel.findOneAndUpdate(
     { notificationId },
@@ -37,9 +36,7 @@ export async function createUserNotification(payload: CreateNotificationPayload)
         title: payload.title,
         content: payload.content,
         isRead: false,
-        metadata: payload.metadata || {},
-        createdAt: now,
-        updatedAt: now
+        metadata: payload.metadata || {}
       }
     },
     { upsert: true, returnDocument: 'after' }

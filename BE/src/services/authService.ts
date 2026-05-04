@@ -330,6 +330,9 @@ export async function loginWithGoogle(
   const googlePayload = await verifyGoogleIdentityToken(identityToken);
   const userProfile = buildGoogleUserProfile(googlePayload);
   const correlationId = createCorrelationId();
+  const isOrganizationRegistrationRequest = role === 'organization';
+  const initialUserRole = isOrganizationRegistrationRequest ? 'donor' : role;
+  const initialAccountStatus = isOrganizationRegistrationRequest ? 'INACTIVE_PENDING_KYC' : 'ACTIVE';
 
   const existingUser = await findUserByEmail(userProfile.email);
   let authenticatedUser: AuthUser;
@@ -341,14 +344,15 @@ export async function loginWithGoogle(
         id: crypto.randomUUID(),
         email: userProfile.email,
         fullName: userProfile.fullName,
-        role,
+        // Ghi chú logic phức tạp: đăng ký tổ chức chỉ tạo hồ sơ chờ KYC, không cấp quyền organization trước khi duyệt.
+        role: initialUserRole,
         walletAddress: smartAccountCreationResult.walletAddress,
         smartAccountOwnerAddress: smartAccountCreationResult.ownerAddress,
         smartAccountOwnerEncryptedPrivateKey: smartAccountCreationResult.encryptedOwnerPrivateKey,
         socialProvider: 'google',
         socialAccountId: userProfile.socialAccountId,
         isEmailVerified: userProfile.isEmailVerified,
-        accountStatus: role === 'organization' ? 'INACTIVE_PENDING_KYC' : 'ACTIVE',
+        accountStatus: initialAccountStatus,
         organizationName: null,
         legalRegistrationNumber: null,
         isSybil: false,
