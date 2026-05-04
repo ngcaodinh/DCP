@@ -61,14 +61,14 @@ function isPublicApiRoute(request: Request): boolean {
 /** Hàm gắn header đo thời gian phản hồi. Mục đích: hỗ trợ theo dõi hiệu năng API trong production và qua reverse proxy. */
 function applyApiResponseTimeHeader(request: Request, response: Response, next: NextFunction): void {
   const requestStartTime = process.hrtime.bigint();
-  const originalWriteHead = response.writeHead.bind(response);
+  const originalWriteHead = response.writeHead.bind(response) as (...argumentsList: unknown[]) => Response;
 
-  response.writeHead = (...argumentsList: Parameters<Response['writeHead']>) => {
+  response.writeHead = ((...argumentsList: unknown[]) => {
     const responseTimeInMilliseconds = Number(process.hrtime.bigint() - requestStartTime) / 1_000_000;
     response.setHeader('Server-Timing', `app;dur=${responseTimeInMilliseconds.toFixed(2)}`);
     response.setHeader('X-Response-Time', `${responseTimeInMilliseconds.toFixed(2)}ms`);
     return originalWriteHead(...argumentsList);
-  };
+  }) as Response['writeHead'];
 
   next();
 }

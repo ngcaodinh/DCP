@@ -25,7 +25,6 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json next.config.js postcss.config.js tailwind.config.js tsconfig.json ./
 COPY app ./app
 COPY public ./public
-COPY types ./types
 RUN npm run build
 
 FROM node:20-alpine AS runner
