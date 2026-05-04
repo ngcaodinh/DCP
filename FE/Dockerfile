@@ -24,14 +24,12 @@ ENV NEXT_PUBLIC_DONATION_RANKING_CONTRACT_ADDRESS=${NEXT_PUBLIC_DONATION_RANKING
 COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json next.config.js postcss.config.js tailwind.config.js tsconfig.json ./
 COPY app ./app
-COPY public ./public
 RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
-COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 EXPOSE 3000
