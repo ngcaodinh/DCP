@@ -1,4 +1,4 @@
-import mongoose, { Schema } from 'mongoose';
+ import mongoose, { Schema } from 'mongoose';
 
 export type ProjectStatus = 'DRAFT' | 'PENDING_APPROVAL' | 'ACTIVE' | 'COMPLETED' | 'CLOSED' | 'REJECTED';
 
@@ -57,6 +57,12 @@ projectSchema.index({ organizationId: 1, name: 1 }, { unique: true });
 
 const ProjectMongoModel = mongoose.model<ProjectRecord>('Project', projectSchema);
 
+/** Hàm tạo filter thời gian cho project public. Mục đích: tránh ẩn toàn bộ dự án chỉ vì deadline vừa quá hạn trong thời gian ngắn. */
+function createPublicProjectDeadlineFilter(): { $gte: Date } {
+  const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  return { $gte: sixtyDaysAgo };
+}
+
 /** Hàm tìm dự án theo tên trong cùng tổ chức. Mục đích: chặn trùng tên dự án theo nghiệp vụ. */
 export async function findProjectByOrganizationIdAndName(organizationId: string, name: string): Promise<ProjectRecord | null> {
   return ProjectMongoModel.findOne({ organizationId, name }).lean<ProjectRecord>().exec();
@@ -97,7 +103,7 @@ export async function findProjectsByStatus(status: ProjectStatus): Promise<Proje
 export async function findPublicSupportProjects(limitCount: number): Promise<ProjectRecord[]> {
   return ProjectMongoModel.find({
     status: 'ACTIVE',
-    deadline: { $gte: new Date() }
+    deadline: createPublicProjectDeadlineFilter()
   })
     .sort({ updatedAt: -1 })
     .limit(limitCount)
@@ -110,7 +116,7 @@ export async function findPublicSupportProjectByProjectId(projectId: string): Pr
   return ProjectMongoModel.findOne({
     projectId,
     status: 'ACTIVE',
-    deadline: { $gte: new Date() }
+    deadline: createPublicProjectDeadlineFilter()
   })
     .lean<ProjectRecord>()
     .exec();
@@ -125,7 +131,7 @@ export async function findActiveProjectsByProjectIdList(projectIdList: string[])
   return ProjectMongoModel.find({
     projectId: { $in: projectIdList },
     status: 'ACTIVE',
-    deadline: { $gte: new Date() }
+    deadline: createPublicProjectDeadlineFilter()
   })
     .lean<ProjectRecord[]>()
     .exec();

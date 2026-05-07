@@ -3,9 +3,11 @@ import {
   handleGetDonationHistoryByProjectId,
   handleGetPublicDonationCampaignDetail,
   handleGetPublicDonationCampaigns,
+  handleGetPublicLiveFeed,
   handleGetPublicDonorList,
   handleOneClickDonation,
   handleRecordDonationFromTransactionHash,
+  handleStreamPublicLiveFeed,
   handleSyncDonationEventsFromBlockchain
 } from '../controllers/donationController';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
@@ -26,6 +28,8 @@ export function createDonationRoutes(): Router {
   router.get('/campaigns/:projectId', attachRequestMetadata(), getCampaignRateLimit, handleGetPublicDonationCampaignDetail);
   router.get('/campaigns/:projectId/history', attachRequestMetadata(), getHistoryRateLimit, handleGetDonationHistoryByProjectId);
   router.get('/donors', attachRequestMetadata(), getHistoryRateLimit, handleGetPublicDonorList);
+  router.get('/live-feed', attachRequestMetadata(), getHistoryRateLimit, handleGetPublicLiveFeed);
+  router.get('/live-feed/stream', attachRequestMetadata(), getHistoryRateLimit, handleStreamPublicLiveFeed);
   router.post('/one-click', attachRequestMetadata(), authenticationMiddleware, getHistoryRateLimit, handleOneClickDonation);
   router.post('/record', attachRequestMetadata(), authenticationMiddleware, getHistoryRateLimit, handleRecordDonationFromTransactionHash);
 

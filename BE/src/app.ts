@@ -58,16 +58,21 @@ function isPublicApiRoute(request: Request): boolean {
   );
 }
 
+/** Hàm kiểm tra request có phải SSE public hay không. Mục đích: tắt cache/buffering cho stream realtime để tránh trễ dữ liệu. */
+function isPublicSseRoute(request: Request): boolean {
+  return request.path === '/donations/live-feed/stream';
+}
+
 /** Hàm gắn header đo thời gian phản hồi. Mục đích: hỗ trợ theo dõi hiệu năng API trong production và qua reverse proxy. */
 function applyApiResponseTimeHeader(request: Request, response: Response, next: NextFunction): void {
   const requestStartTime = process.hrtime.bigint();
-  const originalWriteHead = response.writeHead.bind(response) as (...argumentsList: unknown[]) => Response;
+  const originalWriteHead = response.writeHead.bind(response) as Response['writeHead'];
 
   response.writeHead = ((...argumentsList: unknown[]) => {
     const responseTimeInMilliseconds = Number(process.hrtime.bigint() - requestStartTime) / 1_000_000;
     response.setHeader('Server-Timing', `app;dur=${responseTimeInMilliseconds.toFixed(2)}`);
     response.setHeader('X-Response-Time', `${responseTimeInMilliseconds.toFixed(2)}ms`);
-    return originalWriteHead(...argumentsList);
+    return originalWriteHead(...(argumentsList as Parameters<Response['writeHead']>));
   }) as Response['writeHead'];
 
   next();
@@ -77,7 +82,10 @@ function applyApiResponseTimeHeader(request: Request, response: Response, next: 
 function applySeoAndCacheHeaders(request: Request, response: Response, next: NextFunction): void {
   response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
 
-  if (request.method === 'GET' && isPublicApiRoute(request)) {
+  if (isPublicSseRoute(request)) {
+    response.setHeader('Cache-Control', 'no-cache, no-transform');
+    response.setHeader('X-Accel-Buffering', 'no');
+  } else if (request.method === 'GET' && isPublicApiRoute(request)) {
     response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
   } else {
     response.setHeader('Cache-Control', 'no-store');
