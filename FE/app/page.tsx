@@ -19,6 +19,7 @@ type HomeSupportProject = {
   name: string;
   description: string;
   goalAmount: number;
+  deadline?: string;
   status: string;
   evidenceCids: string[];
   evidenceFiles?: HomeProjectEvidenceFile[];
@@ -80,13 +81,28 @@ type RankingSnapshotResponse = {
 };
 
 type TransactionItem = {
-  id: number;
-  type: 'donation' | 'deposit' | 'disbursement';
+  id: string;
+  type: 'donation' | 'disbursement';
   hash: string;
   project: string;
   amount: string;
   time: string;
   amountColor?: string;
+  explorerUrl: string | null;
+};
+
+type LiveFeedApiTransactionItem = {
+  id: string;
+  type: 'donation' | 'disbursement';
+  transactionHash: string;
+  projectId: string;
+  projectName: string;
+  organizationName: string | null;
+  amount: number;
+  currencySymbol: string;
+  occurredAt: string;
+  explorerUrl: string | null;
+  displayDirection: 'inflow' | 'outflow';
 };
 
 type StatItem = {
@@ -113,73 +129,10 @@ const stats: StatItem[] = [
   { id: 3, value: 15842, suffix: '', label: 'Nhà hảo tâm', delay: 0.2 },
   { id: 4, value: 98, suffix: '%', label: 'Giao dịch thành công', delay: 0.3 }
 ];
-
-
-
-const initialTransactions: TransactionItem[] = [
-  {
-    id: 1,
-    type: 'donation',
-    hash: '0x3a4f...9b2c',
-    project: '→ Trường học vùng cao Hà Giang',
-    amount: '+500,000₫',
-    time: '2 giây trước'
-  },
-  {
-    id: 2,
-    type: 'deposit',
-    hash: '0x8e1d...4f7a',
-    project: 'Nạp tiền → Smart Account',
-    amount: '+2,000,000₫',
-    time: '45 giây trước',
-    amountColor: '#F59E0B'
-  },
-  {
-    id: 3,
-    type: 'donation',
-    hash: '0x5c2e...8a1d',
-    project: '→ Phẫu thuật tim miễn phí',
-    amount: '+1,200,000₫',
-    time: '1 phút trước'
-  },
-  {
-    id: 4,
-    type: 'disbursement',
-    hash: '0x9b7c...2e4f',
-    project: 'Giải ngân → Ánh Sáng Việt Nam',
-    amount: '-50,000,000₫',
-    time: '3 phút trước',
-    amountColor: '#3B82F6'
-  },
-  {
-    id: 5,
-    type: 'donation',
-    hash: '0x1f8a...6c3b',
-    project: '→ Tái thiết nhà Quảng Bình',
-    amount: '+300,000₫',
-    time: '5 phút trước'
-  }
-];
-
-const transactionSources = [
-  {
-    type: 'donation' as const,
-    projects: ['Trường học Hà Giang', 'Phẫu thuật tim', 'Nhà Quảng Bình', 'Nước sạch Sóc Trăng'],
-    amounts: ['+200,000₫', '+500,000₫', '+1,000,000₫', '+300,000₫', '+750,000₫']
-  },
-  {
-    type: 'deposit' as const,
-    projects: ['Nạp tiền → Smart Account'],
-    amounts: ['+500,000₫', '+2,000,000₫', '+1,000,000₫']
-  }
-];
-
 const chartData = [
   45, 72, 58, 91, 68, 110, 95, 130, 88, 145, 162, 138, 155, 178, 142, 190, 168, 205, 182, 220, 195, 245,
   210, 260, 238, 280, 255, 300, 272, 295
 ];
-
-const hexCharacters = '0123456789abcdef';
 
 const trustItems = [
   { label: '💰 Tổng quyên góp', value: '2,847,500,000₫' },
@@ -189,14 +142,68 @@ const trustItems = [
   { label: '🏆 Dự án hoàn thành', value: '89' }
 ];
 
-/**
- * Hàm tạo mã hash giả lập cho luồng giao dịch hiển thị.
- * Mục đích: mô phỏng dữ liệu blockchain ở phần live feed.
- */
-const createRandomHash = () => {
-  const prefix = Array.from({ length: 4 }, () => hexCharacters[Math.floor(Math.random() * 16)]).join('');
-  const suffix = Array.from({ length: 4 }, () => hexCharacters[Math.floor(Math.random() * 16)]).join('');
-  return `0x${prefix}...${suffix}`;
+/** Hàm rút gọn transaction hash. Mục đích: giữ UI gọn nhưng vẫn giúp người dùng nhận diện giao dịch thật. */
+const formatTransactionHash = (transactionHash: string): string => {
+  if (!transactionHash) {
+    return 'Đang đồng bộ hash';
+  }
+
+  if (transactionHash.length <= 18) {
+    return transactionHash;
+  }
+
+  return `${transactionHash.slice(0, 10)}...${transactionHash.slice(-6)}`;
+};
+
+/** Hàm định dạng thời gian tương đối. Mục đích: hiển thị cảm giác realtime dễ đọc cho live feed homepage. */
+const formatRelativeTime = (occurredAtIso: string): string => {
+  const occurredAtDate = new Date(occurredAtIso);
+  const occurredAtTimestamp = occurredAtDate.getTime();
+
+  if (!Number.isFinite(occurredAtTimestamp)) {
+    return 'Vừa cập nhật';
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - occurredAtTimestamp) / 1000));
+
+  if (elapsedSeconds < 5) {
+    return 'Vừa xong';
+  }
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds} giây trước`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes} phút trước`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) {
+    return `${elapsedHours} giờ trước`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays} ngày trước`;
+};
+
+/** Hàm map dữ liệu API thành item hiển thị. Mục đích: cô lập logic render live feed thật để UI không phụ thuộc trực tiếp backend shape. */
+const mapLiveFeedApiTransactionToViewModel = (transactionItem: LiveFeedApiTransactionItem): TransactionItem => {
+  const amountPrefix = transactionItem.displayDirection === 'inflow' ? '+' : '-';
+  const amountColor = transactionItem.type === 'disbursement' ? '#3B82F6' : undefined;
+  const projectPrefix = transactionItem.type === 'disbursement' ? 'Giải ngân → ' : '→ ';
+
+  return {
+    id: transactionItem.id,
+    type: transactionItem.type,
+    hash: formatTransactionHash(transactionItem.transactionHash),
+    project: `${projectPrefix}${transactionItem.projectName}`,
+    amount: `${amountPrefix}${formatCurrencyVnd(transactionItem.amount)}${transactionItem.currencySymbol}`,
+    time: formatRelativeTime(transactionItem.occurredAt),
+    amountColor,
+    explorerUrl: transactionItem.explorerUrl
+  };
 };
 
 /**
@@ -275,6 +282,11 @@ const isCampaignBeforeDeadline = (deadlineIso?: string): boolean => {
 /** Hàm kiểm tra campaign đủ điều kiện donate. Mục đích: gom rule nghiệp vụ UC3.1 tại Home. */
 const isCampaignEligibleForDonation = (campaignItem: HomeDonationCampaignDetail): boolean => {
   return campaignItem.status === 'ACTIVE' && isCampaignBeforeDeadline(campaignItem.deadline);
+};
+
+/** Hàm kiểm tra project card còn được phép quyên góp hay không. Mục đích: ẩn CTA quyên góp nếu dự án đã quá deadline. */
+const isSupportProjectDonationAvailable = (projectItem: HomeSupportProject): boolean => {
+  return projectItem.status === 'ACTIVE' && isCampaignBeforeDeadline(projectItem.deadline);
 };
 
 /** Hàm chuẩn hóa projectId cho relay. Mục đích: hỗ trợ cả mã thuần số và mã có chứa số như PRJ-1001. */
@@ -415,7 +427,11 @@ export default function HomePage() {
   const [userTokenBalance, setUserTokenBalance] = useState(0);
   const [isLoginRequiredDialogVisible, setIsLoginRequiredDialogVisible] = useState(false);
   const [statValues, setStatValues] = useState(() => stats.map(() => 0));
-  const [transactions, setTransactions] = useState<TransactionItem[]>(initialTransactions);
+  const [transactions, setTransactions] = useState<TransactionItem[]>([]);
+  const [isLiveFeedLoading, setIsLiveFeedLoading] = useState(true);
+  const [isLiveFeedConnected, setIsLiveFeedConnected] = useState(false);
+  const [liveFeedErrorMessage, setLiveFeedErrorMessage] = useState('');
+  const [hasClientMounted, setHasClientMounted] = useState(false);
   const [rankingItemList, setRankingItemList] = useState<RankingItem[]>([]);
   const [isRankingLoading, setIsRankingLoading] = useState(true);
   const [rankingErrorMessage, setRankingErrorMessage] = useState('');
@@ -443,6 +459,10 @@ export default function HomePage() {
   useEffect(() => {
     const timeout = window.setTimeout(() => setIsHeroReady(true), 500);
     return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    setHasClientMounted(true);
   }, []);
 
   useEffect(() => {
@@ -491,29 +511,115 @@ export default function HomePage() {
     requestAnimationFrame(animate);
   }, [visibleCards.stats]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      const source = transactionSources[Math.floor(Math.random() * transactionSources.length)];
-      const newTransaction: TransactionItem = {
-        id: Date.now(),
-        type: source.type,
-        hash: createRandomHash(),
-        project: `→ ${source.projects[Math.floor(Math.random() * source.projects.length)]}`,
-        amount: source.amounts[Math.floor(Math.random() * source.amounts.length)],
-        time: 'vừa xong'
-      };
+  /** Hàm tải snapshot live feed. Mục đích: lấy dữ liệu thật cho lần render đầu và cho fallback polling. */
+  const loadLiveFeedTransactionList = useCallback(async () => {
+    setIsLiveFeedLoading(true);
+    setLiveFeedErrorMessage('');
 
-      setTransactions(current => {
-        const nextItems = [newTransaction, ...current].slice(0, 6);
-        return nextItems.map((item, index) => ({
-          ...item,
-          time: ['vừa xong', '5 giây', '30 giây', '1 phút', '2 phút', '4 phút'][index] || '5 phút trước'
-        }));
+    try {
+      const liveFeedResponse = await fetchApi<LiveFeedApiTransactionItem[]>(buildApiUrl('/donations/live-feed?limit=6'), {
+        method: 'GET',
+        cache: 'no-store'
       });
-    }, 3500);
 
-    return () => window.clearInterval(interval);
+      setTransactions(liveFeedResponse.data.map(mapLiveFeedApiTransactionToViewModel));
+    } catch (error) {
+      const fallbackErrorMessage = 'Không thể tải giao dịch thời gian thực. Vui lòng thử lại sau.';
+      const normalizedErrorMessage = error instanceof Error ? error.message : fallbackErrorMessage;
+      setLiveFeedErrorMessage(normalizedErrorMessage || fallbackErrorMessage);
+      setTransactions([]);
+    } finally {
+      setIsLiveFeedLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadLiveFeedTransactionList();
+  }, [loadLiveFeedTransactionList]);
+
+  useEffect(() => {
+    let reconnectTimeoutId: number | null = null;
+    let fallbackPollingIntervalId: number | null = null;
+    let isEffectDisposed = false;
+    let liveFeedEventSource: EventSource | null = null;
+
+    /** Hàm khởi tạo fallback polling. Mục đích: giữ live feed tiếp tục cập nhật khi SSE bị lỗi hoặc bị proxy chặn. */
+    const startFallbackPolling = () => {
+      if (fallbackPollingIntervalId) {
+        return;
+      }
+
+      fallbackPollingIntervalId = window.setInterval(() => {
+        void loadLiveFeedTransactionList();
+      }, 30000);
+    };
+
+    /** Hàm dừng fallback polling. Mục đích: tránh gọi API trùng khi SSE đã hoạt động ổn định. */
+    const stopFallbackPolling = () => {
+      if (!fallbackPollingIntervalId) {
+        return;
+      }
+
+      window.clearInterval(fallbackPollingIntervalId);
+      fallbackPollingIntervalId = null;
+    };
+
+    /** Hàm kết nối SSE live feed. Mục đích: nhận snapshot giao dịch thật theo thời gian thực từ backend. */
+    const connectLiveFeedStream = () => {
+      if (isEffectDisposed) {
+        return;
+      }
+
+      try {
+        liveFeedEventSource = new EventSource(buildApiUrl('/donations/live-feed/stream?limit=6'));
+      } catch {
+        setIsLiveFeedConnected(false);
+        startFallbackPolling();
+        reconnectTimeoutId = window.setTimeout(connectLiveFeedStream, 5000);
+        return;
+      }
+
+      liveFeedEventSource.addEventListener('live-feed', event => {
+        const parsedData = JSON.parse(event.data) as LiveFeedApiTransactionItem[];
+
+        // Ghi chú logic phức tạp: backend SSE luôn đẩy snapshot hoàn chỉnh, nên frontend chỉ cần replace state để tránh lệch thứ tự sự kiện.
+        setTransactions(parsedData.map(mapLiveFeedApiTransactionToViewModel));
+        setIsLiveFeedConnected(true);
+        setIsLiveFeedLoading(false);
+        setLiveFeedErrorMessage('');
+        stopFallbackPolling();
+      });
+
+      liveFeedEventSource.addEventListener('heartbeat', () => {
+        setIsLiveFeedConnected(false);
+        startFallbackPolling();
+      });
+
+      liveFeedEventSource.onerror = () => {
+        setIsLiveFeedConnected(false);
+        startFallbackPolling();
+        liveFeedEventSource?.close();
+        liveFeedEventSource = null;
+
+        if (!isEffectDisposed) {
+          reconnectTimeoutId = window.setTimeout(connectLiveFeedStream, 5000);
+        }
+      };
+    };
+
+    connectLiveFeedStream();
+
+    return () => {
+      isEffectDisposed = true;
+      stopFallbackPolling();
+
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
+
+      liveFeedEventSource?.close();
+    };
+  }, [loadLiveFeedTransactionList]);
 
   useEffect(() => {
     /**
@@ -1356,6 +1462,7 @@ export default function HomePage() {
             supportProjectList.map((project, projectIndex) => {
               const projectVisual = getProjectVisualByIndex(projectIndex);
               const projectCoverImageUrl = supportProjectCoverImageUrlById[project.projectId] || '';
+              const isDonationAvailable = isSupportProjectDonationAvailable(project);
               const projectCoverStyle = projectCoverImageUrl
                 ? { backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${projectCoverImageUrl})` }
                 : { background: projectVisual.background };
@@ -1387,9 +1494,15 @@ export default function HomePage() {
                       <span>Trạng thái: {getPublicProjectStatusLabel(project.status)}</span>
                     </div>
                     <div className="pcard-actions">
-                      <button className="btn-donate" type="button" onClick={() => void handleOpenDonationModal(project.projectId, project)}>
-                        💛 Quyên góp ngay
-                      </button>
+                      {isDonationAvailable ? (
+                        <button className="btn-donate" type="button" onClick={() => void handleOpenDonationModal(project.projectId, project)}>
+                          💛 Quyên góp ngay
+                        </button>
+                      ) : (
+                        <span className="inline-flex h-11 items-center justify-center rounded-xl bg-[#e5e7eb] px-5 text-sm font-semibold text-[#6b7280]">
+                          Đã quá hạn quyên góp
+                        </span>
+                      )}
                       <button className="btn-detail" type="button" onClick={() => void handleOpenProjectDetailModal(project.projectId)}>
                         Chi tiết
                       </button>
@@ -1501,23 +1614,31 @@ export default function HomePage() {
                     <p className="mt-1 text-xs text-[#6b7280]">Số dư của bạn: {Number(userTokenBalance).toLocaleString('vi-VN')} token</p>
                   </div>
 
-                  <div>
-                    <label htmlFor="homeDonationAmountInput" className="text-sm font-semibold text-[#111827]">
-                      Số token muốn quyên góp
-                    </label>
-                    <input
-                      id="homeDonationAmountInput"
-                      className="mt-2 w-full rounded-lg border border-[#d1d5db] px-3 py-2 text-sm text-[#111827] outline-none focus:border-[#0e7c6b] focus:ring-2 focus:ring-[#0e7c6b]/20"
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      value={donationAmountInput}
-                      onChange={event => setDonationAmountInput(event.target.value)}
-                      disabled={isDonationSubmitting}
-                      placeholder="Ví dụ: 100"
-                    />
-                  </div>
+                  {!isCampaignEligibleForDonation(selectedDonationCampaignDetail) && (
+                    <p className="rounded-lg border border-[#fde68a] bg-[#fffbeb] p-3 text-sm text-[#92400e]">
+                      Dự án đã quá thời hạn quyên góp nên chức năng quyên góp hiện không khả dụng.
+                    </p>
+                  )}
+
+                  {isCampaignEligibleForDonation(selectedDonationCampaignDetail) && (
+                    <div>
+                      <label htmlFor="homeDonationAmountInput" className="text-sm font-semibold text-[#111827]">
+                        Số token muốn quyên góp
+                      </label>
+                      <input
+                        id="homeDonationAmountInput"
+                        className="mt-2 w-full rounded-lg border border-[#d1d5db] px-3 py-2 text-sm text-[#111827] outline-none focus:border-[#0e7c6b] focus:ring-2 focus:ring-[#0e7c6b]/20"
+                        type="number"
+                        min={1}
+                        step={1}
+                        inputMode="numeric"
+                        value={donationAmountInput}
+                        onChange={event => setDonationAmountInput(event.target.value)}
+                        disabled={isDonationSubmitting}
+                        placeholder="Ví dụ: 100"
+                      />
+                    </div>
+                  )}
                 </>
               )}
 
@@ -1542,7 +1663,7 @@ export default function HomePage() {
                 type="button"
                 className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 text-sm font-semibold text-white transition hover:bg-[#0b6759] disabled:cursor-not-allowed disabled:opacity-50"
                 onClick={handleOpenDonationConfirmModal}
-                disabled={isDonationSubmitting || isDonationDataLoading || !selectedDonationCampaignDetail}
+                disabled={isDonationSubmitting || isDonationDataLoading || !selectedDonationCampaignDetail || !isCampaignEligibleForDonation(selectedDonationCampaignDetail)}
               >
                 Quyên góp
               </button>
@@ -1767,30 +1888,61 @@ export default function HomePage() {
             <div className="live-header">
               <h3 className="live-title">Live Feed</h3>
               <div className="live-label">
-                <span className="live-dot" /> Đang cập nhật
+                <span className="live-dot" /> {hasClientMounted && isLiveFeedConnected ? 'Đang cập nhật realtime' : 'Đang đồng bộ dữ liệu thật'}
               </div>
             </div>
             <div className="tx-list">
-              {transactions.map(transaction => (
-                <div className="tx-item" key={transaction.id}>
-                  <div className={`tx-dot ${transaction.type}`} />
+              {!hasClientMounted ? (
+                <div className="tx-item">
                   <div className="tx-info">
-                    <div className="tx-hash">{transaction.hash}</div>
-                    <div className="tx-project">{transaction.project}</div>
-                  </div>
-                  <div>
-                    <div className="tx-amount" style={transaction.amountColor ? { color: transaction.amountColor } : {}}>
-                      {transaction.amount}
-                    </div>
-                    <div className="tx-time">{transaction.time}</div>
+                    <div className="tx-hash">Đang tải giao dịch thật...</div>
+                    <div className="tx-project">Hệ thống đang chuẩn bị đồng bộ live feed.</div>
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="tx-footer">
-              <a href="#" className="tx-link">
-                Xem tất cả giao dịch → ↗ Block Explorer
-              </a>
+              ) : isLiveFeedLoading ? (
+                <div className="tx-item">
+                  <div className="tx-info">
+                    <div className="tx-hash">Đang tải giao dịch thật...</div>
+                    <div className="tx-project">Hệ thống đang đồng bộ dữ liệu on-chain mới nhất.</div>
+                  </div>
+                </div>
+              ) : liveFeedErrorMessage ? (
+                <div className="tx-item">
+                  <div className="tx-info">
+                    <div className="tx-hash">Chưa thể tải live feed</div>
+                    <div className="tx-project">{liveFeedErrorMessage}</div>
+                  </div>
+                </div>
+              ) : transactions.length === 0 ? (
+                <div className="tx-item">
+                  <div className="tx-info">
+                    <div className="tx-hash">Chưa có giao dịch</div>
+                    <div className="tx-project">Live Feed sẽ tự động hiển thị khi có dữ liệu thật từ hệ thống.</div>
+                  </div>
+                </div>
+              ) : (
+                transactions.map(transaction => (
+                  <div className="tx-item" key={transaction.id}>
+                    <div className={`tx-dot ${transaction.type}`} />
+                    <div className="tx-info">
+                      {transaction.explorerUrl ? (
+                        <a href={transaction.explorerUrl} target="_blank" rel="noreferrer" className="tx-hash hover:underline">
+                          {transaction.hash}
+                        </a>
+                      ) : (
+                        <div className="tx-hash">{transaction.hash}</div>
+                      )}
+                      <div className="tx-project">{transaction.project}</div>
+                    </div>
+                    <div>
+                      <div className="tx-amount" style={transaction.amountColor ? { color: transaction.amountColor } : {}}>
+                        {transaction.amount}
+                      </div>
+                      <div className="tx-time">{transaction.time}</div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

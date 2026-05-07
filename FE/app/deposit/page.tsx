@@ -18,6 +18,8 @@ type TransactionItem = {
   title: string;
   date: string;
   hash: string;
+  rawHash: string | null;
+  explorerUrl: string;
   amount: string;
   status: 'SUCCESS' | 'FAILED' | 'PENDING';
 };
@@ -106,6 +108,25 @@ const truncateWalletAddress = (walletAddress: string): string => {
   }
 
   return `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+};
+
+/** Hàm rút gọn transaction hash. Mục đích: hiển thị mã giao dịch gọn hơn nhưng vẫn đủ nhận diện. */
+const shortenTransactionHash = (transactionHashValue: string): string => {
+  if (transactionHashValue.length <= 9) {
+    return transactionHashValue;
+  }
+
+  return `${transactionHashValue.slice(0, 3)}...${transactionHashValue.slice(-3)}`;
+};
+
+/** Hàm tạo link explorer cho transaction hash. Mục đích: cho phép người dùng mở blockchain explorer từ giao dịch nạp tiền. */
+const buildTransactionExplorerUrl = (transactionHashValue: string): string => {
+  if (!transactionHashValue) {
+    return '';
+  }
+
+  const blockchainExplorerTxBaseUrl = String(process.env.NEXT_PUBLIC_BLOCKCHAIN_EXPLORER_TX_BASE_URL || 'https://amoy.polygonscan.com/tx').trim();
+  return `${blockchainExplorerTxBaseUrl.replace(/\/$/, '')}/${transactionHashValue}`;
 };
 
 /**
@@ -324,7 +345,9 @@ function DepositHomePageContent() {
       id: index + 1,
       title: 'Nạp tiền',
       date: formatTransactionDateTime(deposit.updatedAt || deposit.createdAt),
-      hash: deposit.onChainTransactionHash ? truncateWalletAddress(deposit.onChainTransactionHash) : `Order ${deposit.orderCode}`,
+      hash: deposit.onChainTransactionHash ? shortenTransactionHash(deposit.onChainTransactionHash) : `Order ${deposit.orderCode}`,
+      rawHash: deposit.onChainTransactionHash,
+      explorerUrl: deposit.onChainTransactionHash ? buildTransactionExplorerUrl(deposit.onChainTransactionHash) : '',
       amount: `+${deposit.tokenAmount.toLocaleString('vi-VN')}`,
       status: mapDepositStatusToTransactionStatus(deposit.status)
     }));
@@ -720,7 +743,24 @@ function DepositHomePageContent() {
         <div className="flex-1">
           <div className="text-sm font-semibold text-[#0D1117]">{transaction.title}</div>
           <div className="text-[11px] text-gray-400">{transaction.date}</div>
-          <div className="text-[10px] text-gray-400">{transaction.hash}</div>
+          <div className="text-[10px] text-gray-400">
+            {transaction.explorerUrl ? (
+              <a
+                href={transaction.explorerUrl}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="inline-flex items-center gap-1 text-[#1d4ed8] hover:underline"
+                title={transaction.rawHash || transaction.hash}
+              >
+                <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+                <span>{transaction.hash}</span>
+              </a>
+            ) : (
+              <span title={transaction.hash}>{transaction.hash}</span>
+            )}
+          </div>
         </div>
         <div className="text-right">
           <div className="text-sm font-semibold text-[#0E7C6B]">{transaction.amount}</div>
@@ -1003,9 +1043,6 @@ function DepositHomePageContent() {
                 <div className="rounded-2xl border border-black/5 bg-white px-5 py-6 shadow-sm">
                   <div className="mb-4 flex items-center justify-between">
                     <div className="text-sm font-semibold text-[#0D1117]">Giao dịch gần đây</div>
-                    <a href="#" className="text-xs font-semibold text-[#0E7C6B]">
-                      Xem tất cả
-                    </a>
                   </div>
                   <div className="space-y-3">
                     {isSidebarLoading && <div className="text-xs text-gray-400">Đang tải giao dịch...</div>}
@@ -1140,5 +1177,3 @@ export default function DepositHomePage() {
     </Suspense>
   );
 }
-
-

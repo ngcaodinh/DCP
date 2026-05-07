@@ -10,6 +10,7 @@ import {
   recordDonationFromTransactionHash,
   syncDonationEventsFromBlockchain
 } from '../services/donationService';
+import { getPublicLiveFeedTransactionList } from '../services/liveFeedService';
 import { sendErrorFromUnknown, sendErrorResponse, sendSuccessResponse } from '../utils/apiResponse';
 
 const logger = getLogger();
@@ -89,6 +90,53 @@ export async function handleGetPublicDonorList(request: AuthenticatedRequest, re
     logger.error('Lấy danh sách nhà hảo tâm thất bại.', { errorMessage: (error as Error).message });
     sendErrorFromUnknown(response, error, 'Không thể lấy danh sách nhà hảo tâm.');
   }
+}
+
+/** Hàm xử lý request lấy snapshot live feed public. Mục đích: trả giao dịch thật cho section minh bạch trên homepage. */
+export async function handleGetPublicLiveFeed(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const parsedLimitCount = Number(request.query.limit);
+
+  try {
+    const liveFeedTransactionItemList = await getPublicLiveFeedTransactionList(parsedLimitCount);
+    sendSuccessResponse(response, 200, 'Lấy dữ liệu live feed thành công.', liveFeedTransactionItemList);
+  } catch (error) {
+    logger.error('Lấy dữ liệu live feed thất bại.', { errorMessage: (error as Error).message });
+    sendErrorFromUnknown(response, error, 'Không thể lấy dữ liệu live feed.');
+  }
+}
+
+/** Hàm xử lý stream SSE cho live feed public. Mục đích: đẩy snapshot giao dịch thật theo thời gian thực cho homepage. */
+export async function handleStreamPublicLiveFeed(request: AuthenticatedRequest, response: Response): Promise<void> {
+  const parsedLimitCount = Number(request.query.limit);
+
+  response.setHeader('Content-Type', 'text/event-stream');
+  response.setHeader('Cache-Control', 'no-cache, no-transform');
+  response.setHeader('Connection', 'keep-alive');
+  response.setHeader('X-Accel-Buffering', 'no');
+  response.flushHeaders?.();
+
+  /** Hàm gửi snapshot live feed mới nhất. Mục đích: giữ frontend đồng bộ dữ liệu thật mà không cần mock interval. */
+  const sendLiveFeedSnapshot = async (): Promise<void> => {
+    try {
+      const liveFeedTransactionItemList = await getPublicLiveFeedTransactionList(parsedLimitCount);
+      response.write('event: live-feed\n');
+      response.write(`data: ${JSON.stringify(liveFeedTransactionItemList)}\n\n`);
+    } catch (error) {
+      logger.warn('Không thể gửi snapshot live feed SSE.', { errorMessage: (error as Error).message });
+      response.write('event: heartbeat\n');
+      response.write('data: {}\n\n');
+    }
+  };
+
+  await sendLiveFeedSnapshot();
+  const snapshotIntervalId = setInterval(() => {
+    void sendLiveFeedSnapshot();
+  }, 5000);
+
+  request.on('close', () => {
+    clearInterval(snapshotIntervalId);
+    response.end();
+  });
 }
 
 
