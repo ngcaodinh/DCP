@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
@@ -250,6 +250,7 @@ function DepositHomePageContent() {
   const [selectedChipId, setSelectedChipId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isToastOpen, setIsToastOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProgressBarRunning, setIsProgressBarRunning] = useState(false);
   const [isConfirmBannerVisible, setIsConfirmBannerVisible] = useState(false);
   const [currentOrderCode, setCurrentOrderCode] = useState('');
@@ -264,6 +265,7 @@ function DepositHomePageContent() {
   const [sidebarTokenBalance, setSidebarTokenBalance] = useState(0);
 
   const [sidebarRecentDeposits, setSidebarRecentDeposits] = useState<DepositSidebarRecentDeposit[]>([]);
+  const recentTransactionsSectionReference = useRef<HTMLDivElement | null>(null);
 
   const formattedAmount = useMemo(() => formatCurrency(amountValue), [amountValue]);
   const formattedToken = useMemo(() => formatToken(amountValue), [amountValue]);
@@ -338,6 +340,23 @@ function DepositHomePageContent() {
       window.clearInterval(countdownIntervalIdentifier);
     };
   }, [currentDepositStatus, paymentExpiredAt]);
+
+  /**
+   * Hàm đồng bộ trạng thái cuộn nền khi menu mobile mở.
+   * Mục đích: tránh nền phía sau tiếp tục cuộn làm trải nghiệm menu bị lệch.
+   */
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      document.body.style.overflow = '';
+      return;
+    }
+
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
 
 
   const sidebarRecentTransactions = useMemo<TransactionItem[]>(() => {
@@ -640,6 +659,47 @@ function DepositHomePageContent() {
   };
 
   /**
+   * Hàm mở menu mobile.
+   * Mục đích: hiển thị nhóm thông tin sidebar trên điện thoại khi người dùng bấm nút Menu.
+   */
+  const handleOpenMobileMenu = useCallback(() => {
+    setIsMobileMenuOpen(true);
+  }, []);
+
+  /**
+   * Hàm đóng menu mobile.
+   * Mục đích: thu gọn drawer mobile và trả lại không gian thao tác cho màn hình chính.
+   */
+  const handleCloseMobileMenu = useCallback(() => {
+    setIsMobileMenuOpen(false);
+  }, []);
+
+  /**
+   * Hàm điều hướng về trang tổng quan.
+   * Mục đích: đưa người dùng mobile quay về trang chủ từ bottom navigation.
+   */
+  const handleNavigateToOverview = useCallback(() => {
+    router.push('/');
+  }, [router]);
+
+  /**
+   * Hàm điều hướng sang trang dự án từ thiện.
+   * Mục đích: mở danh sách dự án có sẵn mà không thay đổi luồng nghiệp vụ của trang deposit.
+   */
+  const handleNavigateToProjects = useCallback(() => {
+    router.push('/#projects');
+  }, [router]);
+
+  /**
+   * Hàm cuộn tới khu vực lịch sử giao dịch gần đây.
+   * Mục đích: cho phép người dùng mobile xem nhanh lịch sử ngay trong trang hiện tại.
+   */
+  const handleNavigateToRecentTransactions = useCallback(() => {
+    handleCloseMobileMenu();
+    recentTransactionsSectionReference.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [handleCloseMobileMenu]);
+
+  /**
    * Hàm xử lý đăng xuất.
    * Mục đích: xóa session, reset auth state, và chuyển hướng về trang chủ.
    */
@@ -737,19 +797,19 @@ function DepositHomePageContent() {
     return (
       <div
         key={transaction.id}
-        className="flex items-center gap-3 rounded-xl border border-transparent bg-[#F8FAFB] px-3 py-3 transition hover:border-[#0E7C6B]/20 hover:bg-white"
+        className="flex items-start gap-3 rounded-xl border border-transparent bg-[#F8FAFB] px-3 py-3 transition hover:border-[#0E7C6B]/20 hover:bg-white sm:items-center"
       >
         <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#D1FAE5] text-base">💰</div>
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-[#0D1117]">{transaction.title}</div>
           <div className="text-[11px] text-gray-400">{transaction.date}</div>
-          <div className="text-[10px] text-gray-400">
+          <div className="break-all text-[10px] text-gray-400">
             {transaction.explorerUrl ? (
               <a
                 href={transaction.explorerUrl}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex items-center gap-1 text-[#1d4ed8] hover:underline"
+                className="inline-flex max-w-full items-center gap-1 text-[#1d4ed8] hover:underline"
                 title={transaction.rawHash || transaction.hash}
               >
                 <svg className="h-3 w-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -762,7 +822,7 @@ function DepositHomePageContent() {
             )}
           </div>
         </div>
-        <div className="text-right">
+        <div className="flex-shrink-0 text-right">
           <div className="text-sm font-semibold text-[#0E7C6B]">{transaction.amount}</div>
           <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusStyleByType[transaction.status]}`}>
             {statusLabelByType[transaction.status]}
@@ -807,13 +867,13 @@ function DepositHomePageContent() {
         <LoginModal onClose={handleCloseLoginModal} />
       )}
 
-      <main className="min-h-screen bg-[#F8FAFB] text-[#0D1117]">
+      <main className="min-h-screen overflow-x-hidden bg-[#F8FAFB] text-[#0D1117]">
         <div
           className={`fixed top-0 left-0 right-0 z-50 h-[3px] origin-left bg-gradient-to-r from-[#0E7C6B] to-[#1AAE97] transition-transform duration-700 ${isProgressBarRunning ? 'scale-x-100' : 'scale-x-0'
             }`}
         />
 
-        <div className="flex">
+        <div className="flex min-w-0">
           <aside className="hidden h-screen w-[240px] flex-col overflow-y-auto bg-[#0D1117] pb-6 text-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-40 lg:flex">
             <Link href="/" className="flex items-center gap-3 border-b border-white/10 px-6 py-6">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0E7C6B] shadow-lg">
@@ -866,37 +926,127 @@ function DepositHomePageContent() {
             </div>
           </aside>
 
-          <section className="flex-1 px-4 pb-16 pt-8 lg:ml-[240px] lg:px-10">
+          {isMobileMenuOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="Đóng menu"
+                onClick={handleCloseMobileMenu}
+                className="fixed inset-0 z-40 bg-black/45 lg:hidden"
+              />
+              <aside className="fixed inset-y-0 left-0 z-50 flex w-[88vw] max-w-[320px] flex-col overflow-y-auto bg-[#0D1117] pb-6 text-white shadow-2xl lg:hidden">
+                <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
+                  <Link href="/" onClick={handleCloseMobileMenu} className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0E7C6B] shadow-lg">
+                      ❤
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-lg font-extrabold">DCP</div>
+                      <div className="text-[10px] text-white/50">Decentralized Charity</div>
+                    </div>
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={handleCloseMobileMenu}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-sm text-white/80"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="border-b border-white/10 px-5 py-4">
+                  {isSidebarLoading ? (
+                    <div className="text-xs text-white/60">Đang tải dữ liệu tài khoản...</div>
+                  ) : sidebarErrorMessage ? (
+                    <div className="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                      {sidebarErrorMessage}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#0E7C6B] to-[#1AAE97] text-sm font-bold">
+                          {sidebarUserInitials}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold">{sidebarProfile?.fullName || 'Người dùng'}</div>
+                          <div className="truncate text-xs text-white/40">{sidebarWalletAddressDisplay}</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 inline-flex items-center rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-xs font-semibold text-amber-400">
+                        💛 {sidebarProfile?.role || 'DONOR'}
+                      </div>
+                      <div className="mt-4 rounded-xl border border-[#0E7C6B]/40 bg-[#0E7C6B]/15 px-4 py-3">
+                        <div className="text-[10px] uppercase tracking-[0.2em] text-white/50">Số dư Token</div>
+                        <div className="text-xl font-extrabold text-[#1AAE97]">{sidebarTokenBalanceDisplay}</div>
+                        <div className="text-xs text-white/50">Charity Token</div>
+                        <div className="text-xs text-white/40">≈ {sidebarTokenBalanceVndDisplay}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="px-5 py-4">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40">Điều hướng nhanh</div>
+                  <div className="space-y-2 text-sm">
+                    <button
+                      type="button"
+                      onClick={handleCloseMobileMenu}
+                      className="flex w-full items-center justify-between rounded-xl bg-white/5 px-4 py-3 text-left text-white"
+                    >
+                      <span>Tổng quan nạp tiền</span>
+                      <span className="text-[#1AAE97]">Đang mở</span>
+                    </button>
+                    <Link href="/#projects" onClick={handleCloseMobileMenu} className="flex items-center justify-between rounded-xl bg-white/5 px-4 py-3 text-white/80">
+                      <span>Dự án từ thiện</span>
+                      <span>↗</span>
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="mt-auto border-t border-white/10 px-5 pb-5 pt-4 text-sm">
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex w-full items-center justify-center rounded-xl bg-red-500/15 px-4 py-2.5 text-sm font-semibold text-red-400 ring-1 ring-red-400/40 transition hover:bg-red-500/25 hover:text-red-300"
+                  >
+                    Đăng xuất
+                  </button>
+                </div>
+              </aside>
+            </>
+          )}
+
+          <section className="flex-1 px-3 pb-28 pt-5 sm:px-4 sm:pt-8 lg:ml-[240px] lg:px-10 lg:pb-16">
             <div
-              className={`mb-6 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 shadow-sm transition-all ${isConfirmBannerVisible ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0'}`}
+              className={`mb-6 flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 shadow-sm transition-all sm:flex-row sm:items-center sm:justify-between ${isConfirmBannerVisible ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0'}`}
             >
-              <div className="flex items-center gap-2 font-semibold">
+              <div className="flex items-start gap-2 font-semibold sm:items-center">
                 <span className="text-base">✅</span>
                 <span>Thanh toán xác nhận · Token đã được mint</span>
               </div>
-              <button type="button" onClick={handleCloseToast} className="text-xs font-semibold text-emerald-700">
+              <button type="button" onClick={handleCloseToast} className="self-start text-xs font-semibold text-emerald-700 sm:self-auto">
                 Đóng
               </button>
             </div>
-            <div className="mb-7">
-              <div className="flex items-center gap-2 text-xs text-gray-400">
+            <div className="mb-7 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
                 <span>Tổng quan</span>
                 <svg className="h-3 w-3 text-[#E5E7EB]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 6l6 6-6 6" />
                 </svg>
                 <span className="font-medium text-[#0E7C6B]">Nạp tiền</span>
               </div>
-              <h1 className="mt-3 text-3xl font-extrabold">💰 Nạp tiền</h1>
-              <p className="mt-2 text-sm text-gray-400">
+              <h1 className="mt-3 text-2xl font-extrabold sm:text-3xl">💰 Nạp tiền</h1>
+              <p className="mt-2 text-sm leading-6 text-gray-400">
                 Chuyển VNĐ thành Charity Token để bắt đầu quyên góp cho dự án từ thiện
               </p>
 
-              <div className="mt-3 space-y-2">
-                <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs text-gray-600">
+              <div className="mt-3 min-w-0 space-y-2">
+                <div className="break-words rounded-xl border border-gray-200 bg-white px-4 py-3 text-xs text-gray-600">
                   <span className="font-semibold text-[#0D1117]">Order Code:</span>{' '}
                   {currentOrderCode || 'Chưa có'}
                 </div>
-                <div className="rounded-xl border border-[#0E7C6B]/20 bg-[#E6F7F4] px-4 py-3 text-xs text-[#0E7C6B]">
+                <div className="rounded-xl border border-[#0E7C6B]/20 bg-[#E6F7F4] px-4 py-3 text-xs leading-6 text-[#0E7C6B]">
                   {depositStatusMessage}
                   {currentDepositStatus === 'PENDING_PAYMENT' && paymentExpiredAt && (
                     <div className="mt-2 text-[11px] font-semibold text-amber-700">
@@ -924,34 +1074,34 @@ function DepositHomePageContent() {
               </div>
             </div>
 
-            <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+            <div className="grid gap-5 lg:grid-cols-[1fr_340px] lg:gap-6">
               <div className="space-y-5">
-                <div className="rounded-2xl border border-black/5 bg-white px-6 py-6 shadow-sm">
+                <div className="rounded-2xl border border-black/5 bg-white px-4 py-5 shadow-sm sm:px-6 sm:py-6">
                   <div className="mb-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#0E7C6B]">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0E7C6B] text-white">1</span>
                     Nhập số tiền nạp
                   </div>
-                  <div className="flex items-center overflow-hidden rounded-xl border-2 border-[#E5E7EB] bg-white">
-                    <div className="flex h-[72px] w-24 flex-col items-center justify-center bg-[#E6F7F4] text-[#0E7C6B]">
+                  <div className="overflow-hidden rounded-xl border-2 border-[#E5E7EB] bg-white sm:flex sm:items-center">
+                    <div className="flex h-16 w-full flex-col items-center justify-center bg-[#E6F7F4] text-[#0E7C6B] sm:h-[72px] sm:w-24">
                       <div className="text-sm font-bold">VNĐ</div>
                       <div className="text-[10px] opacity-60">Việt Nam Đồng</div>
                     </div>
                     <input
-                      className="h-[72px] flex-1 bg-transparent px-4 text-3xl font-bold outline-none"
+                      className="h-16 w-full bg-transparent px-4 text-2xl font-bold outline-none sm:h-[72px] sm:flex-1 sm:text-3xl"
                       placeholder="0"
                       inputMode="numeric"
                       value={amountValue === 0 ? '' : amountValue.toLocaleString('vi-VN')}
                       onChange={handleAmountInputChange}
                       aria-label="Số tiền nạp"
                     />
-                    <div className="flex w-32 flex-col items-center justify-center">
+                    <div className="flex h-16 w-full flex-col items-center justify-center border-t border-[#E5E7EB] px-4 sm:h-[72px] sm:w-32 sm:border-t-0 sm:border-l sm:border-[#E5E7EB] sm:px-0">
                       <div className={`text-sm font-bold ${amountValue ? 'text-[#0E7C6B]' : 'text-gray-300'}`}>
                         {amountValue ? formattedToken : 'Token'}
                       </div>
                       <div className="text-[10px] text-gray-400">Nhận được</div>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-400">
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-400">
                     <span className="text-[#0E7C6B]">✔</span>
                     Tỷ lệ cố định: <span className="font-medium text-[#0E7C6B]">1 VNĐ = 1 Charity Token</span> · Không phí
                     chuyển đổi
@@ -964,7 +1114,7 @@ function DepositHomePageContent() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-black/5 bg-white px-6 py-6 shadow-sm">
+                <div className="rounded-2xl border border-black/5 bg-white px-4 py-5 shadow-sm sm:px-6 sm:py-6">
                   <div className="mb-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#0E7C6B]">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0E7C6B] text-white">2</span>
                     Kiểm tra ví nhận
@@ -976,7 +1126,7 @@ function DepositHomePageContent() {
                       </span>
                       Smart Account của bạn
                     </div>
-                    <div className="mt-2 font-mono text-sm text-[#0D1117]">
+                    <div className="mt-2 break-all font-mono text-sm text-[#0D1117]">
                       {sidebarProfile?.walletAddress || 'Chưa có địa chỉ ví'}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-2 text-xs font-semibold">
@@ -987,7 +1137,7 @@ function DepositHomePageContent() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-black/5 bg-white px-6 py-6 shadow-sm">
+                <div className="rounded-2xl border border-black/5 bg-white px-4 py-5 shadow-sm sm:px-6 sm:py-6">
                   <div className="mb-4 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#0E7C6B]">
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#0E7C6B] text-white">3</span>
                     Tóm tắt thanh toán
@@ -1020,17 +1170,31 @@ function DepositHomePageContent() {
                     <span className="text-base">Thanh toán bằng PayOS</span>
                     <span className="text-[11px] font-normal text-black/60">Chuyển khoản an toàn, xác nhận nhanh</span>
                   </button>
-                  <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-400">
+                  <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-center text-xs text-gray-400">
                     <span className="text-emerald-500">✔</span> Thanh toán bảo mật qua PayOS · Hỗ trợ tất cả ngân hàng Việt Nam
                   </div>
-                  <div className="bank-logos mt-2 flex flex-wrap justify-center gap-2">
+                  <div className="bank-logos mt-3 flex flex-wrap justify-center gap-2">
                     {trustedBanks.map(renderTrustedBank)}
                   </div>
                 </div>
               </div>
 
               <aside className="space-y-5">
-                <div className="rounded-2xl border border-black/5 bg-white px-5 py-6 shadow-sm">
+                <div className="rounded-2xl border border-[#0E7C6B]/10 bg-[#E6F7F4] px-4 py-5 sm:px-5 sm:py-6">
+                  <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#0E7C6B]">
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="16" x2="12" y2="12" />
+                      <line x1="12" y1="8" x2="12" y2="8" />
+                    </svg>
+                    Thông tin quan trọng
+                  </div>
+                  <div className="space-y-2">
+                    {noteItems.map(renderNoteItem)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-black/5 bg-white px-4 py-5 shadow-sm sm:px-5 sm:py-6">
                   <div className="mb-4 flex items-center justify-between">
                     <div className="text-sm font-semibold text-[#0D1117]">Quy trình nạp tiền</div>
                     <span className="text-xs text-[#0E7C6B]">Realtime</span>
@@ -1040,7 +1204,7 @@ function DepositHomePageContent() {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-black/5 bg-white px-5 py-6 shadow-sm">
+                <div ref={recentTransactionsSectionReference} className="rounded-2xl border border-black/5 bg-white px-4 py-5 shadow-sm sm:px-5 sm:py-6">
                   <div className="mb-4 flex items-center justify-between">
                     <div className="text-sm font-semibold text-[#0D1117]">Giao dịch gần đây</div>
                   </div>
@@ -1059,28 +1223,14 @@ function DepositHomePageContent() {
                     {!isSidebarLoading && !sidebarErrorMessage && sidebarRecentTransactions.map(renderRecentTransaction)}
                   </div>
                 </div>
-
-                <div className="rounded-2xl border border-[#0E7C6B]/10 bg-[#E6F7F4] px-5 py-6">
-                  <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-[#0E7C6B]">
-                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10" />
-                      <line x1="12" y1="16" x2="12" y2="12" />
-                      <line x1="12" y1="8" x2="12" y2="8" />
-                    </svg>
-                    Thông tin quan trọng
-                  </div>
-                  <div className="space-y-2">
-                    {noteItems.map(renderNoteItem)}
-                  </div>
-                </div>
               </aside>
             </div>
           </section>
         </div>
 
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-            <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-6">
+            <div className="max-h-[calc(100vh-3rem)] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-5 text-center shadow-2xl sm:p-8">
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full border border-amber-400/40 bg-amber-100 text-3xl">
                 💳
               </div>
@@ -1088,7 +1238,7 @@ function DepositHomePageContent() {
               <p className="mt-2 text-sm text-gray-400">
                 Bạn sẽ được chuyển đến cổng thanh toán an toàn. Hoàn tất thanh toán và quay lại DCP.
               </p>
-              <div className="mt-5 flex items-center justify-between rounded-xl bg-[#E6F7F4] px-4 py-3 text-sm">
+              <div className="mt-5 flex flex-col gap-1 rounded-xl bg-[#E6F7F4] px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span className="text-gray-500">Số tiền thanh toán</span>
                 <span className="font-semibold text-[#0E7C6B]">{formattedAmount}</span>
               </div>
@@ -1113,8 +1263,8 @@ function DepositHomePageContent() {
         )}
 
         {isToastOpen && (
-          <div className="fixed bottom-8 right-6 z-50 w-[360px] rounded-2xl border-l-4 border-emerald-500 bg-white px-5 py-4 shadow-2xl">
-            <div className="flex items-center justify-between">
+          <div className="fixed bottom-24 left-3 right-3 z-50 rounded-2xl border-l-4 border-emerald-500 bg-white px-4 py-4 shadow-2xl sm:bottom-8 sm:left-auto sm:right-6 sm:w-[360px] sm:px-5">
+            <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="text-sm font-bold">✅ Nạp tiền thành công!</div>
               <button type="button" onClick={handleCloseToast} className="h-6 w-6 rounded-full bg-gray-100 text-xs">
                 ✕
@@ -1123,7 +1273,7 @@ function DepositHomePageContent() {
             <p className="mt-2 text-xs text-gray-500">Token đã được mint vào ví của bạn</p>
             <div className="mt-3 text-lg font-extrabold text-[#0E7C6B]">+{formattedToken}</div>
             <div className="text-xs text-gray-400">Số dư mới: {sidebarTokenBalanceDisplay} Token</div>
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row">
               <button type="button" className="flex-1 rounded-lg bg-[#0E7C6B] py-2 text-xs font-semibold text-white">
                 Quyên góp ngay →
               </button>
@@ -1134,24 +1284,24 @@ function DepositHomePageContent() {
           </div>
         )}
 
-        <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-gray-200 bg-white/95 px-4 py-3 text-[10px] text-gray-400 backdrop-blur lg:hidden">
-          <button type="button" className="flex flex-col items-center gap-1 text-gray-400">
+        <nav className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-gray-200 bg-white/95 px-2 py-3 text-[10px] text-gray-400 backdrop-blur lg:hidden">
+          <button type="button" onClick={handleOpenMobileMenu} className="flex flex-col items-center gap-1 text-gray-400">
             <span className="text-base">☰</span>
             Menu
           </button>
-          <button type="button" className="flex flex-col items-center gap-1 text-gray-400">
+          <button type="button" onClick={handleNavigateToOverview} className="flex flex-col items-center gap-1 text-gray-400">
             <span className="text-base">🏠</span>
-            Tổng quan
+            Trang chủ
           </button>
           <button type="button" className="flex flex-col items-center gap-1 text-[#0E7C6B]">
             <span className="text-base">💳</span>
             Nạp tiền
           </button>
-          <button type="button" className="flex flex-col items-center gap-1 text-gray-400">
+          <button type="button" onClick={handleNavigateToProjects} className="flex flex-col items-center gap-1 text-gray-400">
             <span className="text-base">🎁</span>
             Dự án
           </button>
-          <button type="button" className="flex flex-col items-center gap-1 text-gray-400">
+          <button type="button" onClick={handleNavigateToRecentTransactions} className="flex flex-col items-center gap-1 text-gray-400">
             <span className="text-base">🧾</span>
             Lịch sử
           </button>

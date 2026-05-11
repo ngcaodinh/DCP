@@ -59,8 +59,8 @@ export default function Topbar({
   const hasUnreadNotification = notificationCount > 0;
 
   return (
-    <header className="sticky inset-x-0 top-0 z-20 m-0 flex h-16 items-center justify-between border-b border-emerald-900/15 bg-white px-4 lg:px-7">
-      <div className="flex items-center gap-2.5">
+    <header className="sticky inset-x-0 top-0 z-20 m-0 flex h-16 items-center justify-between border-b border-emerald-900/15 bg-white px-4 lg:z-10 lg:px-7">
+      <div className="min-w-0 flex items-center gap-2.5">
         <button
           type="button"
           onClick={onOpenMobileMenu}
@@ -69,14 +69,14 @@ export default function Topbar({
         >
           ☰
         </button>
-        <p className="text-[12.5px] font-medium leading-none text-slate-500">
+        <p className="max-w-[calc(100vw-136px)] truncate text-[12.5px] font-medium leading-none text-slate-500 sm:max-w-none">
           <span>DCP</span>
           <span className="mx-1.5 inline-block text-slate-400">›</span>
           <span className="font-semibold text-slate-900">{breadcrumbTitle}</span>
         </p>
       </div>
 
-      <div className="flex items-center gap-3.5">
+      <div className="shrink-0 flex items-center gap-3.5">
         <button
           type="button"
           onClick={onOpenNotification}

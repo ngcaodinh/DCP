@@ -193,6 +193,7 @@ export default function OrganizationsPageView() {
   const [activePage, setActivePage] = useState<OrganizationPageKey>('dashboard');
   const [activeDisbursementTab, setActiveDisbursementTab] = useState<'eligible' | 'pending' | 'history'>('eligible');
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCreateProjectOpen, setIsCreateProjectOpen] = useState(false);
   const [selectedDisbursementProject, setSelectedDisbursementProject] = useState<ProjectSummary | null>(null);
   const [isBankSetupHighlighted, setIsBankSetupHighlighted] = useState(false);
@@ -1023,8 +1024,7 @@ export default function OrganizationsPageView() {
 
   /** Hàm mở menu mobile. Mục đích: giữ tương thích API của Topbar trong khi sidebar hiện tại là desktop cố định. */
   const handleOpenMobileMenu = () => {
-    // Ghi chú logic phức tạp: layout organizations hiện chưa có drawer mobile,
-    // nên tạm thời giữ hàm rỗng để không phá vỡ props contract của Topbar.
+    setIsMobileMenuOpen(true);
   };
 
   /** Hàm chạy guard phân quyền khi component mount. */
@@ -1182,7 +1182,7 @@ export default function OrganizationsPageView() {
   return (
     <main className="min-h-screen bg-[#F8FAFB] text-[#0D1117]">
       <div className="flex">
-        <aside className="fixed left-0 top-0 z-20 flex h-screen w-[248px] flex-col border-r border-[#0F6B5D] bg-gradient-to-b from-[#0E7C6B] via-[#0A5C50] to-[#08473F]">
+        <aside className="fixed left-0 top-0 z-30 hidden h-screen w-[248px] flex-col border-r border-[#0F6B5D] bg-gradient-to-b from-[#0E7C6B] via-[#0A5C50] to-[#08473F] lg:flex">
           <div className="border-b border-white/10 px-5 py-5">
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 shadow-[0_8px_20px_rgba(0,0,0,0.18)] ring-1 ring-white/20">
@@ -1255,7 +1255,7 @@ export default function OrganizationsPageView() {
           </div>
         </aside>
 
-        <section className="ml-[248px] flex min-h-screen flex-1 flex-col">
+        <section className="flex min-h-screen flex-1 flex-col lg:ml-[248px]">
           <Topbar
             breadcrumbTitle={pageTitle}
             userDisplayName={userDisplayName}
@@ -1269,13 +1269,14 @@ export default function OrganizationsPageView() {
             }}
           />
 
-          <div className="p-7">
+          <div className="px-4 py-4 sm:px-5 sm:py-5 lg:p-7">
             {activePage === 'dashboard' ? (
               <DashboardSection {...dashboardSectionProps} />
             ) : null}
             {activePage === 'projects' ? (
               <ProjectsSection
                 createdProjects={createdProjects}
+                raisedAmountByProjectIdMap={new Map(Array.from(rankingItemByProjectIdMap.entries()).map(([projectId, rankingItem]) => [projectId, rankingItem.totalRaisedAmount]))}
                 isProjectsLoading={isProjectsLoading}
                 projectsErrorMessage={projectsErrorMessage}
                 onRetryLoadProjects={loadProjectsFromApi}
@@ -1317,6 +1318,103 @@ export default function OrganizationsPageView() {
         </section>
       </div>
 
+      {isMobileMenuOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            aria-label="Đóng menu điều hướng"
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="absolute inset-0 bg-black/45"
+          />
+          <aside className="relative z-10 flex h-full w-[248px] max-w-[86vw] flex-col border-r border-[#0F6B5D] bg-gradient-to-b from-[#0E7C6B] via-[#0A5C50] to-[#08473F] shadow-2xl">
+            <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 shadow-[0_8px_20px_rgba(0,0,0,0.18)] ring-1 ring-white/20">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-white" fill="currentColor" aria-hidden="true">
+                    <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
+                  </svg>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[15px] font-bold leading-none text-white">DCP</p>
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.12em] text-white/55">Decentralized Charity Platform</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="rounded-lg bg-white/10 px-2.5 py-1.5 text-sm font-semibold text-white"
+              >
+                X
+              </button>
+            </div>
+
+            <div className="border-b border-white/10 px-5 py-4">
+              <p className="text-xs font-semibold text-white">Quỹ Hy Vọng Xanh</p>
+              <p className="mt-1 text-[10px] text-[#4ADE80]">● Đã xác minh KYC</p>
+            </div>
+
+            <div className="overflow-y-auto px-1 pb-4">
+              <div className="px-4 py-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">CHÍNH</div>
+              <div className="space-y-1 px-3">
+                {primaryNavigationItems.map(item => (
+                  <SidebarItem
+                    key={`mobile-${item.label}`}
+                    item={item}
+                    activePage={activePage}
+                    onSelectPage={page => {
+                      handleSelectPage(page);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    onTriggerAction={action => {
+                      handleSidebarAction(action);
+                      setIsMobileMenuOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div className="px-4 py-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">TÀI CHÍNH</div>
+              <div className="space-y-1 px-3">
+                {financeNavigationItems.map(item => (
+                  <SidebarItem
+                    key={`mobile-${item.label}`}
+                    item={item}
+                    activePage={activePage}
+                    onSelectPage={page => {
+                      handleSelectPage(page);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    onTriggerAction={action => {
+                      handleSidebarAction(action);
+                      setIsMobileMenuOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div className="px-4 py-4 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/45">HỆ THỐNG</div>
+              <div className="space-y-1 px-3">
+                {systemNavigationItemsWithNotificationState.map(item => (
+                  <SidebarItem
+                    key={`mobile-${item.label}`}
+                    item={item}
+                    activePage={activePage}
+                    onSelectPage={page => {
+                      handleSelectPage(page);
+                      setIsMobileMenuOpen(false);
+                    }}
+                    onTriggerAction={action => {
+                      handleSidebarAction(action);
+                      setIsMobileMenuOpen(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       {isNotificationOpen ? (
         <NotificationDropdown
           notificationItemList={notificationItemList}
@@ -1335,7 +1433,7 @@ export default function OrganizationsPageView() {
             setIsNotificationOpen(true);
             void loadNotificationsFromApi();
           }}
-          className="fixed right-6 top-20 z-50 w-[360px] max-w-[calc(100vw-32px)] rounded-2xl border border-[#D1FAE5] bg-white p-4 text-left shadow-[0_18px_55px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_65px_rgba(15,23,42,0.22)]"
+          className="fixed left-3 right-3 top-[72px] z-50 w-auto rounded-2xl border border-[#D1FAE5] bg-white p-3 text-left shadow-[0_18px_55px_rgba(15,23,42,0.18)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_65px_rgba(15,23,42,0.22)] sm:left-auto sm:right-6 sm:top-20 sm:w-[360px] sm:max-w-[calc(100vw-32px)] sm:p-4"
         >
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#ECFDF5] text-lg" aria-hidden="true">

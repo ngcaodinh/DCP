@@ -1,4 +1,4 @@
-import { findUserById } from '../models/authModel';
+import { findUserById, findUsersByWalletAddressList, type AuthUser } from '../models/authModel';
 import { findLatestDisbursements, type DisbursementRecord } from '../models/disbursementModel';
 import { findDonations, type DonationRecord } from '../models/donationModel';
 import { findAllProjectsByProjectIdList, type ProjectRecord } from '../models/projectModel';
@@ -8,6 +8,7 @@ export type LiveFeedTransactionType = 'donation' | 'disbursement';
 export type LiveFeedTransactionItem = {
   id: string;
   type: LiveFeedTransactionType;
+  displayName: string;
   transactionHash: string;
   projectId: string;
   projectName: string;
@@ -69,15 +70,18 @@ async function createOrganizationNameMap(organizationIdList: string[]): Promise<
 function mapDonationRecordToLiveFeedItem(
   donationRecord: DonationRecord,
   projectByProjectIdMap: Map<string, ProjectRecord>,
-  organizationNameByIdMap: Map<string, string>
+  organizationNameByIdMap: Map<string, string>,
+  userByWalletAddressMap: Map<string, AuthUser>
 ): LiveFeedTransactionItemWithSortValue {
   const projectRecord = projectByProjectIdMap.get(donationRecord.projectId);
   const occurredAtDate = new Date(donationRecord.timestamp);
   const occurredAtTimestamp = occurredAtDate.getTime();
+  const donorUser = userByWalletAddressMap.get(String(donationRecord.donorAddress || '').toLowerCase());
 
   return {
     id: `donation-${donationRecord.transactionHash}`,
     type: 'donation',
+    displayName: donorUser?.fullName || 'Nhà hảo tâm',
     transactionHash: donationRecord.transactionHash,
     projectId: donationRecord.projectId,
     projectName: projectRecord?.name || donationRecord.projectId,
@@ -118,6 +122,7 @@ function mapDisbursementRecordToLiveFeedItem(
   return {
     id: `disbursement-${disbursementRecord.requestId}-${transactionHash || occurredAtTimestamp}`,
     type: 'disbursement',
+    displayName: organizationNameByIdMap.get(disbursementRecord.organizationId) || 'Đơn vị giải ngân',
     transactionHash,
     projectId: disbursementRecord.projectId,
     projectName: projectRecord?.name || disbursementRecord.projectId,
@@ -141,6 +146,9 @@ export async function getPublicLiveFeedTransactionList(limitCount: number): Prom
   ]);
 
   const eligibleDisbursementRecordList = disbursementRecordList.filter(isEligibleDisbursementForLiveFeed);
+  const donorWalletAddressList = Array.from(
+    new Set(donationRecordList.map(donationRecord => String(donationRecord.donorAddress || '').toLowerCase()).filter(Boolean))
+  );
   const projectIdList = Array.from(
     new Set([
       ...donationRecordList.map(donationRecord => donationRecord.projectId),
@@ -149,13 +157,15 @@ export async function getPublicLiveFeedTransactionList(limitCount: number): Prom
   );
   const projectList = await findAllProjectsByProjectIdList(projectIdList);
   const projectByProjectIdMap = createProjectMap(projectList);
+  const donorUserList = await findUsersByWalletAddressList(donorWalletAddressList);
+  const userByWalletAddressMap = new Map(donorUserList.map(userItem => [String(userItem.walletAddress || '').toLowerCase(), userItem]));
   const organizationNameByIdMap = await createOrganizationNameMap([
     ...projectList.map(projectItem => projectItem.organizationId),
     ...eligibleDisbursementRecordList.map(disbursementRecord => disbursementRecord.organizationId)
   ]);
 
   const liveFeedTransactionItemList = [
-    ...donationRecordList.map(donationRecord => mapDonationRecordToLiveFeedItem(donationRecord, projectByProjectIdMap, organizationNameByIdMap)),
+    ...donationRecordList.map(donationRecord => mapDonationRecordToLiveFeedItem(donationRecord, projectByProjectIdMap, organizationNameByIdMap, userByWalletAddressMap)),
     ...eligibleDisbursementRecordList.map(disbursementRecord => mapDisbursementRecordToLiveFeedItem(disbursementRecord, projectByProjectIdMap, organizationNameByIdMap))
   ];
 

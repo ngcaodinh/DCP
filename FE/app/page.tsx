@@ -50,6 +50,11 @@ type HomeDonationCampaignDetail = {
   deadline?: string;
 };
 
+type HomeDonationCampaignSummary = {
+  projectId: string;
+  donatedAmount: number;
+};
+
 
 
 
@@ -83,17 +88,17 @@ type RankingSnapshotResponse = {
 type TransactionItem = {
   id: string;
   type: 'donation' | 'disbursement';
-  hash: string;
+  displayName: string;
   project: string;
   amount: string;
   time: string;
   amountColor?: string;
-  explorerUrl: string | null;
 };
 
 type LiveFeedApiTransactionItem = {
   id: string;
   type: 'donation' | 'disbursement';
+  displayName: string;
   transactionHash: string;
   projectId: string;
   projectName: string;
@@ -142,19 +147,6 @@ const trustItems = [
   { label: '🏆 Dự án hoàn thành', value: '89' }
 ];
 
-/** Hàm rút gọn transaction hash. Mục đích: giữ UI gọn nhưng vẫn giúp người dùng nhận diện giao dịch thật. */
-const formatTransactionHash = (transactionHash: string): string => {
-  if (!transactionHash) {
-    return 'Đang đồng bộ hash';
-  }
-
-  if (transactionHash.length <= 18) {
-    return transactionHash;
-  }
-
-  return `${transactionHash.slice(0, 10)}...${transactionHash.slice(-6)}`;
-};
-
 /** Hàm định dạng thời gian tương đối. Mục đích: hiển thị cảm giác realtime dễ đọc cho live feed homepage. */
 const formatRelativeTime = (occurredAtIso: string): string => {
   const occurredAtDate = new Date(occurredAtIso);
@@ -197,12 +189,11 @@ const mapLiveFeedApiTransactionToViewModel = (transactionItem: LiveFeedApiTransa
   return {
     id: transactionItem.id,
     type: transactionItem.type,
-    hash: formatTransactionHash(transactionItem.transactionHash),
+    displayName: transactionItem.displayName,
     project: `${projectPrefix}${transactionItem.projectName}`,
     amount: `${amountPrefix}${formatCurrencyVnd(transactionItem.amount)}${transactionItem.currencySymbol}`,
     time: formatRelativeTime(transactionItem.occurredAt),
-    amountColor,
-    explorerUrl: transactionItem.explorerUrl
+    amountColor
   };
 };
 
@@ -406,6 +397,7 @@ export default function HomePage() {
     ranking: false
   });
   const [supportProjectList, setSupportProjectList] = useState<HomeSupportProject[]>([]);
+  const [donatedAmountByProjectId, setDonatedAmountByProjectId] = useState<Record<string, number>>({});
   const [supportProjectCoverImageUrlById, setSupportProjectCoverImageUrlById] = useState<Record<string, string>>({});
   const [isSupportProjectsLoading, setIsSupportProjectsLoading] = useState(true);
   const [supportProjectsErrorMessage, setSupportProjectsErrorMessage] = useState('');
@@ -680,6 +672,31 @@ export default function HomePage() {
   useEffect(() => {
     void loadSupportProjectList(false);
   }, [loadSupportProjectList]);
+
+  /** Hàm tải tổng số tiền đã quyên góp theo dự án. Mục đích: bổ sung dữ liệu hiển thị cho card homepage mà không thay đổi nguồn dữ liệu chính hiện tại. */
+  const loadDonatedAmountMap = useCallback(async () => {
+    try {
+      const donationCampaignResponse = await fetchApi<HomeDonationCampaignSummary[]>(buildApiUrl('/donations/campaigns?limit=12'), {
+        method: 'GET',
+        cache: 'no-store'
+      });
+
+      const nextDonatedAmountByProjectId = donationCampaignResponse.data.reduce<Record<string, number>>((projectAmountMap, campaignItem) => {
+        projectAmountMap[campaignItem.projectId] = Number(campaignItem.donatedAmount || 0);
+        return projectAmountMap;
+      }, {});
+
+      setDonatedAmountByProjectId(nextDonatedAmountByProjectId);
+    } catch (error) {
+      // Ghi chú logic phức tạp: đây là dữ liệu phụ cho UI nên nếu lỗi thì không làm hỏng luồng homepage hiện tại.
+      console.error('Fetch donated amount map failed.', error);
+      setDonatedAmountByProjectId({});
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDonatedAmountMap();
+  }, [loadDonatedAmountMap]);
 
   useEffect(() => {
     let isCoverResolveCancelled = false;
@@ -1167,7 +1184,12 @@ export default function HomePage() {
       const refreshedCampaignDetailPromise = loadDonationCampaignDetail(selectedDonationCampaignDetail.projectId);
       const refreshedBalancePromise = loadUserTokenBalance();
 
-      await Promise.all([loadSupportProjectList(isShowingAllSupportProjects), refreshedCampaignDetailPromise, refreshedBalancePromise]);
+      await Promise.all([
+        loadSupportProjectList(isShowingAllSupportProjects),
+        loadDonatedAmountMap(),
+        refreshedCampaignDetailPromise,
+        refreshedBalancePromise
+      ]);
 
       const refreshedCampaignDetail = await refreshedCampaignDetailPromise;
       if (refreshedCampaignDetail) {
@@ -1467,6 +1489,7 @@ export default function HomePage() {
             supportProjectList.map((project, projectIndex) => {
               const projectVisual = getProjectVisualByIndex(projectIndex);
               const projectCoverImageUrl = supportProjectCoverImageUrlById[project.projectId] || '';
+              const donatedAmount = donatedAmountByProjectId[project.projectId] ?? 0;
               const isDonationAvailable = isSupportProjectDonationAvailable(project);
               const projectCoverStyle = projectCoverImageUrl
                 ? { backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${projectCoverImageUrl})` }
@@ -1491,11 +1514,12 @@ export default function HomePage() {
                     <div className="pcard-desc">{project.description}</div>
                     <div className="progress-wrap">
                       <div className="progress-label">
-                        <span className="progress-value">Mục tiêu {formatCurrencyVnd(project.goalAmount)}₫</span>
+                        <span className="progress-value">Mục tiêu {formatCurrencyVnd(project.goalAmount)}VND</span>
                         <span>Cập nhật {formatUpdatedTime(project.updatedAt)}</span>
                       </div>
                     </div>
-                    <div className="pcard-meta">
+                    <div className="pcard-meta justify-between">
+                      <span className="font-medium text-[#334155]">Đã quyên góp: {formatCurrencyVnd(donatedAmount)} VND</span>
                       <span>Trạng thái: {getPublicProjectStatusLabel(project.status)}</span>
                     </div>
                     <div className="pcard-actions">
@@ -1930,13 +1954,7 @@ export default function HomePage() {
                   <div className="tx-item" key={transaction.id}>
                     <div className={`tx-dot ${transaction.type}`} />
                     <div className="tx-info">
-                      {transaction.explorerUrl ? (
-                        <a href={transaction.explorerUrl} target="_blank" rel="noreferrer" className="tx-hash hover:underline">
-                          {transaction.hash}
-                        </a>
-                      ) : (
-                        <div className="tx-hash">{transaction.hash}</div>
-                      )}
+                      <div className="tx-hash">{transaction.displayName}</div>
                       <div className="tx-project">{transaction.project}</div>
                     </div>
                     <div>

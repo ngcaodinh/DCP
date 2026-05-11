@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+﻿import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { ProgressBar, SectionCard, StatusBadge } from './OrganizationUiParts';
 import { transparencyTransactionRows } from './mockData';
 import { ApiErrorDetail, ApiErrorResponse, fetchApi, buildApiUrl } from '@/app/utils/apiClient';
@@ -37,6 +37,7 @@ type CreateProjectModalProps = {
 
 type ProjectsSectionProps = {
   createdProjects: ProjectSummary[];
+  raisedAmountByProjectIdMap?: Map<string, number>;
   isProjectsLoading?: boolean;
   projectsErrorMessage?: string | null;
   onRetryLoadProjects?: () => void;
@@ -224,9 +225,18 @@ function buildStatusPresentation(status: ProjectSummary['status']): {
 }
 
 /** Hàm chuyển dữ liệu dự án vừa tạo sang dạng card hiển thị. Mục đích: đồng bộ layout UI với dữ liệu API. */
-function mapCreatedProjectToCardView(project: ProjectSummary, index: number): ProjectCardView {
+function mapCreatedProjectToCardView(
+  project: ProjectSummary,
+  index: number,
+  raisedAmountByProjectIdMap: Map<string, number>
+): ProjectCardView {
   const statusPresentation = buildStatusPresentation(project.status);
   const deadlineDate = new Date(project.deadline);
+  const raisedAmountValue = raisedAmountByProjectIdMap.get(project.projectId) || 0;
+  const progressPercent =
+    project.goalAmount > 0
+      ? Math.min(100, Math.round((raisedAmountValue / project.goalAmount) * 100))
+      : 0;
 
   // Logic này tính số ngày còn lại để hiển thị nhanh tình trạng deadline trong footer của card.
   const remainingDays = Math.max(0, Math.ceil((deadlineDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
@@ -242,9 +252,9 @@ function mapCreatedProjectToCardView(project: ProjectSummary, index: number): Pr
     statusStyle: statusPresentation.statusStyle,
     name: project.name,
     description: project.description,
-    progressLabel: '0%',
-    progressPercent: 0,
-    raisedAmount: '0 ₫',
+    progressLabel: `${progressPercent}%`,
+    progressPercent,
+    raisedAmount: `${formatCurrencyFromNumber(raisedAmountValue)} ₫`,
     goalAmount: `${formatCurrencyFromNumber(project.goalAmount)} ₫`,
     footerMeta: ['👥 0', remainingLabel, '🏅 Chờ xếp hạng'],
     statusKey: statusPresentation.statusKey,
@@ -775,7 +785,7 @@ export function DashboardSection({
                       value={selectedDonationHistoryPageSize}
                       onChange={event => handleChangeDonationHistoryPageSize(Number(event.target.value))}
                       disabled={isDonationHistoryLoading}
-                      className="h-10 w-full min-w-[112px] rounded-xl border border-[#99f6e4] bg-[#f0fdfa] px-3 text-xs font-semibold text-[#0f766e] outline-none transition hover:border-[#5eead4] hover:bg-[#ccfbf1] focus-visible:ring-2 focus-visible:ring-[#14b8a6] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#f8fafc] disabled:text-[#94a3b8]"
+                      className="h-10 w-full rounded-xl border border-[#99f6e4] bg-[#f0fdfa] px-3 text-xs font-semibold text-[#0f766e] outline-none transition hover:border-[#5eead4] hover:bg-[#ccfbf1] focus-visible:ring-2 focus-visible:ring-[#14b8a6] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:border-[#d1d5db] disabled:bg-[#f8fafc] disabled:text-[#94a3b8] sm:min-w-[112px]"
                     >
                       {donationHistoryPageSizeOptionList.map(pageSizeOption => (
                         <option key={pageSizeOption} value={pageSizeOption}>
@@ -797,7 +807,7 @@ export function DashboardSection({
                     </button>
 
                     {/* Ghi chú logic UI: aria-live giúp trình đọc màn hình nhận biết trang lịch sử đã thay đổi mà không cần tải lại toàn bộ trang. */}
-                    <div aria-live="polite" className="flex h-10 min-w-[150px] items-center justify-center rounded-xl border border-[#99f6e4] bg-[#ecfeff] px-3 text-center text-xs font-semibold text-[#0f766e]">
+                    <div aria-live="polite" className="flex h-10 items-center justify-center rounded-xl border border-[#99f6e4] bg-[#ecfeff] px-3 text-center text-xs font-semibold text-[#0f766e] sm:min-w-[150px]">
                       <span className={`mr-2 inline-block h-2.5 w-2.5 rounded-full ${isDonationHistoryLoading ? 'animate-pulse bg-[#0d9488]' : 'bg-[#10b981]'}`} />
                       {isDonationHistoryLoading ? 'Đang tải...' : `Trang ${donationHistoryCurrentPage} / ${donationHistoryTotalPages}`}
                     </div>
@@ -866,6 +876,7 @@ export function DashboardSection({
 /** Hàm render section Projects. Mục đích: hiển thị danh sách dự án và cho phép submit dự án chờ duyệt. */
 export function ProjectsSection({
   createdProjects,
+  raisedAmountByProjectIdMap = new Map<string, number>(),
   isProjectsLoading = false,
   projectsErrorMessage = null,
   onRetryLoadProjects,
@@ -889,8 +900,8 @@ export function ProjectsSection({
   const [updateProjectErrorMessage, setUpdateProjectErrorMessage] = useState<string | null>(null);
 
   const mappedCreatedProjects = useMemo(
-    () => createdProjects.map((project, projectIndex) => mapCreatedProjectToCardView(project, projectIndex)),
-    [createdProjects]
+    () => createdProjects.map((project, projectIndex) => mapCreatedProjectToCardView(project, projectIndex, raisedAmountByProjectIdMap)),
+    [createdProjects, raisedAmountByProjectIdMap]
   );
 
   const mergedProjects = mappedCreatedProjects;
@@ -1120,7 +1131,7 @@ export function ProjectsSection({
     <SectionCard title="Dự án của tổ chức" bodyClassName="p-0">
       <div className="flex flex-wrap items-center gap-2 border-b border-[#F3F4F6] p-4">
         <input
-          className="min-w-[220px] flex-1 rounded border border-[#E5E7EB] bg-[#F3F4F6] px-3 py-2 text-xs"
+          className="w-full flex-1 rounded border border-[#E5E7EB] bg-[#F3F4F6] px-3 py-2 text-xs sm:min-w-[220px]"
           placeholder="Tìm dự án theo tên..."
           value={searchKeyword}
           onChange={event => setSearchKeyword(event.target.value)}
@@ -1132,7 +1143,7 @@ export function ProjectsSection({
           type="button"
           onClick={onOpenCreateProjectModal}
           disabled={!isCreateProjectAllowed}
-          className="rounded-[8px] bg-[#0E7C6B] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full rounded-[8px] bg-[#0E7C6B] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
         >
           ➕ Tạo dự án
         </button>
@@ -1986,14 +1997,42 @@ export function TransparencySection() {
   return (
     <SectionCard title="Lịch sử giao dịch on-chain" bodyClassName="p-0">
       <div className="flex flex-wrap gap-2 border-b border-[#F3F4F6] p-4">
-        <input className="min-w-[200px] flex-1 rounded border border-[#E5E7EB] bg-[#F3F4F6] px-3 py-2 text-xs" placeholder="Tìm theo hash hoặc ví..." />
-        <select className="rounded border border-[#E5E7EB] px-2 py-2 text-xs">
+        <input className="w-full flex-1 rounded border border-[#E5E7EB] bg-[#F3F4F6] px-3 py-2 text-xs sm:min-w-[200px]" placeholder="Tìm theo hash hoặc ví..." />
+        <select className="w-full rounded border border-[#E5E7EB] px-2 py-2 text-xs sm:w-auto">
           <option>Tất cả loại</option>
         </select>
-        <button type="button" className="rounded border border-[#E5E7EB] px-3 py-2 text-xs">⤓ Export CSV</button>
+        <button type="button" className="w-full rounded border border-[#E5E7EB] px-3 py-2 text-xs sm:w-auto">⤓ Export CSV</button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="space-y-3 p-4 md:hidden">
+        {transparencyTransactionRows.map(row => (
+          <div key={row.hash} className="rounded-[12px] border border-[#E5E7EB] bg-white p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-[#111827]">{row.time}</p>
+                <p className="mt-1 break-all text-xs text-[#2563EB]">{row.hash}</p>
+              </div>
+              <StatusBadge label={row.status} className={row.statusStyle} />
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-[#374151]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[#6B7280]">Loại</span>
+                <StatusBadge label={row.type} className={row.typeStyle} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[#6B7280]">Số tiền</span>
+                <span className="break-words text-right font-semibold text-[#111827]">{row.amount}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[#6B7280]">Nguồn</span>
+                <span className="break-all text-right text-[#111827]">{row.sender}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-[#F3F4F6] text-xs uppercase text-[#6B7280]">
             <tr>
@@ -2279,7 +2318,7 @@ function BankSettingsPanel({
               <span className="ml-auto text-xs text-[#16A34A]">✓ Xác nhận</span>
             </div>
             {/* Body: 2 cột */}
-            <div className="grid grid-cols-2 divide-x divide-[#D1FAE5]">
+            <div className="grid grid-cols-1 divide-y divide-[#D1FAE5] sm:grid-cols-2 sm:divide-x sm:divide-y-0">
               <div className="px-4 py-3 space-y-3">
                 <div>
                   <p className="text-[10px] font-medium uppercase tracking-wider text-[#6B7280] mb-0.5">Ngân hàng</p>
@@ -2834,7 +2873,7 @@ export function NotificationDropdown({
   return (
     <div
       ref={dropdownContainerRef}
-      className="fixed right-4 top-16 z-30 max-h-[calc(100vh-88px)] w-[calc(100vw-32px)] max-w-[420px] overflow-hidden rounded-[18px] border border-[#D1FAE5] bg-white shadow-2xl sm:right-6"
+      className="fixed left-4 right-4 top-16 z-30 max-h-[calc(100vh-88px)] w-auto overflow-hidden rounded-[18px] border border-[#D1FAE5] bg-white shadow-2xl sm:left-auto sm:right-6 sm:w-[calc(100vw-32px)] sm:max-w-[420px]"
     >
       <div className="flex items-center justify-between border-b border-[#D1FAE5] bg-[#F8FFFD] p-4">
         <div className="flex items-center gap-2">
@@ -2879,12 +2918,12 @@ export function NotificationDropdown({
           </div>
         )) : null}
       </div>
-      <div className="flex items-center justify-between gap-3 border-t border-[#D1FAE5] bg-[#F8FFFD] p-3">
+      <div className="flex flex-col items-stretch justify-between gap-3 border-t border-[#D1FAE5] bg-[#F8FFFD] p-3 sm:flex-row sm:items-center">
         <button
           type="button"
           onClick={() => setCurrentNotificationPage(previousPage => Math.max(1, previousPage - 1))}
           disabled={currentNotificationPage <= 1 || isNotificationLoading}
-          className="inline-flex h-9 items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF]"
+          className="inline-flex h-9 w-full items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF] sm:w-auto"
         >
           Trang trước
         </button>
@@ -2895,7 +2934,7 @@ export function NotificationDropdown({
           type="button"
           onClick={() => setCurrentNotificationPage(previousPage => Math.min(totalNotificationPages, previousPage + 1))}
           disabled={currentNotificationPage >= totalNotificationPages || isNotificationLoading}
-          className="inline-flex h-9 items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF]"
+          className="inline-flex h-9 w-full items-center justify-center rounded-xl border border-[#A7F3D0] bg-white px-3 text-xs font-bold text-[#047857] transition hover:bg-[#ECFDF5] disabled:cursor-not-allowed disabled:border-[#E5E7EB] disabled:text-[#9CA3AF] sm:w-auto"
         >
           Trang sau
         </button>

@@ -1,7 +1,7 @@
 import './globals.css';
 import Script from 'next/script';
 import { Be_Vietnam_Pro, Lexend } from 'next/font/google';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import AuthSessionManager from './components/AuthSessionManager';
 
 const beVietnamProFont = Be_Vietnam_Pro({
@@ -124,6 +124,12 @@ export const metadata: Metadata = {
   }
 };
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover'
+};
+
 /**
  * Hàm layout gốc của ứng dụng FE.
  * Mục đích: bọc toàn bộ trang bằng cấu trúc HTML, SEO metadata và font chuẩn Next.js.
@@ -131,7 +137,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <body className={`${beVietnamProFont.variable} ${lexendFont.variable}`}>
+      <body className={`${beVietnamProFont.variable} ${lexendFont.variable} overflow-x-hidden`}>
         <Script
           id="website-structured-data"
           type="application/ld+json"
