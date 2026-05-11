@@ -1283,13 +1283,13 @@ export default function HomePage() {
             <a href="#projects" className="btn-primary">
               Khám phá dự án <span>→</span>
             </a>
-            <a href="#how" className="btn-play">
+            <a href="https://www.youtube.com/watch?v=I6lp2qo-18k" className="btn-play">
               <div className="play-circle">
                 <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                   <path d="M4 2.5l7 4.5-7 4.5V2.5z" fill="#0E7C6B" />
                 </svg>
               </div>
-              Xem cách hoạt động
+              Xem cách quyên góp
             </a>
           </div>
         </div>
@@ -1371,6 +1371,7 @@ export default function HomePage() {
             {
               icon: '💳',
               title: 'Nạp tiền VNĐ',
+              href: '/deposit',
               description:
                 'Chuyển khoản qua PayOS — hệ thống tự động mint Charity Token vào ví Smart Account của bạn. Tỷ lệ 1₫ = 1 Token.',
               delay: 0
@@ -1378,6 +1379,7 @@ export default function HomePage() {
             {
               icon: '🎯',
               title: 'Chọn & Quyên góp',
+              href: '/#projects',
               description:
                 'Duyệt danh sách dự án được xếp hạng bằng Quadratic Funding, quyên góp Token — giao dịch ghi nhận ngay lên Blockchain.',
               delay: 0.15
@@ -1385,6 +1387,7 @@ export default function HomePage() {
             {
               icon: '🔍',
               title: 'Theo dõi Minh bạch',
+              href: '/#projects',
               description:
                 'Xem lịch sử toàn bộ on-chain bất kỳ lúc nào. Giải ngân cần 2/3 admin ký trên Smart Contract — không ai có thể tự ý sử dụng.',
               delay: 0.3
@@ -1398,9 +1401,11 @@ export default function HomePage() {
               data-group="steps"
             >
               <div className="step-icon-wrapper">
-                <div className="step-icon">
-                  <span>{step.icon}</span>
-                </div>
+                <a href={step.href} aria-label={step.title} className="block">
+                  <div className="step-icon">
+                    <span>{step.icon}</span>
+                  </div>
+                </a>
                 <div className="step-num">{index + 1}</div>
               </div>
               <h3>{step.title}</h3>
@@ -1809,7 +1814,7 @@ export default function HomePage() {
                     </div>
                     <div className="mt-3 rounded-lg border border-[#e5e7eb] bg-white p-3">
                       <h5 className="text-sm font-semibold text-[#0e7c6b]">Mô tả dự án</h5>
-                      <p className="mt-1.5 text-sm leading-5 text-[#374151] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:5] overflow-hidden">
+                      <p className="mt-1.5 text-sm leading-5 text-[#374151] whitespace-pre-line">
                         {selectedProjectDetail.description}
                       </p>
                       <div className="mt-3 flex flex-col gap-2 border-t border-[#eef2f7] pt-3">
