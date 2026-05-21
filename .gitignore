@@ -77,3 +77,6 @@ dcp-terms-of-service.md
 docs
 # môi trường framework kiểm thử tự động bằng NUnit + Selenium.
 E2E.Tests
+
+# 
+.cursor/

@@ -404,6 +404,7 @@ export default function HomePage() {
   const [isShowingAllSupportProjects, setIsShowingAllSupportProjects] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [isProjectDetailModalVisible, setIsProjectDetailModalVisible] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isProjectDetailLoading, setIsProjectDetailLoading] = useState(false);
   const [projectDetailErrorMessage, setProjectDetailErrorMessage] = useState('');
   const [selectedProjectDetail, setSelectedProjectDetail] = useState<HomeSupportProjectDetail | null>(null);
@@ -1106,6 +1107,19 @@ export default function HomePage() {
     };
   }, [isDonationModalVisible, isDonationSubmitting]);
 
+  useEffect(() => {
+    const handleEscapeForMobileMenu = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isMobileMenuOpen) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscapeForMobileMenu);
+    return () => {
+      window.removeEventListener('keydown', handleEscapeForMobileMenu);
+    };
+  }, [isMobileMenuOpen]);
+
   /** Hàm kiểm tra dữ liệu donation trước khi mở xác nhận. Mục đích: gom validate để tái sử dụng cho nhiều bước submit. */
   const validateDonationInput = (): number | null => {
     const normalizedAmount = Number(donationAmountInput);
@@ -1278,8 +1292,180 @@ export default function HomePage() {
           <a href="/deposit" className="btn-amber">
             💰 Nạp tiền
           </a>
+          <button
+            type="button"
+            className={`mobile-hamburger${isMobileMenuOpen ? ' is-open' : ''}`}
+            aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="mobile-menu"
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          >
+            <svg
+              className="mobile-hamburger-svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <g className="hamburger-bars">
+                <path d="M4 7H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M4 12H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M4 17H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+              </g>
+              <g className="hamburger-close">
+                <path d="M5 5L19 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                <path d="M19 5L5 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+              </g>
+            </svg>
+          </button>
         </div>
       </nav>
+
+      {isMobileMenuOpen && (
+        <>
+          <div
+            className="mobile-menu-overlay"
+            onClick={() => setIsMobileMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            id="mobile-menu"
+            className="mobile-menu-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Menu điều hướng"
+          >
+            <div className="mobile-menu-header">
+              <span className="logo-text">DCP</span>
+              <button
+                type="button"
+                className="mobile-menu-close"
+                aria-label="Đóng menu"
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                  <path d="M2 2L16 16M16 2L2 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <ul className="mobile-menu-links">
+              <li>
+                <a href="#projects" onClick={() => setIsMobileMenuOpen(false)}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path d="M2 6C2 4.9 2.9 4 4 4H7L9 6H16C17.1 6 18 6.9 18 8V14C18 15.1 17.1 16 16 16H4C2.9 16 2 15.1 2 14V6Z" fill="#F59E0B" />
+                    <path d="M2 8H18V14C18 15.1 17.1 16 16 16H4C2.9 16 2 15.1 2 14V8Z" fill="#FBBF24" />
+                    <path d="M10 9V12M8.5 10.5H11.5" stroke="#FEFCE8" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                  Dự án
+                </a>
+              </li>
+              <li>
+                <a href="#ranking" onClick={() => setIsMobileMenuOpen(false)}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <rect x="2" y="12" width="5" height="6" rx="1.5" fill="#B45309" />
+                    <rect x="7.5" y="8" width="5" height="10" rx="1.5" fill="#D97706" />
+                    <rect x="13" y="5" width="5" height="13" rx="1.5" fill="#F59E0B" />
+                    <circle cx="4.5" cy="9.5" r="1.5" fill="#FEFCE8" />
+                    <circle cx="10" cy="5.5" r="1.5" fill="#FEFCE8" />
+                    <circle cx="15.5" cy="2.5" r="1.5" fill="#FEFCE8" />
+                    <path d="M10 2L10.4 3.3H11.7L10.5 4.1L10.9 5.4L10 4.6L9.1 5.4L9.5 4.1L8.3 3.3H9.6L10 2Z" fill="#FEFCE8" />
+                  </svg>
+                  Bảng xếp hạng
+                </a>
+              </li>
+              <li>
+                <a href="#transparency" onClick={() => setIsMobileMenuOpen(false)}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <path d="M10 2L17 5V10C17 13.5 14 16.5 10 18C6 16.5 3 13.5 3 10V5L10 2Z" fill="#0E7C6B" />
+                    <path d="M10 2L17 5V10C17 13.5 14 16.5 10 18C6 16.5 3 13.5 3 10V5L10 2Z" stroke="#0D9488" strokeWidth="1.5" />
+                    <path d="M7 10L9 12L13 8" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Minh bạch
+                </a>
+              </li>
+              <li>
+                <a href="#how" onClick={() => setIsMobileMenuOpen(false)}>
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                    <circle cx="10" cy="10" r="3" stroke="#0E7C6B" strokeWidth="2" />
+                    <path d="M10 2V4.5" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M10 15.5V18" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M2 10H4.5" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M15.5 10H18" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M4.2 4.2L5.8 5.8" stroke="#0D9488" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M14.2 14.2L15.8 15.8" stroke="#0D9488" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M15.8 4.2L14.2 5.8" stroke="#0D9488" strokeWidth="1.8" strokeLinecap="round" />
+                    <path d="M5.8 14.2L4.2 15.8" stroke="#0D9488" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  Cách hoạt động
+                </a>
+              </li>
+            </ul>
+            <div className="mobile-menu-actions">
+              {authenticatedUserName ? (
+                <>
+                  <div className="mobile-menu-user">
+                    <div className="mobile-menu-avatar">
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                        <circle cx="10" cy="7" r="4" fill="#0E7C6B" />
+                        <path d="M2 18C2 14.5 5.5 12 10 12C14.5 12 18 14.5 18 18" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                    <div className="mobile-menu-user-info">
+                      <span className="mobile-menu-user-name" title={authenticatedUserName}>
+                        {authenticatedUserName.length > 14
+                          ? authenticatedUserName.slice(0, 14) + '…'
+                          : authenticatedUserName}
+                      </span>
+                      <span className="mobile-menu-user-badge">Đã đăng nhập</span>
+                    </div>
+                  </div>
+                  <a href="/deposit" className="btn-amber" onClick={() => setIsMobileMenuOpen(false)}>
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                      <path d="M2 5H16C16.55 5 17 5.45 17 6V14C17 14.55 16.55 15 16 15H2C1.45 15 1 14.55 1 14V6C1 5.45 1.45 5 2 5Z" fill="#059669" />
+                      <path d="M2 5H16C16.55 5 17 5.45 17 6V9H1V6C1 5.45 1.45 5 2 5Z" fill="#10B981" />
+                      <rect x="1" y="6" width="16" height="3" fill="#10B981" />
+                      <circle cx="9" cy="12.5" r="3" fill="#34D399" />
+                      <path d="M9 11V14M7.5 12.5H10.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                    Nạp tiền
+                  </a>
+                  <button
+                    type="button"
+                    className="mobile-menu-logout"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      handleHeaderUserLogout();
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M6 3H3C2.45 3 2 3.45 2 4V12C2 12.55 2.45 13 3 13H6" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" />
+                      <path d="M10 11L13 8L10 5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M13 8H5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                    Đăng xuất
+                  </button>
+                </>
+              ) : (
+                <>
+                  <a href="/login" className="btn-ghost" onClick={() => setIsMobileMenuOpen(false)}>
+                    Đăng nhập
+                  </a>
+                  <a href="/deposit" className="btn-amber" onClick={() => setIsMobileMenuOpen(false)}>
+                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+                      <path d="M2 5H16C16.55 5 17 5.45 17 6V14C17 14.55 16.55 15 16 15H2C1.45 15 1 14.55 1 14V6C1 5.45 1.45 5 2 5Z" fill="#059669" />
+                      <path d="M2 5H16C16.55 5 17 5.45 17 6V9H1V6C1 5.45 1.45 5 2 5Z" fill="#10B981" />
+                      <rect x="1" y="6" width="16" height="3" fill="#10B981" />
+                      <circle cx="9" cy="12.5" r="3" fill="#34D399" />
+                      <path d="M9 11V14M7.5 12.5H10.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                    Nạp tiền
+                  </a>
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <section className="hero" id="home">
         <div className="hero-bg" />
@@ -1344,7 +1530,12 @@ export default function HomePage() {
                 <div className="badge-verified">⛓ Xác minh on-chain</div>
               </div>
               <div className="card-body">
-                <div className="card-org">✅ Ánh Sáng Việt Nam</div>
+                <div className="card-org">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: '#0e7c6b', flexShrink: 0 }}>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Ánh Sáng Việt Nam
+                </div>
                 <div className="card-title">Xây dựng phòng học cho 120 em học sinh dân tộc thiểu số</div>
                 <div className="progress-wrap">
                   <div className="progress-label">
@@ -1509,7 +1700,12 @@ export default function HomePage() {
                     <div className="pcard-status status-active">● {getPublicProjectStatusLabel(project.status)}</div>
                   </div>
                   <div className="pcard-body">
-                    <div className="pcard-org">✅ Dự án đã xác minh</div>
+                    <div className="pcard-org">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: '#0e7c6b', flexShrink: 0 }}>
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                      Dự án đã xác minh
+                    </div>
                     <div className="pcard-title">{project.name}</div>
                     <div className="pcard-desc">{project.description}</div>
                     <div className="progress-wrap">
