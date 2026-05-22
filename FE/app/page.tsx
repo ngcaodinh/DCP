@@ -1120,6 +1120,21 @@ export default function HomePage() {
     };
   }, [isMobileMenuOpen]);
 
+  /**
+   * Hàm khóa overflow trên body khi menu mobile mở.
+   * Mục đích: ngăn nền phía sau tiếp tục cuộn hoặc bị dịch chuyển khi drawer menu hiển thị trên mobile.
+   */
+  useEffect(() => {
+    if (!isMobileMenuOpen) {
+      document.body.style.overflow = '';
+      return;
+    }
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileMenuOpen]);
+
   /** Hàm kiểm tra dữ liệu donation trước khi mở xác nhận. Mục đích: gom validate để tái sử dụng cho nhiều bước submit. */
   const validateDonationInput = (): number | null => {
     const normalizedAmount = Number(donationAmountInput);
