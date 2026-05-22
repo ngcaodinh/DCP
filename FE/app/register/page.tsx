@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { persistAuthSession, readAuthSession } from "../utils/authSession";
+import AuthLegalModal from "../components/AuthLegalModal";
 
 declare global {
   interface Window {
@@ -249,6 +250,7 @@ export default function RegisterPage() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [selectedRole, setSelectedRole] = useState<RoleType>(null);
   const [isTermsAccepted, setIsTermsAccepted] = useState<boolean>(false);
+  const [termsError, setTermsError] = useState<string>('');
   const [isInfoCollapsed, setIsInfoCollapsed] = useState<boolean>(false);
   const [isLoadingVisible, setIsLoadingVisible] = useState<boolean>(false);
   const [loadingTexts, setLoadingTexts] = useState<LoadingTexts>(defaultLoadingText);
@@ -264,7 +266,6 @@ export default function RegisterPage() {
   const [uploadInfoList, setUploadInfoList] = useState<UploadInfo[]>([]);
   const [isUploadHover, setIsUploadHover] = useState<boolean>(false);
   const [isCopySuccess, setIsCopySuccess] = useState<boolean>(false);
-  const [isTermsShake, setIsTermsShake] = useState<boolean>(false);
 
   const [isRegisterProcessing, setIsRegisterProcessing] = useState<boolean>(false);
   const [registerErrorMessage, setRegisterErrorMessage] = useState<string>("");
@@ -272,6 +273,13 @@ export default function RegisterPage() {
   const [createdWalletAddress, setCreatedWalletAddress] = useState<string>("");
   const [registeredUserEmail, setRegisteredUserEmail] = useState<string>("");
   const [authenticatedRole, setAuthenticatedRole] = useState<AuthenticatedRoleType>(null);
+
+  // State cho modal pháp lý (điều khoản sử dụng / chính sách bảo mật).
+  const [isLegalModalOpen, setIsLegalModalOpen] = useState<boolean>(false);
+  const [legalModalVariant, setLegalModalVariant] = useState<'terms' | 'privacy'>('terms');
+  // Ref cho link đã kích hoạt mở modal (dùng để trả focus khi đóng).
+  const termsLinkRef = useRef<HTMLAnchorElement>(null);
+  const privacyLinkRef = useRef<HTMLAnchorElement>(null);
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:4000";
   const router = useRouter();
@@ -375,6 +383,7 @@ export default function RegisterPage() {
   // Ghi chú: Bật/tắt trạng thái đồng ý điều khoản.
   const handleToggleTerms = () => {
     setIsTermsAccepted((previousState) => !previousState);
+    setTermsError('');
   };
 
   // Ghi chú: Thu gọn hoặc mở rộng hộp giải thích.
@@ -595,11 +604,10 @@ export default function RegisterPage() {
   // Ghi chú: Kiểm tra điều khoản trước khi cho phép thao tác với nút Google.
   const handleGoogleRegister = () => {
     if (!isTermsAccepted) {
-      setIsTermsShake(true);
-      window.setTimeout(() => {
-        setIsTermsShake(false);
-      }, 350);
+      setTermsError('Vui lòng tích vào ô để tiếp tục.');
+      return;
     }
+    setTermsError('');
   };
 
   // Ghi chú: Đóng màn hình chúc mừng cho Donor.
@@ -841,16 +849,14 @@ export default function RegisterPage() {
     : "rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-6 py-6 text-center transition-all hover:border-teal-600 hover:bg-teal-50";
 
   const checkboxClassName = isTermsAccepted
-    ? "flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border border-teal-600 bg-teal-600"
-    : "flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border border-gray-200 bg-white";
+    ? "flex h-6 w-6 min-w-6 items-center justify-center rounded-md border-2 border-teal-600 bg-teal-600 cursor-pointer transition-all hover:bg-teal-700"
+    : "flex h-6 w-6 min-w-6 items-center justify-center rounded-md border-2 border-gray-300 bg-white cursor-pointer transition-all hover:border-teal-400 hover:bg-teal-50";
 
   const infoBoxClassName = "rounded-xl border-l-[3px] border-teal-600 bg-teal-50 px-4 py-3";
   const infoBoxBodyClassName = isInfoCollapsed ? "hidden" : "mt-2 text-xs leading-6 text-gray-600";
   const infoBoxChevronClassName = isInfoCollapsed ? "-rotate-90" : "rotate-0";
 
-  const termsRowClassName = isTermsShake
-    ? "mb-5 flex items-start gap-2.5 rounded-lg ring-2 ring-red-400/60"
-    : "mb-5 flex items-start gap-2.5";
+  const termsRowClassName = "mb-5 flex items-start gap-2.5";
 
   return (
     <div className="relative min-h-screen bg-slate-50" onKeyDown={handleKeyDown} role="presentation">
@@ -1207,6 +1213,52 @@ export default function RegisterPage() {
                   Đổi vai trò
                 </button>
 
+                <div className="mt-4">
+                  <div className={termsRowClassName}>
+                    <button type="button" className={checkboxClassName} onClick={handleToggleTerms}>
+                      {isTermsAccepted && (
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="white" strokeWidth="3">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                    </button>
+                    <label className="text-xs text-slate-500" onClick={handleToggleTerms}>
+                      Tôi đồng ý với{' '}
+                      <a
+                        className="font-semibold text-teal-600"
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setLegalModalVariant('terms');
+                          setIsLegalModalOpen(true);
+                        }}
+                        ref={termsLinkRef}
+                      >
+                        Điều khoản sử dụng
+                      </a>{' '}
+                      và{' '}
+                      <a
+                        className="font-semibold text-teal-600"
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setLegalModalVariant('privacy');
+                          setIsLegalModalOpen(true);
+                        }}
+                        ref={privacyLinkRef}
+                      >
+                        Chính sách bảo mật
+                      </a>{' '}
+                      của DCP
+                    </label>
+                  </div>
+                  {termsError && (
+                    <p className="mt-1.5 text-xs font-medium text-red-500">{termsError}</p>
+                  )}
+                </div>
+
                 <div className="mt-6" onClick={handleGoogleRegister}>
                   <div className="group flex h-[50px] w-full items-center justify-center rounded-[10px] border-[1.5px] border-[#e5e7eb] bg-white font-['Be_Vietnam_Pro',sans-serif] text-[14.5px] font-semibold text-[#0d1117] transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-[1px] hover:border-[#0e7c6b] hover:shadow-[0_2px_14px_rgba(14,124,107,0.12)]">
                     <div
@@ -1221,22 +1273,6 @@ export default function RegisterPage() {
                     {registerErrorMessage}
                   </div>
                 )}
-
-                <div className="mt-4">
-                  <div className={termsRowClassName}>
-                    <button type="button" className={checkboxClassName} onClick={handleToggleTerms}>
-                      {isTermsAccepted && (
-                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="white" strokeWidth="3">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </button>
-                    <label className="text-xs text-slate-500" onClick={handleToggleTerms}>
-                      Tôi đồng ý với <a className="font-semibold text-teal-600" href="#">Điều khoản sử dụng</a> và{" "}
-                      <a className="font-semibold text-teal-600" href="#">Chính sách bảo mật</a> của DCP
-                    </label>
-                  </div>
-                </div>
 
                 <div className={`${infoBoxClassName} mt-4`}>
                   <button className="flex w-full items-center justify-between" onClick={handleToggleInfoBox}>
@@ -1461,6 +1497,12 @@ export default function RegisterPage() {
           </div>
         </div>
       </div>
+      <AuthLegalModal
+        open={isLegalModalOpen}
+        onClose={() => setIsLegalModalOpen(false)}
+        variant={legalModalVariant}
+        triggerRef={legalModalVariant === 'terms' ? termsLinkRef : privacyLinkRef}
+      />
       <style jsx global>{`
         /* Ghi chú logic phức tạp: chỉ tinh chỉnh lớp CSS do Google render để đồng nhất giao diện nút với trang đăng nhập, */
         /* không thay đổi hành vi callback xác thực Google. */
