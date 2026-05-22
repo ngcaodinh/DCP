@@ -42,7 +42,6 @@ body {
   font-family: var(--font-lexend), var(--font-be-vietnam-pro), sans-serif;
   background: var(--cream);
   color: var(--ink);
-  overflow-x: hidden;
   font-size: 16px;
   line-height: 1.65;
   text-rendering: optimizeLegibility;
@@ -310,6 +309,7 @@ nav.scrolled {
   height: 600px;
   background: radial-gradient(circle, rgba(14, 124, 107, 0.06) 0%, transparent 70%);
   z-index: 0;
+  overflow-x: clip;
 }
 
 .hero-hex {
@@ -539,6 +539,7 @@ nav.scrolled {
   color: var(--ink);
   margin-bottom: 14px;
   line-height: 1.45;
+  overflow-wrap: break-word;
 }
 
 .progress-wrap {
@@ -652,6 +653,7 @@ nav.scrolled {
   padding: 14px 5%;
   overflow: hidden;
   position: relative;
+  overflow-x: clip;
 }
 
 .trust-scroll {
@@ -981,6 +983,7 @@ section {
   color: var(--ink);
   margin-bottom: 8px;
   line-height: 1.4;
+  overflow-wrap: break-word;
 }
 
 .pcard-desc {
@@ -1576,7 +1579,7 @@ section {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
-  white-space: nowrap;
+  white-space: normal;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1820,11 +1823,13 @@ section {
 .rank-project {
   font-weight: 600;
   color: var(--ink);
+  overflow-wrap: break-word;
 }
 
 .rank-organization {
   font-size: 13px;
   color: var(--gray);
+  overflow-wrap: break-word;
 }
 
 .rank-score {
@@ -1859,6 +1864,7 @@ section {
   font-size: 14px;
   color: var(--ink);
   margin-bottom: 6px;
+  overflow-wrap: break-word;
 }
 
 .rank-org {
@@ -1909,6 +1915,29 @@ section {
 .rank-table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 520px;
+}
+
+.rank-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: var(--teal) var(--cream);
+  border-radius: 12px;
+}
+
+.rank-table-wrapper::-webkit-scrollbar {
+  height: 5px;
+}
+
+.rank-table-wrapper::-webkit-scrollbar-track {
+  background: var(--cream);
+  border-radius: 99px;
+}
+
+.rank-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--teal);
+  border-radius: 99px;
 }
 
 .rank-table th {
@@ -2239,9 +2268,20 @@ footer {
 }
 
 /* ─── RESPONSIVE ─── */
-@media (max-width: 1024px) {
+
+/* Tablet 641px–1024px */
+@media (min-width: 641px) and (max-width: 1024px) {
   .why-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .projects-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 32px;
   }
 
   .footer-grid {
@@ -2250,6 +2290,14 @@ footer {
   }
 }
 
+/* Tablet 641px+ — why-grid always 2 col above mobile */
+@media (min-width: 641px) {
+  .why-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Mobile ≤640px — base 2 col for density */
 @media (max-width: 640px) {
   .why-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -2260,12 +2308,43 @@ footer {
   }
 }
 
+/* Mobile ≤768px */
 @media (max-width: 768px) {
   .hero {
     grid-template-columns: 1fr;
-    padding: 40px 5% 60px;
-    gap: 40px;
+    padding: 32px 5% 48px;
+    gap: 32px;
     min-height: auto;
+  }
+
+  .hero-pattern {
+    width: 280px;
+    height: 280px;
+    right: -80px;
+    top: -60px;
+  }
+
+  .hero-hex {
+    width: 200px;
+    height: 200px;
+    right: -40px;
+    bottom: -40px;
+  }
+
+  .hero h1 {
+    font-size: clamp(28px, 7vw, 38px);
+    line-height: 1.2;
+  }
+
+  .hero-desc {
+    font-size: 15px;
+    margin-bottom: 24px;
+  }
+
+  .hero-badge {
+    margin-bottom: 18px;
+    font-size: 12px;
+    padding: 5px 12px;
   }
 
   .hero-visual {
@@ -2317,8 +2396,8 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .rank-table {
-    display: none;
+  .rank-table-wrapper {
+    display: block;
   }
 
   .projects-header {
@@ -2408,6 +2487,44 @@ footer {
 
   .why-card p {
     text-align: left;
+  }
+
+  /* ── SECTION RHYTHM ── */
+  section {
+    padding: 48px 5%;
+  }
+
+  .section-title {
+    font-size: clamp(22px, 5vw, 30px);
+  }
+
+  /* ── CTA ── */
+  .cta-section {
+    padding: 56px 5%;
+  }
+
+  .cta-section h2 {
+    font-size: clamp(24px, 6vw, 34px);
+    margin-bottom: 12px;
+  }
+
+  .cta-section p {
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+
+  .cta-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .btn-white,
+  .btn-outline-white {
+    width: 100%;
+    justify-content: center;
+    padding: 14px 24px;
+    font-size: 14px;
   }
 
   /* ── STATS ── */
@@ -2510,16 +2627,6 @@ footer {
   }
 
   .mobile-menu-close:focus-visible {
-    outline: 3px solid rgba(14, 124, 107, 0.45);
-    outline-offset: 2px;
-  }
-
-  .mobile-menu-close:focus-visible {
-    outline: 2px solid var(--teal);
-    outline-offset: 2px;
-  }
-
-  .mobile-menu-close:focus-visible {
     outline: 2px solid var(--teal);
     outline-offset: 2px;
   }
@@ -2606,7 +2713,7 @@ footer {
     font-size: 15px;
     font-weight: 700;
     color: var(--ink);
-    white-space: nowrap;
+    white-space: normal;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
@@ -2660,23 +2767,6 @@ footer {
   .project-detail-modal-footer-close-button {
     min-height: 44px;
     padding: 10px 20px;
-  }
-
-  /* ── SECTION PADDING ── */
-  section {
-    padding: 64px 5%;
-  }
-
-  .section-title {
-    font-size: clamp(22px, 5vw, 30px);
-  }
-
-  .cta-section {
-    padding: 72px 5%;
-  }
-
-  .cta-section h2 {
-    font-size: clamp(24px, 6vw, 34px);
   }
 
   /* ── ANIMATIONS ── */

@@ -2385,6 +2385,7 @@ export default function HomePage() {
                 </div>
               );
             })()}
+            <div className="rank-table-wrapper">
             <table className="rank-table">
               <thead>
                 <tr>
@@ -2411,6 +2412,7 @@ export default function HomePage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </>
         )}
       </section>
