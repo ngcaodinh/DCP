@@ -388,7 +388,6 @@ const useChartPath = () => {
 export default function HomePage() {
   const [isNavbarScrolled, setIsNavbarScrolled] = useState(false);
   const [isHeroReady, setIsHeroReady] = useState(false);
-  const [activeTab, setActiveTab] = useState('Tất cả');
   const [visibleCards, setVisibleCards] = useState({
     steps: false,
     projects: false,
@@ -1648,18 +1647,6 @@ export default function HomePage() {
           <div>
             <div className="section-label">Dự án</div>
             <h2 className="section-title">Đang cần hỗ trợ</h2>
-          </div>
-          <div className="filter-tabs">
-            {['Tất cả', 'Giáo dục', 'Y tế', 'Thiên tai', 'Trẻ em'].map(tab => (
-              <button
-                className={`tab ${activeTab === tab ? 'active' : ''}`}
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                type="button"
-              >
-                {tab}
-              </button>
-            ))}
           </div>
         </div>
         <div className="projects-grid">
