@@ -17,7 +17,8 @@ const application = express();
 
 /** Hàm cấu hình middleware chính cho ứng dụng. Mục đích: áp dụng bảo mật, tối ưu hiệu năng và parse request body cho toàn hệ thống. */
 function configureMiddlewares(): void {
-  const allowedOrigin = process.env.CORS_ALLOWED_ORIGIN || 'http://localhost:3000';
+  const allowedOriginsEnv = process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000';
+  const allowedOriginList = allowedOriginsEnv.split(',').map(origin => origin.trim());
   const requestBodyLimit = getRequestBodyLimit();
 
   application.disable('x-powered-by');
@@ -25,7 +26,14 @@ function configureMiddlewares(): void {
 
   application.use(
     cors({
-      origin: allowedOrigin,
+      origin: (incomingOrigin, callback) => {
+        // Cho phép null origin (mobile apps, server-to-server) và các origin trong whitelist
+        if (!incomingOrigin || allowedOriginList.includes(incomingOrigin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: origin '${incomingOrigin}' not allowed`));
+        }
+      },
       credentials: true
     })
   );

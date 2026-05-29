@@ -80,3 +80,6 @@ E2E.Tests
 
 # 
 .cursor/
+
+# Agent capabilities
+.agents/
