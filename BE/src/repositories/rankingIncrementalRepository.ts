@@ -6,7 +6,7 @@ import {
   deleteProjectMetrics,
   ProjectIncrementalMetrics
 } from '../models/rankingIncrementalModel';
-import { findDonationsInTimeRange } from '../models/donationModel';
+import { findDonationsByProjectIdInTimeRange } from '../models/donationModel';
 
 /**
  * Hàm repository lấy hoặc tạo metrics cho project.
@@ -68,5 +68,5 @@ export async function findDonationsForProjectInWindow(
   startedAt: Date,
   endedAt: Date
 ) {
-  return findDonationsInTimeRange(startedAt, endedAt);
+  return findDonationsByProjectIdInTimeRange(projectId, startedAt, endedAt);
 }

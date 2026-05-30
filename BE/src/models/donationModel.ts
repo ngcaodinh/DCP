@@ -148,6 +148,28 @@ export async function findDonationsInTimeRange(startedAt: Date, endedAt: Date): 
     .exec();
 }
 
+/** Hàm lấy donation của một project trong khoảng thời gian. Mục đích: phục vụ recompute project metrics. */
+export async function findDonationsByProjectIdInTimeRange(projectId: string, startedAt: Date, endedAt: Date): Promise<DonationRecord[]> {
+  return DonationMongoModel.find({
+    projectId,
+    timestamp: { $gte: startedAt, $lte: endedAt },
+    donationStatus: 'INDEXED'
+  })
+    .sort({ timestamp: -1 })
+    .lean<DonationRecord[]>()
+    .exec();
+}
 
+/**
+ * Hàm đếm donations kể từ một thời điểm.
+ * Mục đích: phục vụ reconciliation worker tính tỷ lệ guest donations.
+ * @param sinceDate - Thời điểm bắt đầu
+ * @returns Số lượng donations
+ */
+export async function countDonationsSince(sinceDate: Date): Promise<number> {
+  return DonationMongoModel.countDocuments({
+    timestamp: { $gte: sinceDate }
+  }).exec();
+}
 
 
