@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import jsonWebToken from 'jsonwebtoken';
 import { getJsonWebTokenConfig, getJsonWebTokenSecret } from '../config/jsonWebToken';
 import { sendErrorResponse } from '../utils/apiResponse';
+import { extractBearerToken } from '../utils/tokenExtractor';
 
 type JwtClaims = {
   userId: string;
@@ -13,24 +14,12 @@ type AuthenticatedRequest = Request & {
 };
 
 /**
- * Hàm đọc access token từ header Authorization.
- * Mục đích: chuẩn hóa cách lấy Bearer token cho middleware xác thực.
- */
-function extractBearerToken(request: Request): string | null {
-  const authorizationHeader = request.headers.authorization;
-  if (!authorizationHeader || !authorizationHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  return authorizationHeader.slice(7).trim();
-}
-
-/**
  * Hàm tạo middleware xác thực JWT.
  * Mục đích: bảo vệ endpoint yêu cầu người dùng đăng nhập hợp lệ.
  */
 export function createAuthenticationMiddleware() {
   return (request: AuthenticatedRequest, response: Response, next: NextFunction): void => {
-    const bearerToken = extractBearerToken(request);
+    const bearerToken = extractBearerToken(request.headers.authorization);
 
     if (!bearerToken) {
       sendErrorResponse(response, 401, 'Thiếu access token hợp lệ.', 'UNAUTHENTICATED');

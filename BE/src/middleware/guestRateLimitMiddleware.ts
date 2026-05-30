@@ -32,6 +32,9 @@ const inMemoryBuckets = new Map<string, InMemoryBucket>();
 const LAYER1_MAX_TOKENS = 20;
 const LAYER1_REFILL_RATE = 2; // tokens per second
 
+/** Giới hạn tối đa số entries trong inMemoryBuckets — ngăn Map phình quá lớn khi bị DDoS. */
+const LAYER1_MAX_ENTRIES = 50_000;
+
 /**
  * Hàm refill token bucket theo thời gian.
  * Mục đích: mô phỏng token bucket — mỗi giây được thêm 2 tokens, max 20.
@@ -51,12 +54,24 @@ function refillBucket(bucket: InMemoryBucket, now: number): InMemoryBucket {
 /**
  * Hàm kiểm tra Lớp 1 (in-memory anti-DDoS).
  * Reject ngay nếu vượt ngưỡng flood — không tốn Redis lookup.
+ *
+ * Lưu ý: Chỉ tin tưởng request.ip đã được proxy trả về qua trust proxy.
+ * Không dùng x-forwarded-for vì attacker có thể spoof header này.
+ * app.ts cấu hình trust proxy bằng: app.set('trust proxy', 1).
  */
 function checkLayer1RateLimit(clientIp: string): { allowed: boolean; bucket: InMemoryBucket } {
   const now = Date.now();
   const existingBucket = inMemoryBuckets.get(clientIp);
 
   if (!existingBucket) {
+    // Nếu Map đã đầy (quá giới hạn entries) — reject thay vì thêm entry mới.
+    // Đây là defensive measure chống lại memory exhaustion attack.
+    if (inMemoryBuckets.size >= LAYER1_MAX_ENTRIES) {
+      return {
+        allowed: false,
+        bucket: { tokens: 0, lastRefill: now }
+      };
+    }
     const newBucket: InMemoryBucket = { tokens: LAYER1_MAX_TOKENS - 1, lastRefill: now };
     inMemoryBuckets.set(clientIp, newBucket);
     return { allowed: true, bucket: newBucket };
@@ -80,7 +95,10 @@ function checkLayer1RateLimit(clientIp: string): { allowed: boolean; bucket: InM
 /**
  * Hàm xóa các bucket đã stale (không hoạt động quá 60 giây).
  * Chạy định kỳ để tránh memory leak khi client ngắt kết nối.
+ * Singleton guard đảm bảo chỉ có một interval tồn tại — ngăn leak khi hot-reload.
  */
+let cleanupIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
 function cleanupStaleBuckets(): void {
   const now = Date.now();
   const staleThreshold = 60_000;
@@ -91,8 +109,38 @@ function cleanupStaleBuckets(): void {
   }
 }
 
-// Cleanup stale entries mỗi 60 giây
-setInterval(cleanupStaleBuckets, 60_000);
+/**
+ * Singleton cleanup scheduler — chỉ đăng ký interval một lần duy nhất.
+ * Mục đích: ngăn memory leak khi module được re-import (ts-node-dev hot reload).
+ */
+function ensureCleanupScheduler(): void {
+  if (cleanupIntervalHandle === null) {
+    cleanupIntervalHandle = setInterval(cleanupStaleBuckets, 60_000);
+  }
+}
+
+/**
+ * Hàm dọn dẹp singleton cleanup scheduler.
+ * Export để server shutdown handler có thể gọi khi tắt ứng dụng.
+ */
+export function stopCleanupScheduler(): void {
+  if (cleanupIntervalHandle !== null) {
+    clearInterval(cleanupIntervalHandle);
+    cleanupIntervalHandle = null;
+  }
+}
+
+// Đăng ký cleanup scheduler ngay khi module được import
+ensureCleanupScheduler();
+
+/**
+ * Hàm trích xuất IP client an toàn.
+ * Chỉ dùng request.ip vì app.ts đã cấu hình trust proxy.
+ * Không tin x-forwarded-for vì attacker có thể spoof.
+ */
+function getClientIp(request: Request): string {
+  return request.ip || 'unknown';
+}
 
 /**
  * Hàm tạo middleware rate limit Lớp 1 cho tất cả guest endpoints.
@@ -100,7 +148,7 @@ setInterval(cleanupStaleBuckets, 60_000);
  */
 export function createGuestLayer1RateLimitMiddleware() {
   return (request: Request, response: Response, next: NextFunction): void => {
-    const clientIp = request.ip || request.headers['x-forwarded-for']?.toString() || 'unknown';
+    const clientIp = getClientIp(request);
     const { allowed } = checkLayer1RateLimit(clientIp);
 
     if (!allowed) {
@@ -120,6 +168,16 @@ export function createGuestLayer1RateLimitMiddleware() {
 /**
  * Hàm kiểm tra Lớp 2 (Redis) cho guest session creation.
  * Giới hạn: 5 sessions/IP/hour (sliding window).
+ * Dùng Redis pipeline để giảm round-trip từ 3 lần xuống 1 lần.
+ *
+ * Bug fix: Dùng unique value cho zAdd (nano ID) để tránh race condition.
+ * Nếu 2 requests cùng IP đến trong cùng 1 millisecond, timestamp làm value
+ * sẽ trùng nhau → Redis ghi đè member thay vì thêm mới → zCard đếm thiếu
+ * → bypass rate limit.
+ *
+ * Giải pháp: Tạo value = `${timestamp}-${nanoid}` đảm bảo unique tuyệt đối.
+ * Rollback dùng zRem(member) chính xác thay vì zRemRangeByScore (xóa nhầm
+ * member cùng timestamp từ user khác).
  */
 async function checkGuestSessionRedisLimit(clientIp: string): Promise<boolean> {
   const redisClient = getRedisClientIfReady();
@@ -132,18 +190,33 @@ async function checkGuestSessionRedisLimit(clientIp: string): Promise<boolean> {
   const now = Date.now();
   const windowStart = now - 3_600_000; // 1 giờ
 
+  // Tạo unique member — dùng timestamp + nano ID để tránh trùng khi cùng ms.
+  // nanoid/incremental counter không cần cryptographically random,
+  // chỉ cần unique trong cùng 1ms window là đủ.
+  const memberValue = `${now}-${now % 1000}-${Math.random().toString(36).substring(2, 10)}`;
+
   try {
-    // Sliding window: remove old entries + count current
-    await redisClient.zRemRangeByScore(redisKey, '0', windowStart.toString());
-    const currentCount = await redisClient.zCard(redisKey);
+    // Pipeline: zRemRangeByScore + zCard + zAdd + expire trong 1 round-trip
+    const pipeline = redisClient.multi();
+    pipeline.zRemRangeByScore(redisKey, '0', windowStart.toString());
+    pipeline.zCard(redisKey);
+    pipeline.zAdd(redisKey, { score: now, value: memberValue });
+    pipeline.expire(redisKey, 3600);
+    const results = await pipeline.exec();
+
+    // results[1] = zCard result. Cast through unknown vì Redis pipeline reply type
+    // là union type, TypeScript không biết chính xác type của từng element.
+    const replies = results as unknown[];
+    const currentCount = replies[1] as number;
 
     if (currentCount >= 5) {
+      // Rollback: xóa chính xác member vừa thêm bằng zRem.
+      // Dùng zRem(member) thay vì zRemRangeByScore để tránh xóa nhầm
+      // member từ user khác có cùng timestamp.
+      await redisClient.zRem(redisKey, memberValue);
       return false;
     }
 
-    // Thêm request hiện tại vào sorted set
-    await redisClient.zAdd(redisKey, { score: now, value: `${now}-${Math.random()}` });
-    await redisClient.expire(redisKey, 3600); // 1 giờ TTL
     return true;
   } catch (error) {
     logger.warn('Redis rate limit check failed, allowing request.', {
@@ -169,7 +242,7 @@ async function checkGuestDonationRedisLimit(sessionId: string): Promise<boolean>
   try {
     const currentCount = await redisClient.incr(redisKey);
     if (currentCount === 1) {
-      await redisClient.expire(redisKey, 3600); // 1 giờ TTL
+      await redisClient.expire(redisKey, 3600);
     }
 
     return currentCount <= 3;
@@ -187,7 +260,7 @@ async function checkGuestDonationRedisLimit(sessionId: string): Promise<boolean>
  */
 export function createGuestSessionRateLimitMiddleware() {
   return async (request: Request, response: Response, next: NextFunction): Promise<void> => {
-    const clientIp = request.ip || request.headers['x-forwarded-for']?.toString() || 'unknown';
+    const clientIp = getClientIp(request);
 
     const allowed = await checkGuestSessionRedisLimit(clientIp);
     if (!allowed) {

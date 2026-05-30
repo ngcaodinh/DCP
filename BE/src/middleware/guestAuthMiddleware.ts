@@ -12,6 +12,7 @@ import { NextFunction, Request, Response } from 'express';
 import { verifyGuestSessionToken, type GuestSessionClaims } from '../config/guestJsonWebToken';
 import { findGuestWalletSessionById } from '../repositories/guestWalletSessionRepository';
 import { sendErrorResponse } from '../utils/apiResponse';
+import { extractBearerToken } from '../utils/tokenExtractor';
 
 /** Request type mở rộng để chứa guest session data. */
 export type GuestSessionRequest = Request & {
@@ -24,18 +25,6 @@ export type GuestSessionRequest = Request & {
 };
 
 /**
- * Hàm trích xuất Bearer token từ Authorization header.
- * Mục đích: chuẩn hóa cách đọc guest token.
- */
-function extractBearerToken(request: Request): string | null {
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-  return authHeader.slice(7).trim();
-}
-
-/**
  * Hàm tạo middleware xác thực guest session.
  * Mục đích: bảo vệ endpoint yêu cầu guest wallet hợp lệ.
  */
@@ -45,7 +34,7 @@ export function createGuestAuthMiddleware() {
     response: Response,
     next: NextFunction
   ): Promise<void> => {
-    const bearerToken = extractBearerToken(request);
+    const bearerToken = extractBearerToken(request.headers.authorization);
 
     if (!bearerToken) {
       sendErrorResponse(response, 401, 'Thiếu guest session token.', 'GUEST_TOKEN_REQUIRED');
