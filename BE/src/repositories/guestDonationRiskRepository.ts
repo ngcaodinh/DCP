@@ -1,8 +1,7 @@
 import { Types } from 'mongoose';
 import {
   GuestDonationRiskModel,
-  GuestDonationRisk,
-  RiskLevel
+  GuestDonationRisk
 } from '../models/guestDonationRiskModel';
 
 /**
@@ -163,36 +162,3 @@ export async function findAllClusterSuspects(
     .exec();
 }
 
-/**
- * Hàm xác định riskLevel và trustMultiplier từ riskScore.
- * Mục đích: chuẩn hóa việc map score → level để đảm bảo nhất quán.
- * Quy tắc:
- * - 0-25:   SAFE      → trustMultiplier = 1.0
- * - 26-50:  LOW       → trustMultiplier = 0.8
- * - 51-69:  MEDIUM    → trustMultiplier = 0.5
- * - 70-90:  HIGH      → trustMultiplier = 0.2 (dùng Token Paymaster)
- * - 91-100: CRITICAL  → trustMultiplier = 0.2 (dùng Token Paymaster)
- *
- * Lưu ý: riskScore >= 70 KHÔNG bị block mà dùng Token Paymaster thu phí gas.
- * Boundary MEDIUM/HIGH phải khớp với RISK_THRESHOLD_FOR_TOKEN_PAYMASTER = 70
- * trong guestPaymasterService.ts.
- * @param riskScore - Điểm risk từ 0-100
- * @returns Object chứa riskLevel và trustMultiplier tương ứng
- */
-export function computeRiskLevelAndMultiplier(
-  riskScore: number
-): { riskLevel: RiskLevel; trustMultiplier: number } {
-  if (riskScore <= 25) {
-    return { riskLevel: 'SAFE', trustMultiplier: 1.0 };
-  }
-  if (riskScore <= 50) {
-    return { riskLevel: 'LOW', trustMultiplier: 0.8 };
-  }
-  if (riskScore < 70) {
-    return { riskLevel: 'MEDIUM', trustMultiplier: 0.5 };
-  }
-  if (riskScore <= 90) {
-    return { riskLevel: 'HIGH', trustMultiplier: 0.2 };
-  }
-  return { riskLevel: 'CRITICAL', trustMultiplier: 0.2 };
-}

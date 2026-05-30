@@ -38,6 +38,22 @@ export async function findAuditsBySessionId(
 }
 
 /**
+ * Hàm tìm các khoản donation amounts theo sessionId với projection.
+ * Mục đích: checkDonationPattern chỉ cần field amount, dùng projection để tối ưu performance.
+ * @param sessionId - ID của phiên guest session
+ * @returns Mảng các khoản donation amounts
+ */
+export async function findAuditAmountsBySessionId(
+  sessionId: string
+): Promise<number[]> {
+  const results = await AnonymousDonationAuditModel.find({ sessionId })
+    .select('amount -_id')
+    .lean<{ amount: number }[]>()
+    .exec();
+  return results.map((r) => Number(r.amount));
+}
+
+/**
  * Hàm tìm audit records theo walletAddress.
  * Mục đích: lấy donation history của một ví cụ thể phục vụ risk evaluation.
  * @param walletAddress - Địa chỉ ví EVM

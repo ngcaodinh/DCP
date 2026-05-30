@@ -98,6 +98,7 @@ type LogMetadata = {
   context?: Record<string, unknown>;
   factors?: Record<string, number>;
   deviceFingerprintHash?: string;
+  originalError?: string;
 };
 
 /**

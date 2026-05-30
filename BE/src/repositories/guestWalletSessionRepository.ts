@@ -131,6 +131,27 @@ export async function countRecentSessionsByIp(
 }
 
 /**
+ * Hàm đếm số phiên guest wallet theo IP trong khoảng thời gian, loại trừ một session cụ thể.
+ * Mục đích: kiểm tra session velocity - đếm các session TỒN TẠI TRƯỚC session hiện tại,
+ * không include chính nó trong count. Session hiện tại đã được insert vào DB
+ * trước khi hàm này được gọi.
+ * @param ipAddress - Địa chỉ IP cần đếm
+ * @param sinceDate - Thời điểm bắt đầu đếm
+ * @param excludeSessionId - Session ID cần loại trừ khỏi count
+ */
+export async function countRecentSessionsByIpExcluding(
+  ipAddress: string,
+  sinceDate: Date,
+  excludeSessionId: string
+): Promise<number> {
+  return GuestWalletSessionModel.countDocuments({
+    ipAddress,
+    createdAt: { $gte: sinceDate },
+    sessionId: { $ne: excludeSessionId }
+  }).exec();
+}
+
+/**
  * Hàm cập nhật trạng thái và metadata của phiên guest wallet.
  * Mục đích: cập nhật donation count, total amount, hoặc status khi có sự kiện.
  * Luôn tự động set updatedAt để đảm bảo consistency.
