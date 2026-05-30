@@ -5,6 +5,7 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import { ethers } from 'ethers';
 import {
   createGuestWalletSession,
   findGuestWalletSessionById,
@@ -13,10 +14,9 @@ import {
   countRecentSessionsByIp
 } from '../repositories/guestWalletSessionRepository';
 import { signGuestSessionToken } from '../config/guestJsonWebToken';
-import { evaluateAndSaveGuestRisk } from './guestRiskService';
+import { evaluateAndSaveGuestRisk, computeRiskLevelAndMultiplier } from './guestRiskService';
 import {
-  upsertGuestDonationRisk,
-  computeRiskLevelAndMultiplier
+  upsertGuestDonationRisk
 } from '../repositories/guestDonationRiskRepository';
 import { getLogger } from '../config/logger';
 import { ApplicationError } from '../utils/applicationError';
@@ -78,15 +78,42 @@ function generateServerSalt(): string {
 }
 
 /**
+ * Chuyển đổi và kiểm tra địa chỉ ví có đúng định dạng EIP-55 checksum không.
+ * ethers v6: getAddress() throws nếu không phải valid hex hoặc checksum sai.
+ * Sau khi validate, chuyển sang lowercase để lưu vào MongoDB (case-insensitive).
+ */
+function normalizeAndValidateWalletAddress(address: string): string {
+  try {
+    return ethers.getAddress(address).toLowerCase();
+  } catch {
+    throw new ApplicationError(
+      'Địa chỉ ví không hợp lệ.',
+      400,
+      'INVALID_WALLET_ADDRESS'
+    );
+  }
+}
+
+/**
+ * Kiểm tra fingerprint hash có đúng định dạng SHA-256 hex không.
+ * @param hash - Fingerprint hash cần kiểm tra
+ * @returns true nếu hợp lệ
+ */
+function isValidFingerprintHash(hash: string): boolean {
+  return /^[0-9a-f]{64}$/.test(hash);
+}
+
+/**
  * Hàm tạo phiên guest wallet mới.
  *
  * Quy trình:
- * 1. Validate fingerprint limit (≤3/24h)
- * 2. Validate IP burst (≤3/1h)
- * 3. Generate server salt
- * 4. Create session record in MongoDB
- * 5. Sign JWT token
- * 6. Return response
+ * 1. Validate walletAddress (EIP-55 format) và fingerprint hash
+ * 2. Validate fingerprint limit (≤3/24h)
+ * 3. Validate IP burst (≤3/1h)
+ * 4. Generate server salt
+ * 5. Create session record in MongoDB
+ * 6. Sign JWT token
+ * 7. Return response
  *
  * @throws Error nếu vượt giới hạn hoặc tạo session thất bại
  */
@@ -96,12 +123,21 @@ export async function createNewGuestSession(
   ipAddress: string,
   userAgent: string
 ): Promise<CreateGuestSessionResult> {
-  const normalizedWallet = walletAddress.toLowerCase();
+  const normalizedWallet = normalizeAndValidateWalletAddress(walletAddress);
+
+  if (!isValidFingerprintHash(deviceFingerprintHash)) {
+    throw new ApplicationError(
+      'Device fingerprint không hợp lệ.',
+      400,
+      'INVALID_FINGERPRINT'
+    );
+  }
 
   // Kiểm tra giới hạn fingerprint (≤3/24h) và IP burst (≤3/1h) song song
   // để giảm độ trễ DB round-trip từ 2 lần thành 1 lần.
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const currentTimeMs = Date.now();
+  const oneDayAgo = new Date(currentTimeMs - 24 * 60 * 60 * 1000);
+  const oneHourAgo = new Date(currentTimeMs - 60 * 60 * 1000);
   const [fingerprintCount, ipCount] = await Promise.all([
     countRecentSessionsByFingerprint(deviceFingerprintHash, oneDayAgo),
     countRecentSessionsByIp(ipAddress, oneHourAgo)
@@ -150,33 +186,43 @@ export async function createNewGuestSession(
 
   // Initial risk assessment sau khi tạo session (Task 4.2)
   // Đánh giá risk ngay để có risk record sẵn sàng cho Paymaster sponsorship.
+  // Truyền `now` để checkSessionVelocity exclude chính session này khỏi count.
   // Nếu risk evaluation thất bại (VD: RPC error, DB upsert failure), dùng fallback
   // risk an toàn (SAFE, score=0, multiplier=1.0) để tránh dangling record.
   try {
     await evaluateAndSaveGuestRisk(
       { sessionId, walletAddress: normalizedWallet, deviceFingerprintHash },
-      ipAddress
+      ipAddress,
+      now
     );
   } catch (error) {
     // Fallback risk an toàn khi evaluation thất bại — không fail toàn bộ session creation
     const { riskLevel, trustMultiplier } = computeRiskLevelAndMultiplier(0);
-    await upsertGuestDonationRisk(sessionId, {
-      sessionId,
-      walletAddress: normalizedWallet,
-      riskScore: 0,
-      riskLevel,
-      trustMultiplier,
-      factors: {
-        walletAgeScore: 0,
-        ipBurstScore: 0,
-        fingerprintReuseScore: 0,
-        donationPatternScore: 0,
-        sessionVelocityScore: 0
-      },
-      blocked: false,
-      blockedAt: null,
-      blockedReason: null
-    });
+    try {
+      await upsertGuestDonationRisk(sessionId, {
+        sessionId,
+        walletAddress: normalizedWallet,
+        riskScore: 0,
+        riskLevel,
+        trustMultiplier,
+        factors: {
+          walletAgeScore: 0,
+          ipBurstScore: 0,
+          fingerprintReuseScore: 0,
+          donationPatternScore: 0,
+          sessionVelocityScore: 0
+        },
+        blocked: false,
+        blockedAt: null,
+        blockedReason: null
+      });
+    } catch (fallbackError) {
+      // Session tồn tại nhưng không có risk record — Paymaster phải handle
+      logger.error('Risk fallback upsert also failed. Session has no risk record.', {
+        sessionId,
+        errorMessage: fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      });
+    }
     logger.warn('Risk evaluation failed, using safe fallback.', {
       sessionId,
       walletAddress: normalizedWallet,
