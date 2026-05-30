@@ -3,6 +3,7 @@
  * theo pattern repository pattern, giữ business logic và data access layer riêng biệt.
  * Phục vụ các worker đọc/ghi audit records phục vụ risk scoring và reconciliation.
  */
+import mongoose from 'mongoose';
 import {
   AnonymousDonationAuditModel,
   AnonymousDonationAudit
@@ -96,13 +97,15 @@ export async function countAnonymousDonationsSince(
  * Hàm tạo audit record mới.
  * Mục đích: ghi nhận mỗi lần paymaster được sponsor.
  * @param audit - Dữ liệu audit cần tạo
+ * @param session - MongoDB session cho transaction (tùy chọn)
  * @returns Audit record đã được tạo
  */
 export async function createAuditRecord(
-  audit: AnonymousDonationAudit
+  audit: AnonymousDonationAudit,
+  session?: mongoose.ClientSession
 ): Promise<AnonymousDonationAudit> {
-  const created = await AnonymousDonationAuditModel.create(audit);
-  return created.toObject() as AnonymousDonationAudit;
+  const created = await AnonymousDonationAuditModel.create([audit], { session });
+  return created[0].toObject() as AnonymousDonationAudit;
 }
 
 /**

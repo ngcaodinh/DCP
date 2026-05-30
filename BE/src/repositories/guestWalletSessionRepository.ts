@@ -1,3 +1,4 @@
+import mongoose, { Types } from 'mongoose';
 import {
   GuestWalletSessionModel,
   GuestWalletSession
@@ -133,10 +134,14 @@ export async function countRecentSessionsByIp(
  * Hàm cập nhật trạng thái và metadata của phiên guest wallet.
  * Mục đích: cập nhật donation count, total amount, hoặc status khi có sự kiện.
  * Luôn tự động set updatedAt để đảm bảo consistency.
+ * @param sessionId - ID của phiên cần cập nhật
+ * @param updateData - Dữ liệu cần cập nhật
+ * @param mongoSession - MongoDB session cho transaction (tùy chọn)
  */
 export async function updateGuestWalletSession(
   sessionId: string,
-  updateData: UpdateableGuestWalletSession
+  updateData: UpdateableGuestWalletSession,
+  mongoSession?: mongoose.ClientSession
 ): Promise<GuestWalletSession | null> {
   const updatedSession = await GuestWalletSessionModel.findOneAndUpdate(
     { sessionId },
@@ -144,7 +149,7 @@ export async function updateGuestWalletSession(
       ...updateData,
       updatedAt: new Date()
     },
-    { returnDocument: 'after' }
+    { returnDocument: 'after', session: mongoSession }
   )
     .lean<GuestWalletSession>()
     .exec();

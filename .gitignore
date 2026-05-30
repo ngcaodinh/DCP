@@ -85,3 +85,5 @@ E2E.Tests
 .agents/
 
 FE/tsconfig.tsbuildinfo
+
+BE/src/__tests__/

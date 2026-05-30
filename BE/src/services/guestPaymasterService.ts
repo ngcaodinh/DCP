@@ -4,7 +4,7 @@
  * - riskScore < 70:  ZeroDev Free Paymaster (sponsor 100% gas)
  * - riskScore >= 70: Custom Token Paymaster (tài trợ gas trước, khấu trừ ~1 CharityToken)
  */
-import { createHash } from 'crypto';
+import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import { getZeroDevConfig } from '../config/zeroDev';
 import { getLogger } from '../config/logger';
@@ -19,6 +19,7 @@ import {
 import { findAuditByUserOpHash, createAuditRecord } from '../repositories/anonymousDonationAuditRepository';
 import { evaluateGuestRisk } from './guestRiskService';
 import { GuestWalletSession } from '../models/guestWalletSessionModel';
+import mongoose from 'mongoose';
 
 const logger = getLogger();
 
@@ -161,27 +162,27 @@ function decodeDonationCalldata(calldata: string): {
 /**
  * Hàm compute deterministic hash từ unsignedUserOp để tạo unique userOpHash.
  * Mục đích: tạo hash cho duplicate check và audit trail.
- * Dùng SHA3-256 (Keccak) vì đây là standard của Ethereum/EntryPoint.
+ *
+ * Dùng ethers.keccak256 (Keccak-256) — standard của Ethereum/EntryPoint.
+ * KHÔNG dùng SHA3-256 (FIPS-202 / NIST standard) vì Ethereum dùng Keccak-256.
+ *
+ * Encoding: RLP-like format (entryPoint + sender + nonce + hash(callData))
+ * để tạo deterministic hash mà không phụ thuộc gas fields có thể thay đổi.
  */
 function computeUserOpHash(
   userOp: SponsorPaymasterRequest['unsignedUserOp']
 ): string {
-  const normalized = {
-    sender: String(userOp.sender).toLowerCase(),
-    nonce: String(userOp.nonce),
-    initCode: String(userOp.initCode || '0x'),
-    callData: String(userOp.callData),
-    callGasLimit: String(userOp.callGasLimit || '21000'),
-    verificationGasLimit: String(userOp.verificationGasLimit || '100000'),
-    preVerificationGas: String(userOp.preVerificationGas || '21000'),
-    maxFeePerGas: String(userOp.maxFeePerGas || '150000000'),
-    maxPriorityFeePerGas: String(userOp.maxPriorityFeePerGas || '150000000'),
-    paymasterAndData: String(userOp.paymasterAndData || '0x'),
-    signature: String(userOp.signature || '0x')
-  };
+  const sender = ethers.zeroPadValue(
+    ethers.isAddress(userOp.sender) ? userOp.sender : '0x0000000000000000000000000000000000000000',
+    32
+  );
+  const nonce = ethers.zeroPadValue(ethers.toBeHex(String(userOp.nonce), 32), 32);
+  const callDataHash = ethers.keccak256(userOp.callData || '0x');
+  const initCodeHash = ethers.keccak256(userOp.initCode || '0x');
 
-  const serialized = JSON.stringify(normalized);
-  return createHash('sha3-256').update(serialized).digest('hex');
+  // RLP-like concatenation: [sender, nonce, initCodeHash, callDataHash]
+  const packed = ethers.concat([sender, nonce, initCodeHash, callDataHash]);
+  return ethers.keccak256(packed);
 }
 
 /**
@@ -417,9 +418,8 @@ async function validateSessionForSponsorship(
  * 4. Check duplicate userOpHash
  * 5. Read risk score từ DB → chọn Paymaster type
  * 6. Gọi Paymaster API tương ứng
- * 7. Tạo AnonymousDonationAudit record
- * 8. Set hasPendingDonation flag
- * 9. Return sponsorship data
+ * 7. Tạo AnonymousDonationAudit record + set hasPendingDonation trong 1 transaction
+ * 8. Return sponsorship data
  *
  * @throws ApplicationError nếu validation thất bại hoặc Paymaster từ chối
  */
@@ -432,6 +432,7 @@ export async function sponsorGuestDonation(
   const sponsorshipId = uuidv4();
 
   // Buoc 1: Validate session + quota (dùng request body amount để check limit)
+  // Session được fetch ở đây và reuse trong suốt function để tránh duplicate DB calls
   const session = await validateSessionForSponsorship(
     sessionId,
     unsignedUserOp.sender,
@@ -465,15 +466,10 @@ export async function sponsorGuestDonation(
   }
 
   // Buoc 5: Re-evaluate risk score trước mỗi donation để phát hiện thay đổi
-  // Fresh evaluation phản ánh tình trạng thực tế tại thời điểm sponsor
-  const freshRisk = await evaluateGuestRisk(
-    {
-      sessionId,
-      walletAddress: unsignedUserOp.sender,
-      deviceFingerprintHash: session.deviceFingerprintHash
-    },
-    ipAddress
-  );
+  // Fresh evaluation phản ánh tình trạng thực tế tại thời điểm sponsor.
+  // Truyền session object thay vì chỉ deviceFingerprintHash — tránh duplicate DB fetch
+  // bên trong evaluateGuestRisk → checkDonationPattern → findAuditsBySessionId.
+  const freshRisk = await evaluateGuestRisk(session, ipAddress);
   const riskScore = freshRisk.riskScore;
   const trustMultiplier = freshRisk.trustMultiplier;
 
@@ -504,36 +500,40 @@ export async function sponsorGuestDonation(
     paymasterResult = await callFreePaymaster(projectId, unsignedUserOp);
   }
 
-  // Buoc 7 & 8: Tạo audit record + set hasPendingDonation trong 1 transaction
-  // Dùng atomic write: nếu audit record tạo thành công → set flag
-  // Nếu crash giữa chừng → hasPendingDonation vẫn false (frontend sẽ polling)
+  // Buoc 7: Tạo audit record + set hasPendingDonation trong 1 MongoDB transaction
+  // Nếu step 2 fail → cả 2 đều rollback, tránh orphan audit record.
   const now = new Date();
-  await createAuditRecord({
-    auditId: uuidv4(),
-    sessionId,
-    walletAddress: unsignedUserOp.sender.toLowerCase(),
-    projectId,
-    amount: amountFromCalldata,
-    trustMultiplier,
-    riskScore,
-    userOpHash,
-    onChainTxHash: null,
-    onChainBlockNumber: null,
-    paymasterSponsoredGas: true,
-    claimedByUserId: null,
-    isAnonymous: true,
-    ipAddress,
-    userAgent,
-    createdAt: now,
-    indexedAt: null
-  });
+  const mongoSession = await mongoose.startSession();
+  try {
+    await mongoSession.withTransaction(async () => {
+      await createAuditRecord({
+        auditId: uuidv4(),
+        sessionId,
+        walletAddress: unsignedUserOp.sender.toLowerCase(),
+        projectId,
+        amount: amountFromCalldata,
+        trustMultiplier,
+        riskScore,
+        userOpHash,
+        onChainTxHash: null,
+        onChainBlockNumber: null,
+        paymasterSponsoredGas: true,
+        claimedByUserId: null,
+        isAnonymous: true,
+        ipAddress,
+        userAgent,
+        createdAt: now,
+        indexedAt: null
+      }, mongoSession);
 
-  // Chỉ set flag sau khi audit record được tạo thành công
-  // Nếu không thì donation bị stuck — reconciliation worker sẽ phát hiện orphan audit
-  await updateGuestWalletSession(sessionId, {
-    hasPendingDonation: true,
-    updatedAt: now
-  });
+      await updateGuestWalletSession(sessionId, {
+        hasPendingDonation: true,
+        updatedAt: now
+      }, mongoSession);
+    });
+  } finally {
+    await mongoSession.endSession();
+  }
 
   logger.info('Guest donation sponsored.', {
     sponsorshipId,
@@ -545,7 +545,7 @@ export async function sponsorGuestDonation(
     amount: amountFromCalldata
   });
 
-  // Buoc 9: Return result
+  // Buoc 8: Return result
   const result: SponsorPaymasterResult = {
     paymasterAndData: paymasterResult.paymasterAndData,
     userOpHash: paymasterResult.userOpHash,
@@ -563,3 +563,8 @@ export async function sponsorGuestDonation(
 
   return result;
 }
+
+/**
+ * Export các pure functions để unit test.
+ */
+export { decodeDonationCalldata, computeUserOpHash };

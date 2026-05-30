@@ -4,6 +4,7 @@
  * Không chứa business logic.
  */
 import { Request, Response } from 'express';
+import { ethers } from 'ethers';
 import {
   createNewGuestSession,
   refreshExistingSession,
@@ -13,19 +14,18 @@ import { sponsorGuestDonation } from '../services/guestPaymasterService';
 import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { getLogger } from '../config/logger';
-import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
 
 /**
  * Hàm extract IP address từ request.
- * Ưu tiên: x-forwarded-for header → request.ip → fallback.
+ * Ưu tiên: request.ip đã được Express xử lý an toàn qua trust proxy setting.
+ * Việc tự parse header x-forwarded-for sẽ tạo lỗ hổng IP spoofing
+ * (kẻ tấn công cố tình gửi X-Forwarded-For để giả mạo IP).
+ * app.ts đã set 'trust proxy', Express sẽ tự động populate request.ip
+ * từ right-most non-trusted hop một cách an toàn.
  */
 function extractClientIp(request: Request): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim().length > 0) {
-    return forwarded.split(',')[0].trim();
-  }
   return request.ip || 'unknown';
 }
 
@@ -43,11 +43,19 @@ function extractRequestMetadata(request: Request): { ipAddress: string; userAgen
 }
 
 /**
- * Hàm validate EIP-55 checksum wallet address.
- * Mục đích: reject địa chỉ không hợp lệ trước khi tạo session.
+ * Hàm validate EVM wallet address.
+ * Dùng ethers.getAddress() để verify địa chỉ EVM hợp lệ (checksum).
+ * Không so sánh strict với input vì ZeroDev luôn trả checksummed address
+ * nhưng client/UI có thể gửi lowercase — ethers vẫn accept.
+ * Nếu ethers.getAddress() không throw → địa chỉ hợp lệ.
  */
 function isValidEthereumAddress(address: string): boolean {
-  return /^0x[0-9a-fA-F]{40}$/.test(address);
+  try {
+    ethers.getAddress(address);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -113,11 +121,20 @@ export async function handleCreateGuestSession(
       walletAddress
     });
 
-    if (error instanceof Error) {
-      if (error.message.includes('giới hạn')) {
-        sendErrorResponse(response, 429, error.message, 'GUEST_SESSION_LIMIT_EXCEEDED');
-        return;
-      }
+    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
+    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
+    // để tránh prototype chain mismatch giữa mock class và real class.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'statusCode' in error &&
+      'errorCode' in error &&
+      typeof (error as Record<string, unknown>).statusCode === 'number' &&
+      typeof (error as Record<string, unknown>).errorCode === 'string'
+    ) {
+      const appError = error as { statusCode: number; errorCode: string; message: string };
+      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
+      return;
     }
 
     sendErrorFromUnknown(response, error, 'Không thể tạo phiên guest. Vui lòng thử lại.');
@@ -156,15 +173,20 @@ export async function handleRefreshGuestSession(
       sessionId: guestSession.sessionId
     });
 
-    if (error instanceof Error) {
-      if (error.message.includes('giới hạn')) {
-        sendErrorResponse(response, 429, error.message, 'GUEST_RENEWAL_LIMIT_EXCEEDED');
-        return;
-      }
-      if (error.message.includes('hết hạn')) {
-        sendErrorResponse(response, 401, error.message, 'GUEST_SESSION_EXPIRED');
-        return;
-      }
+    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
+    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
+    // để tránh prototype chain mismatch giữa mock class và real class.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'statusCode' in error &&
+      'errorCode' in error &&
+      typeof (error as Record<string, unknown>).statusCode === 'number' &&
+      typeof (error as Record<string, unknown>).errorCode === 'string'
+    ) {
+      const appError = error as { statusCode: number; errorCode: string; message: string };
+      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
+      return;
     }
 
     sendErrorFromUnknown(response, error, 'Không thể làm mới phiên guest. Vui lòng thử lại.');
@@ -300,8 +322,19 @@ export async function handleSponsorGuestPaymaster(
       sessionId: guestSession.sessionId
     });
 
-    if (error instanceof ApplicationError) {
-      sendErrorResponse(response, error.statusCode, error.message, error.errorCode);
+    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
+    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
+    // để tránh prototype chain mismatch giữa mock class và real class.
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'statusCode' in error &&
+      'errorCode' in error &&
+      typeof (error as Record<string, unknown>).statusCode === 'number' &&
+      typeof (error as Record<string, unknown>).errorCode === 'string'
+    ) {
+      const appError = error as { statusCode: number; errorCode: string; message: string };
+      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
       return;
     }
 

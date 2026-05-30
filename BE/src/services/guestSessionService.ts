@@ -19,6 +19,7 @@ import {
   computeRiskLevelAndMultiplier
 } from '../repositories/guestDonationRiskRepository';
 import { getLogger } from '../config/logger';
+import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
 
@@ -97,21 +98,28 @@ export async function createNewGuestSession(
 ): Promise<CreateGuestSessionResult> {
   const normalizedWallet = walletAddress.toLowerCase();
 
-  // Kiểm tra giới hạn fingerprint: ≤3 sessions/24h
+  // Kiểm tra giới hạn fingerprint (≤3/24h) và IP burst (≤3/1h) song song
+  // để giảm độ trễ DB round-trip từ 2 lần thành 1 lần.
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const fingerprintCount = await countRecentSessionsByFingerprint(deviceFingerprintHash, oneDayAgo);
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+  const [fingerprintCount, ipCount] = await Promise.all([
+    countRecentSessionsByFingerprint(deviceFingerprintHash, oneDayAgo),
+    countRecentSessionsByIp(ipAddress, oneHourAgo)
+  ]);
+
   if (fingerprintCount >= MAX_SESSIONS_PER_FINGERPRINT) {
-    throw new Error(
-      `Đã đạt giới hạn tạo phiên. Vui lòng sử dụng trình duyệt khác hoặc đăng nhập để tiếp tục.`
+    throw new ApplicationError(
+      'Đã đạt giới hạn tạo phiên. Vui lòng sử dụng trình duyệt khác hoặc đăng nhập để tiếp tục.',
+      429,
+      'GUEST_SESSION_LIMIT_EXCEEDED'
     );
   }
 
-  // Kiểm tra giới hạn IP burst: ≤3 sessions/1h
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const ipCount = await countRecentSessionsByIp(ipAddress, oneHourAgo);
   if (ipCount >= MAX_SESSIONS_PER_IP_PER_HOUR) {
-    throw new Error(
-      `Phát hiện nhiều phiên từ cùng địa chỉ IP. Vui lòng thử lại sau 1 giờ.`
+    throw new ApplicationError(
+      'Phát hiện nhiều phiên từ cùng địa chỉ IP. Vui lòng thử lại sau 1 giờ.',
+      429,
+      'GUEST_IP_BURST_DETECTED'
     );
   }
 
@@ -210,23 +218,43 @@ export async function refreshExistingSession(
 ): Promise<RefreshGuestSessionResult> {
   const session = await findGuestWalletSessionById(sessionId);
   if (!session) {
-    throw new Error('Guest session không tồn tại.');
+    throw new ApplicationError(
+      'Guest session không tồn tại.',
+      404,
+      'GUEST_SESSION_NOT_FOUND'
+    );
   }
 
   if (session.walletAddress.toLowerCase() !== walletAddress.toLowerCase()) {
-    throw new Error('Wallet address không khớp với session.');
+    throw new ApplicationError(
+      'Wallet address không khớp với session.',
+      403,
+      'GUEST_WALLET_MISMATCH'
+    );
   }
 
   if (session.status !== 'ACTIVE') {
-    throw new Error('Guest session đã hết hạn hoặc bị vô hiệu hóa.');
+    throw new ApplicationError(
+      'Guest session đã hết hạn hoặc bị vô hiệu hóa.',
+      401,
+      'GUEST_SESSION_NOT_ACTIVE'
+    );
   }
 
   if (session.expiresAt < new Date()) {
-    throw new Error('Guest session đã hết hạn. Vui lòng tạo phiên mới.');
+    throw new ApplicationError(
+      'Guest session đã hết hạn. Vui lòng tạo phiên mới.',
+      401,
+      'GUEST_SESSION_EXPIRED'
+    );
   }
 
   if (session.renewalCount >= MAX_RENEWAL_COUNT) {
-    throw new Error('Đã đạt giới hạn làm mới phiên. Vui lòng tạo phiên mới.');
+    throw new ApplicationError(
+      'Đã đạt giới hạn làm mới phiên. Vui lòng tạo phiên mới.',
+      429,
+      'GUEST_RENEWAL_LIMIT_EXCEEDED'
+    );
   }
 
   const newExpiry = new Date(Date.now() + SESSION_TTL_MS);
@@ -257,7 +285,11 @@ export async function refreshExistingSession(
 export async function getSessionStatus(sessionId: string): Promise<SessionStatusResult> {
   const session = await findGuestWalletSessionById(sessionId);
   if (!session) {
-    throw new Error('Guest session không tồn tại.');
+    throw new ApplicationError(
+      'Guest session không tồn tại.',
+      404,
+      'GUEST_SESSION_NOT_FOUND'
+    );
   }
 
   const remainingDonations = Math.max(0, MAX_DONATIONS_PER_SESSION - session.donationCount);
