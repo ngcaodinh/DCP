@@ -33,6 +33,19 @@ type LogMetadata = {
   newClusters?: number;
   farmingDetected?: boolean;
   hasPendingDonation?: boolean;
+  paymasterType?: string;
+  sponsorshipId?: string;
+  riskScore?: number;
+  trustMultiplier?: number;
+  newPaymasterType?: string;
+  chainId?: number;
+  token?: string;
+  status?: string | number;
+  body?: string;
+  ipAddress?: string;
+  amount?: number;
+  riskLevel?: string;
+  factors?: Record<string, number>;
 };
 
 /**

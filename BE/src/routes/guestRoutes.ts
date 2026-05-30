@@ -13,7 +13,8 @@ import { Router } from 'express';
 import {
   handleCreateGuestSession,
   handleRefreshGuestSession,
-  handleGetGuestSessionStatus
+  handleGetGuestSessionStatus,
+  handleSponsorGuestPaymaster
 } from '../controllers/guestSessionController';
 import {
   handleGetPendingDonationStatus,
@@ -88,6 +89,17 @@ export function createGuestRoutes(): Router {
     layer1RateLimit,
     guestAuth,
     handleClearPendingDonation
+  );
+
+  // POST /api/guest/paymaster/sponsor — sponsor Paymaster cho guest donation
+  // Chain: metadata → layer1 → auth → donation-rate-limit → handler
+  router.post(
+    '/paymaster/sponsor',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    donationRateLimit,
+    handleSponsorGuestPaymaster
   );
 
   return router;

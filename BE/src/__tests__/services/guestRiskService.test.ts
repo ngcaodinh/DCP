@@ -25,8 +25,8 @@ describe('guestDonationRiskRepository - computeRiskLevelAndMultiplier', () => {
       });
     });
 
-    it('phân loại MEDIUM khi riskScore 51-70', () => {
-      const testScores = [51, 60, 65, 70];
+    it('phân loại MEDIUM khi riskScore 51-69', () => {
+      const testScores = [51, 60, 65, 69];
       testScores.forEach(score => {
         const result = computeRiskLevelAndMultiplier(score);
         expect(result.riskLevel).toBe('MEDIUM');
@@ -34,8 +34,8 @@ describe('guestDonationRiskRepository - computeRiskLevelAndMultiplier', () => {
       });
     });
 
-    it('phân loại HIGH khi riskScore 71-90', () => {
-      const testScores = [71, 75, 80, 85, 90];
+    it('phân loại HIGH khi riskScore 70-90', () => {
+      const testScores = [70, 71, 75, 80, 85, 90];
       testScores.forEach(score => {
         const result = computeRiskLevelAndMultiplier(score);
         expect(result.riskLevel).toBe('HIGH');
@@ -55,8 +55,8 @@ describe('guestDonationRiskRepository - computeRiskLevelAndMultiplier', () => {
 
   describe('Trust Multiplier Calculation', () => {
     it('trustMultiplier giảm theo risk level tăng', () => {
-      const boundaries = [0, 25, 50, 70, 90, 100];
-      const expectedMultipliers = [1.0, 1.0, 0.8, 0.5, 0.2, 0.2];
+      const boundaries = [0, 25, 50, 69, 70, 90, 100];
+      const expectedMultipliers = [1.0, 1.0, 0.8, 0.5, 0.2, 0.2, 0.2];
 
       boundaries.forEach((score, index) => {
         const result = computeRiskLevelAndMultiplier(score);

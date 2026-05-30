@@ -169,9 +169,13 @@ export async function findAllClusterSuspects(
  * Quy tắc:
  * - 0-25:   SAFE      → trustMultiplier = 1.0
  * - 26-50:  LOW       → trustMultiplier = 0.8
- * - 51-70:  MEDIUM    → trustMultiplier = 0.5
- * - 71-90:  HIGH      → trustMultiplier = 0.2 (không block, dùng Token Paymaster)
- * - 91-100: CRITICAL  → trustMultiplier = 0.2 (không block hoàn toàn, Token Paymaster)
+ * - 51-69:  MEDIUM    → trustMultiplier = 0.5
+ * - 70-90:  HIGH      → trustMultiplier = 0.2 (dùng Token Paymaster)
+ * - 91-100: CRITICAL  → trustMultiplier = 0.2 (dùng Token Paymaster)
+ *
+ * Lưu ý: riskScore >= 70 KHÔNG bị block mà dùng Token Paymaster thu phí gas.
+ * Boundary MEDIUM/HIGH phải khớp với RISK_THRESHOLD_FOR_TOKEN_PAYMASTER = 70
+ * trong guestPaymasterService.ts.
  * @param riskScore - Điểm risk từ 0-100
  * @returns Object chứa riskLevel và trustMultiplier tương ứng
  */
@@ -184,7 +188,7 @@ export function computeRiskLevelAndMultiplier(
   if (riskScore <= 50) {
     return { riskLevel: 'LOW', trustMultiplier: 0.8 };
   }
-  if (riskScore <= 70) {
+  if (riskScore < 70) {
     return { riskLevel: 'MEDIUM', trustMultiplier: 0.5 };
   }
   if (riskScore <= 90) {

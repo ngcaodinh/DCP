@@ -78,8 +78,10 @@ docs
 # môi trường framework kiểm thử tự động bằng NUnit + Selenium.
 E2E.Tests
 
-# 
+#
 .cursor/
 
 # Agent capabilities
 .agents/
+
+FE\tsconfig.tsbuildinfo

@@ -13,6 +13,11 @@ import {
   countRecentSessionsByIp
 } from '../repositories/guestWalletSessionRepository';
 import { signGuestSessionToken } from '../config/guestJsonWebToken';
+import { evaluateAndSaveGuestRisk } from './guestRiskService';
+import {
+  upsertGuestDonationRisk,
+  computeRiskLevelAndMultiplier
+} from '../repositories/guestDonationRiskRepository';
 import { getLogger } from '../config/logger';
 
 const logger = getLogger();
@@ -31,6 +36,9 @@ const MAX_RENEWAL_COUNT = 5;
 
 /** Số bytes của server salt. */
 const SERVER_SALT_BYTES = 32;
+
+/** Giới hạn donation per session — dùng chung cho cả service. */
+const MAX_DONATIONS_PER_SESSION = 3;
 
 /** Response type cho tạo session thành công. */
 export type CreateGuestSessionResult = {
@@ -132,6 +140,42 @@ export async function createNewGuestSession(
     updatedAt: now
   });
 
+  // Initial risk assessment sau khi tạo session (Task 4.2)
+  // Đánh giá risk ngay để có risk record sẵn sàng cho Paymaster sponsorship.
+  // Nếu risk evaluation thất bại (VD: RPC error, DB upsert failure), dùng fallback
+  // risk an toàn (SAFE, score=0, multiplier=1.0) để tránh dangling record.
+  try {
+    await evaluateAndSaveGuestRisk(
+      { sessionId, walletAddress: normalizedWallet, deviceFingerprintHash },
+      ipAddress
+    );
+  } catch (error) {
+    // Fallback risk an toàn khi evaluation thất bại — không fail toàn bộ session creation
+    const { riskLevel, trustMultiplier } = computeRiskLevelAndMultiplier(0);
+    await upsertGuestDonationRisk(sessionId, {
+      sessionId,
+      walletAddress: normalizedWallet,
+      riskScore: 0,
+      riskLevel,
+      trustMultiplier,
+      factors: {
+        walletAgeScore: 0,
+        ipBurstScore: 0,
+        fingerprintReuseScore: 0,
+        donationPatternScore: 0,
+        sessionVelocityScore: 0
+      },
+      blocked: false,
+      blockedAt: null,
+      blockedReason: null
+    });
+    logger.warn('Risk evaluation failed, using safe fallback.', {
+      sessionId,
+      walletAddress: normalizedWallet,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   const guestSessionToken = signGuestSessionToken({
     sessionId,
     walletAddress: normalizedWallet
@@ -216,7 +260,7 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
     throw new Error('Guest session không tồn tại.');
   }
 
-  const remainingDonations = Math.max(0, 3 - session.donationCount);
+  const remainingDonations = Math.max(0, MAX_DONATIONS_PER_SESSION - session.donationCount);
 
   return {
     sessionId: session.sessionId,

@@ -9,9 +9,11 @@ import {
   refreshExistingSession,
   getSessionStatus
 } from '../services/guestSessionService';
+import { sponsorGuestDonation } from '../services/guestPaymasterService';
 import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { getLogger } from '../config/logger';
+import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
 
@@ -195,5 +197,114 @@ export async function handleGetGuestSessionStatus(
     });
 
     sendErrorFromUnknown(response, error, 'Không thể lấy trạng thái phiên guest.');
+  }
+}
+
+/**
+ * Hàm xử lý sponsor Paymaster cho guest donation.
+ * Endpoint: POST /api/guest/paymaster/sponsor
+ * Middleware: guestAuthMiddleware đã verify token và gắn guestSession vào request.
+ *
+ * Quy trình:
+ * 1. Validate request body
+ * 2. Check unsignedUserOp.sender khớp session.walletAddress
+ * 3. Gọi sponsorGuestDonation() service
+ * 4. Return paymaster sponsorship data
+ */
+export async function handleSponsorGuestPaymaster(
+  request: GuestSessionRequest,
+  response: Response
+): Promise<void> {
+  const guestSession = request.guestSession;
+  if (!guestSession) {
+    sendErrorResponse(response, 401, 'Vui lòng cung cấp guest session token hợp lệ.', 'GUEST_SESSION_REQUIRED');
+    return;
+  }
+
+  const { ipAddress, userAgent } = extractRequestMetadata(request);
+
+  const body = request.body as {
+    unsignedUserOp?: unknown;
+    projectId?: string;
+    amount?: number;
+    sessionId?: string;
+  };
+
+  if (!body.unsignedUserOp || typeof body.unsignedUserOp !== 'object') {
+    sendErrorResponse(response, 400, 'unsignedUserOp là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  if (!body.projectId || typeof body.projectId !== 'string') {
+    sendErrorResponse(response, 400, 'projectId là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  if (typeof body.amount !== 'number' || body.amount <= 0) {
+    sendErrorResponse(response, 400, 'amount phải là số lớn hơn 0.', 'INVALID_REQUEST');
+    return;
+  }
+
+  // Giới hạn amount tối đa được kiểm tra trong service layer
+  // (validate calldata + cross-check với body.amount)
+
+  if (!body.sessionId || typeof body.sessionId !== 'string') {
+    sendErrorResponse(response, 400, 'sessionId là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  if (body.sessionId !== guestSession.sessionId) {
+    sendErrorResponse(response, 403, 'sessionId không khớp với token.', 'FORBIDDEN');
+    return;
+  }
+
+  const unsignedUserOp = body.unsignedUserOp as Record<string, unknown>;
+
+  if (!unsignedUserOp.sender || typeof unsignedUserOp.sender !== 'string') {
+    sendErrorResponse(response, 400, 'unsignedUserOp.sender là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  if (unsignedUserOp.sender.toLowerCase() !== guestSession.walletAddress.toLowerCase()) {
+    sendErrorResponse(response, 403, 'Sender address không khớp với session wallet.', 'FORBIDDEN');
+    return;
+  }
+
+  if (!unsignedUserOp.callData || typeof unsignedUserOp.callData !== 'string') {
+    sendErrorResponse(response, 400, 'unsignedUserOp.callData là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  try {
+    const result = await sponsorGuestDonation(
+      {
+        unsignedUserOp: unsignedUserOp as Parameters<typeof sponsorGuestDonation>[0]['unsignedUserOp'],
+        projectId: body.projectId,
+        amount: body.amount,
+        sessionId: body.sessionId
+      },
+      ipAddress,
+      userAgent
+    );
+
+    logger.info('Guest paymaster sponsored via API.', {
+      sessionId: guestSession.sessionId,
+      paymasterType: result.paymasterType,
+      riskScore: result.riskScore
+    });
+
+    sendSuccessResponse(response, 200, 'Sponsor Paymaster thành công.', result);
+  } catch (error: unknown) {
+    logger.warn('Guest paymaster sponsorship failed.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: guestSession.sessionId
+    });
+
+    if (error instanceof ApplicationError) {
+      sendErrorResponse(response, error.statusCode, error.message, error.errorCode);
+      return;
+    }
+
+    sendErrorFromUnknown(response, error, 'Không thể sponsor Paymaster. Vui lòng thử lại.');
   }
 }
