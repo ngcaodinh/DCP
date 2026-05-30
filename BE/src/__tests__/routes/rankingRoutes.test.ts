@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../middleware/authenticationMiddleware', () => ({
+vi.mock('../../middleware/authenticationMiddleware', () => ({
   createAuthenticationMiddleware: () => (requestObject: express.Request, _responseObject: express.Response, nextFunction: express.NextFunction) => {
     (requestObject as express.Request & { authenticatedUser?: { userId: string; role: string } }).authenticatedUser = {
       userId: 'admin-1',
@@ -12,25 +12,25 @@ vi.mock('../middleware/authenticationMiddleware', () => ({
   }
 }));
 
-vi.mock('../middleware/roleAuthorizationMiddleware', () => ({
+vi.mock('../../middleware/roleAuthorizationMiddleware', () => ({
   createRoleAuthorizationMiddleware: () => (_requestObject: express.Request, _responseObject: express.Response, nextFunction: express.NextFunction) => {
     nextFunction();
   }
 }));
 
-vi.mock('../middleware/rateLimitMiddleware', () => ({
+vi.mock('../../middleware/rateLimitMiddleware', () => ({
   createRateLimitMiddleware: () => (_requestObject: express.Request, _responseObject: express.Response, nextFunction: express.NextFunction) => {
     nextFunction();
   }
 }));
 
-vi.mock('../services/rankingService', () => ({
+vi.mock('../../services/rankingService', () => ({
   recalculateRankingSnapshot: vi.fn(),
   getCurrentRankingSnapshotPaginated: vi.fn()
 }));
 
-import { createRankingRoutes } from './rankingRoutes';
-import * as rankingService from '../services/rankingService';
+import { createRankingRoutes } from '../../routes/rankingRoutes';
+import * as rankingService from '../../services/rankingService';
 
 /** Hàm tạo app test cho ranking route. Mục đích: tái sử dụng cấu hình express trong các test case. */
 function createTestApplication() {

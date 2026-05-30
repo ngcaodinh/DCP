@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 import { getLogger } from '../config/logger';
 import {
   addSybilAuditLog,
@@ -146,7 +147,7 @@ function calculateRiskLevel(totalScore: number): 'low' | 'medium' | 'high' | 'cr
 /**
  * Tính điểm rủi ro cho từng tiêu chí phát hiện Sybil.
  * Mục đích: áp dụng 5 tiêu chí trong document.md để đánh giá ví có phải Sybil hay không.
- * 
+ *
  * Logic phức tạp:
  * - IP Correlation: đếm số lượng ví donation cùng IP trong 1 giờ gần nhất.
  *   Nếu > 5 ví → +30 điểm. Dưới 5 ví → tỷ lệ thuận.
@@ -159,8 +160,7 @@ function calculateRiskLevel(totalScore: number): 'low' | 'medium' | 'high' | 'cr
  */
 function calculateRiskFactors(
   user: AuthUser,
-  donationList: DonationRecord[],
-  allUsersByIp: Map<string, string[]>
+  donationList: DonationRecord[]
 ): RiskFactorDetail[] {
   const result: RiskFactorDetail[] = [];
   const now = Date.now();
@@ -173,11 +173,18 @@ function calculateRiskFactors(
   let ipCorrelationScore = 0;
 
   // Tính số ví khác cùng IP (dùng Map với IP key để đếm)
+  // Fix B-3: Chỉ dùng correlationId khi nó chứa IP (format: "ip:xxx")
+  // Không fallback sang donorAddress prefix vì nó không chứa thông tin IP
   const ipDonationCountMap = new Map<string, number>();
   donationList.forEach(d => {
-    // Lấy IP từ metadata donation, fallback sang donorAddress prefix
-    const ipKey = d.correlationId.startsWith('ip:') ? d.correlationId : `ip:${d.donorAddress.slice(0, 8)}`;
-    ipDonationCountMap.set(ipKey, (ipDonationCountMap.get(ipKey) || 0) + 1);
+    // Chỉ extract IP từ correlationId nếu format đúng "ip:xxx"
+    if (d.correlationId && d.correlationId.startsWith('ip:')) {
+      const extractedIp = d.correlationId.substring(3); // Bỏ prefix "ip:"
+      if (extractedIp && extractedIp.length > 0) {
+        ipDonationCountMap.set(extractedIp, (ipDonationCountMap.get(extractedIp) || 0) + 1);
+      }
+    }
+    // Nếu correlationId không chứa IP → bỏ qua, không dùng donorAddress fallback
   });
 
   const donationFromSameIp = Array.from(ipDonationCountMap.values()).reduce((sum, count) => sum + count - 1, 0);
@@ -300,7 +307,7 @@ async function buildSybilUserRecord(user: AuthUser): Promise<SybilUserRecord> {
   const donationList = await findDonationsByDonorAddress(user.walletAddress);
 
   // Tính risk score tổng
-  const riskFactors = calculateRiskFactors(user, donationList, new Map());
+  const riskFactors = calculateRiskFactors(user, donationList);
   const totalRiskScore = riskFactors.reduce((sum, factor) => sum + factor.score, 0);
 
   // Tổng donation amount
@@ -347,9 +354,15 @@ async function buildSybilUserRecord(user: AuthUser): Promise<SybilUserRecord> {
  * Mục đích: cung cấp dữ liệu thật từ MongoDB thay vì mock data.
  * 
  * Logic:
- * 1. Lấy toàn bộ user từ MongoDB (loại trừ system accounts).
- * 2. Với mỗi user, tính risk score và risk factors dựa trên donation history.
- * 3. Phân trang và trả về.
+ * 1. Build query filter với tất cả điều kiện (search, sybilStatus, riskLevel)
+ * 2. Query users từ MongoDB với pagination đúng thứ tự
+ * 3. Với mỗi user, tính risk score và risk factors dựa trên donation history
+ * 4. Filter riskScore = 0 (không có donation history)
+ * 
+ * Fix B-2: Không filter sau .limit() nữa — filterRiskLevel không thể apply
+ * trong query vì riskLevel được tính từ donations (lookup), nên:
+ * - Dùng aggregation pipeline để tính riskLevel trong MongoDB
+ * - Filter riskLevel trong $match stage
  */
 export async function getSybilUserList(
   pageNumber: number,
@@ -358,12 +371,13 @@ export async function getSybilUserList(
   filterSybilStatus?: string,
   searchQuery?: string
 ): Promise<SybilUserListResponse> {
-  // Build query filter
-  const queryFilter: Record<string, unknown> = {};
+  const skipCount = (pageNumber - 1) * pageSize;
 
+  // Build search query nếu có
+  const searchMatch: Record<string, unknown> = {};
   if (searchQuery && searchQuery.trim()) {
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    queryFilter.$or = [
+    const normalizedQuery = searchQuery.trim();
+    searchMatch.$or = [
       { walletAddress: { $regex: normalizedQuery, $options: 'i' } },
       { email: { $regex: normalizedQuery, $options: 'i' } },
       { fullName: { $regex: normalizedQuery, $options: 'i' } },
@@ -371,45 +385,187 @@ export async function getSybilUserList(
     ];
   }
 
+  // Build sybil status filter
+  const sybilStatusMatch: Record<string, unknown> = {};
   if (filterSybilStatus === 'sybil') {
-    queryFilter.isSybil = true;
+    sybilStatusMatch.isSybil = true;
   } else if (filterSybilStatus === 'normal') {
-    queryFilter.isSybil = false;
+    sybilStatusMatch.isSybil = false;
   }
 
-  const totalCount = await AuthUserModel.countDocuments(queryFilter).exec();
-  const skipCount = (pageNumber - 1) * pageSize;
+  // Build risk level filter - chỉ áp dụng nếu có filter và filter != 'all'
+  const riskLevelMatch: Record<string, unknown> = {};
+  const applyRiskLevelFilter = filterRiskLevel && filterRiskLevel !== 'all';
 
-  const userRecordList = await AuthUserModel.find(queryFilter)
-    .sort({ lastLoginAt: -1 })
-    .skip(skipCount)
-    .limit(pageSize)
-    .lean<AuthUser[]>()
-    .exec();
+  // Sử dụng aggregation pipeline để:
+  // 1. Filter users theo search và sybilStatus
+  // 2. Lookup donations để tính risk score
+  // 3. Filter theo riskLevel nếu cần
+  // 4. Paginate với $skip và $limit
+  // 5. Trả về kết quả
 
-  // Build SybilUserRecord với risk factors cho từng user
-  const sybilUserRecordList = await Promise.all(
-    userRecordList.map(user => buildSybilUserRecord(user))
+  const pipeline: mongoose.PipelineStage[] = [];
+
+  // Stage 1: Match users theo search query và sybil status
+  const baseMatch: Record<string, unknown> = { ...searchMatch, ...sybilStatusMatch };
+  if (Object.keys(baseMatch).length > 0) {
+    pipeline.push({ $match: baseMatch });
+  }
+
+  // Stage 2: Lookup donations
+  pipeline.push({
+    $lookup: {
+      from: 'donations',
+      localField: 'walletAddress',
+      foreignField: 'donorAddress',
+      as: 'donations'
+    }
+  });
+
+  // Stage 3: Add computed fields (risk score calculation)
+  pipeline.push({
+    $addFields: {
+      donationCount: { $size: '$donations' },
+      totalDonationAmount: { $sum: '$donations.amount' },
+      // Tính IP correlation score đơn giản
+      ipCorrelationCount: {
+        $size: {
+          $filter: {
+            input: '$donations',
+            as: 'd',
+            cond: { $eq: [{ $substr: ['$$d.correlationId', 0, 3] }, 'ip:'] }
+          }
+        }
+      }
+    }
+  });
+
+  // Stage 4: Tính estimated risk score
+  pipeline.push({
+    $addFields: {
+      estimatedRiskScore: {
+        $min: [
+          {
+            $add: [
+              // IP correlation: mỗi IP correlation > 1 từ cùng IP = +6 điểm
+              { $multiply: [{ $max: [{ $subtract: ['$ipCorrelationCount', 1] }, 0] }, 6] },
+              // No social = +10
+              { $cond: [{ $eq: ['$socialProvider', 'none'] }, 10, 0] }
+            ]
+          },
+          100
+        ]
+      }
+    }
+  });
+
+  // Stage 5: Map risk score sang risk level
+  pipeline.push({
+    $addFields: {
+      riskLevel: {
+        $switch: {
+          branches: [
+            { case: { $gte: ['$estimatedRiskScore', RISK_LEVEL_THRESHOLD_CRITICAL] }, then: 'critical' },
+            { case: { $gte: ['$estimatedRiskScore', RISK_LEVEL_THRESHOLD_HIGH] }, then: 'high' },
+            { case: { $gte: ['$estimatedRiskScore', RISK_LEVEL_THRESHOLD_MEDIUM] }, then: 'medium' }
+          ],
+          default: 'low'
+        }
+      }
+    }
+  });
+
+  // Stage 6: Filter theo riskLevel (nếu có) - filter TRƯỚC KHI paginate
+  if (applyRiskLevelFilter) {
+    pipeline.push({ $match: { riskLevel: filterRiskLevel } });
+  }
+
+  // Stage 7: Filter bỏ users không có donations (riskScore = 0)
+  pipeline.push({
+    $match: {
+      estimatedRiskScore: { $gt: 0 }
+    }
+  });
+
+  // Stage 8: Facet để lấy cả total count và paginated results
+  // Total count trước pagination
+  pipeline.push({
+    $facet: {
+      metadata: [{ $count: 'totalCount' }],
+      users: [
+        { $sort: { lastLoginAt: -1 } },
+        { $skip: skipCount },
+        { $limit: pageSize }
+      ]
+    }
+  });
+
+  const aggregationResult = await AuthUserModel.aggregate(pipeline).exec();
+
+  const facetResult = aggregationResult[0] || { metadata: [], users: [] };
+  const totalCount = facetResult.metadata[0]?.totalCount || 0;
+  const userRecordList = facetResult.users;
+
+  // Build SybilUserRecord từ aggregation results
+  const sybilUserRecordList: SybilUserRecord[] = await Promise.all(
+    userRecordList.map((user: Record<string, unknown>) => buildSybilUserRecordFromAggregation(user))
   );
-
-  // Lọc bỏ những ví không có điểm rủi ro (totalRiskScore === 0) — không cần hiển thị
-  let filteredRecords = sybilUserRecordList.filter(record => record.totalRiskScore > 0);
-
-  // Apply risk level filter sau khi đã tính toán
-  if (filterRiskLevel && filterRiskLevel !== 'all') {
-    filteredRecords = filteredRecords.filter(
-      record => record.riskLevel === filterRiskLevel
-    );
-  }
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return {
-    users: filteredRecords,
+    users: sybilUserRecordList,
     totalCount,
     pageNumber,
     pageSize,
     totalPages
+  };
+}
+
+/**
+ * Build SybilUserRecord từ aggregation result (đã có donations populated).
+ * Mục đích: tái sử dụng logic build record cho cả query thường và aggregation.
+ */
+async function buildSybilUserRecordFromAggregation(
+  userData: Record<string, unknown>
+): Promise<SybilUserRecord> {
+  const donationList = (userData.donations as DonationRecord[]) || [];
+  const ipAddressSet = new Set<string>();
+  
+  donationList.forEach((d: DonationRecord) => {
+    if (d.correlationId.startsWith('ip:')) {
+      ipAddressSet.add(d.correlationId.replace('ip:', ''));
+    }
+  });
+
+  const sortedDonations = [...donationList].sort((a, b) =>
+    new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  const totalDonationAmount = donationList.reduce((sum: number, d: DonationRecord) => sum + d.amount, 0);
+  const riskLevel = (userData.riskLevel as 'low' | 'medium' | 'high' | 'critical') || 'low';
+  const estimatedRiskScore = (userData.estimatedRiskScore as number) || 0;
+
+  return {
+    userId: userData.id as string,
+    walletAddress: userData.walletAddress as string,
+    displayName: (userData.fullName as string) || ((userData.email as string)?.split('@')[0] || 'Unknown'),
+    email: userData.email as string,
+    role: userData.role as string,
+    isSybil: userData.isSybil as boolean,
+    riskLevel,
+    totalRiskScore: estimatedRiskScore,
+    donationCount: donationList.length,
+    totalDonationAmount,
+    firstActivity: sortedDonations[0]?.timestamp.toISOString() || (userData.lastLoginAt as Date)?.toISOString() || new Date().toISOString(),
+    lastActivity: sortedDonations[sortedDonations.length - 1]?.timestamp.toISOString() || (userData.lastLoginAt as Date)?.toISOString() || new Date().toISOString(),
+    ipAddresses: Array.from(ipAddressSet),
+    deviceFingerprint: null,
+    riskFactors: [], // Risk factors chi tiết không có trong aggregation, chỉ có estimatedRiskScore
+    createdAt: (userData.lastLoginAt as Date)?.toISOString() || new Date().toISOString(),
+    reviewedAt: null,
+    reviewedBy: null,
+    reviewNote: null
   };
 }
 
@@ -424,7 +580,7 @@ export async function getSybilUserDetail(userId: string): Promise<SybilUserDetai
   }
 
   const donationList = await findDonationsByDonorAddress(user.walletAddress);
-  const riskFactors = calculateRiskFactors(user, donationList, new Map());
+  const riskFactors = calculateRiskFactors(user, donationList);
   const totalRiskScore = riskFactors.reduce((sum, factor) => sum + factor.score, 0);
   const totalDonationAmount = donationList.reduce((sum, d) => sum + d.amount, 0);
 
@@ -581,31 +737,113 @@ export async function toggleSybilStatus(payload: SybilTogglePayload): Promise<Sy
 /**
  * Hàm lấy metrics tổng hợp cho Sybil dashboard.
  * Mục đích: cung cấp số liệu tổng quan thay vì mock data.
+ * 
+ * Fix B-1: Sử dụng MongoDB aggregation pipeline thay vì N+1 queries
+ * để tránh timeout và OOM khi có hàng triệu users/donations.
+ * 
+ * Logic:
+ * 1. Pipeline đầu tiên: join donations để tính risk score cho mỗi user
+ * 2. Tính pending review (risk >= threshold và chưa bị mark là Sybil)
+ * 3. Tính affected donations/amount từ các user đã bị mark Sybil
  */
 export async function getSybilSummaryMetrics(): Promise<SybilSummaryMetrics> {
+  // Đếm số user đã bị đánh dấu Sybil
   const totalMarkedCount = await AuthUserModel.countDocuments({ isSybil: true }).exec();
 
-  // Đếm user có risk score >= threshold (pending review)
-  const allUsers = await AuthUserModel.find({}).lean<AuthUser[]>().exec();
-  let pendingReviewCount = 0;
-  for (const user of allUsers) {
-    const donationList = await findDonationsByDonorAddress(user.walletAddress);
-    const riskFactors = calculateRiskFactors(user, donationList, new Map());
-    const totalRiskScore = riskFactors.reduce((sum, factor) => sum + factor.score, 0);
-    if (totalRiskScore >= RISK_LEVEL_THRESHOLD_HIGH && !user.isSybil) {
-      pendingReviewCount += 1;
+  // Sử dụng aggregation để:
+  // 1. Lookup donations cho mỗi user
+  // 2. Tính risk score trong pipeline
+  // 3. Đếm users có risk >= threshold mà chưa bị mark
+  const pendingReviewAggregation = await AuthUserModel.aggregate([
+    // Lookup donations từ collection Donation
+    {
+      $lookup: {
+        from: 'donations',
+        localField: 'walletAddress',
+        foreignField: 'donorAddress',
+        as: 'donations'
+      }
+    },
+    // Thêm computed field riskScore dựa trên donation patterns
+    {
+      $addFields: {
+        // Đếm donations trong cùng IP (correlationId format: "ip:xxx")
+        ipCorrelationCount: {
+          $size: {
+            $filter: {
+              input: '$donations',
+              as: 'd',
+              cond: { $eq: [{ $substr: ['$$d.correlationId', 0, 3] }, 'ip:'] }
+            }
+          }
+        },
+        donationCount: { $size: '$donations' }
+      }
+    },
+    // Tính risk score đơn giản: ipCorrelation * 6 điểm mỗi IP correlation
+    {
+      $addFields: {
+        estimatedRiskScore: {
+          $min: [
+            {
+              $add: [
+                { $multiply: [{ $subtract: ['$ipCorrelationCount', 1] }, 6] }, // IP correlation
+                { $cond: [{ $eq: ['$socialProvider', 'none'] }, 10, 0] } // No social = +10
+              ]
+            },
+            100
+          ]
+        }
+      }
+    },
+    // Chỉ lấy users có risk >= HIGH threshold và chưa bị mark Sybil
+    {
+      $match: {
+        isSybil: false,
+        estimatedRiskScore: { $gte: RISK_LEVEL_THRESHOLD_HIGH }
+      }
+    },
+    // Đếm kết quả
+    {
+      $count: 'pendingReviewCount'
     }
-  }
+  ]);
 
-  // Tổng affected donations (từ các ví isSybil = true)
-  const sybilUsers = allUsers.filter(u => u.isSybil);
-  let totalAffectedDonations = 0;
-  let totalAffectedAmount = 0;
-  for (const sybilUser of sybilUsers) {
-    const donationList = await findDonationsByDonorAddress(sybilUser.walletAddress);
-    totalAffectedDonations += donationList.length;
-    totalAffectedAmount += donationList.reduce((sum, d) => sum + d.amount, 0);
-  }
+  const pendingReviewCount = pendingReviewAggregation[0]?.pendingReviewCount || 0;
+
+  // Tính affected donations/amount từ các user đã bị mark Sybil
+  const affectedAggregation = await AuthUserModel.aggregate([
+    {
+      $match: { isSybil: true }
+    },
+    // Lookup donations
+    {
+      $lookup: {
+        from: 'donations',
+        localField: 'walletAddress',
+        foreignField: 'donorAddress',
+        as: 'donations'
+      }
+    },
+    // Tính tổng amount cho mỗi user
+    {
+      $addFields: {
+        userTotalAmount: { $sum: '$donations.amount' },
+        userDonationCount: { $size: '$donations' }
+      }
+    },
+    // Group để sum tất cả
+    {
+      $group: {
+        _id: null,
+        totalAffectedDonations: { $sum: '$userDonationCount' },
+        totalAffectedAmount: { $sum: '$userTotalAmount' }
+      }
+    }
+  ]);
+
+  const totalAffectedDonations = affectedAggregation[0]?.totalAffectedDonations || 0;
+  const totalAffectedAmount = affectedAggregation[0]?.totalAffectedAmount || 0;
 
   return {
     totalMarkedCount,

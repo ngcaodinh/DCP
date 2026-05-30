@@ -32,8 +32,10 @@ function getOwnerEncryptionKey(): Buffer {
   return Buffer.from(normalizedSecret, 'hex');
 }
 
-/** Hàm mã hóa private key owner. Mục đích: lưu private key an toàn trong DB theo định dạng iv:ciphertext:tag. */
-function encryptOwnerPrivateKey(ownerPrivateKey: string): string {
+/**
+ * Hàm mã hóa private key owner. Mục đích: lưu private key an toàn trong DB theo định dạng iv:ciphertext:tag.
+ */
+export function encryptOwnerPrivateKey(ownerPrivateKey: string): string {
   const encryptionKey = getOwnerEncryptionKey();
   const ivBuffer = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, ivBuffer);
@@ -42,8 +44,10 @@ function encryptOwnerPrivateKey(ownerPrivateKey: string): string {
   return `${ivBuffer.toString('hex')}:${encryptedBuffer.toString('hex')}:${authTagBuffer.toString('hex')}`;
 }
 
-/** Hàm giải mã private key owner. Mục đích: khôi phục signer để backend gửi UserOperation thay người dùng. */
-function decryptOwnerPrivateKey(encryptedOwnerPrivateKey: string): `0x${string}` {
+/**
+ * Hàm giải mã private key owner. Mục đích: khôi phục signer để backend gửi UserOperation thay người dùng.
+ */
+export function decryptOwnerPrivateKey(encryptedOwnerPrivateKey: string): `0x${string}` {
   const [ivHexValue, encryptedHexValue, authTagHexValue] = String(encryptedOwnerPrivateKey || '').split(':');
   if (!ivHexValue || !encryptedHexValue || !authTagHexValue) {
     throw new Error('Định dạng encrypted owner private key không hợp lệ.');
@@ -86,14 +90,16 @@ async function createKernelClientFromOwnerPrivateKey(ownerPrivateKey: `0x${strin
   const ownerAccount = privateKeyToAccount(ownerPrivateKey);
   const publicClient = getPublicClient();
 
-  const kernelAccount = await createKernelAccount(publicClient as never, {
+  // ZeroDev SDK v5 có type inference phức tạp trên các generic như entryPoint, kernelVersion, bundlerTransport.
+  // `as never` suppress TypeScript errors vì SDK types không align với actual runtime interface.
+  // Runtime safety đảm bảo bởi viem/zerodev runtime khi gọi thực tế.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const kernelAccount = await createKernelAccount(publicClient as any, {
     entryPoint: {
       address: zeroDevConfig.entryPointAddress,
       version: '0.7'
     },
-    // Kernel >= 0.3.3 là bắt buộc khi dùng eip7702Account theo SDK v5.
     kernelVersion: '0.3.3',
-    // SDK v5 yêu cầu validator plugin. Truyền eip7702Account để SDK tự dựng sudo validator.
     eip7702Account: ownerAccount
   } as never);
 

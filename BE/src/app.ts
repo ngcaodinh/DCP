@@ -39,7 +39,29 @@ function configureMiddlewares(): void {
   );
   application.use(
     helmet({
-      crossOriginResourcePolicy: false
+      crossOriginResourcePolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          mediaSrc: ["'self'"],
+          frameSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'self'"],
+          formAction: ["'self'"]
+        }
+      },
+      noSniff: true,
+      xFrameOptions: { action: 'deny' },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      strictTransportSecurity: { maxAge: 63072000, includeSubDomains: true, preload: true },
+      xPermittedCrossDomainPolicies: { permittedPolicies: 'none' }
     })
   );
   application.use(compression());
@@ -71,6 +93,11 @@ function isPublicSseRoute(request: Request): boolean {
   return request.path === '/donations/live-feed/stream';
 }
 
+/** Hàm kiểm tra request có phải guest API hay không. Mục đích: áp dụng Cache-Control no-store cho guest endpoints để tránh lưu cache dữ liệu nhạy cảm. */
+function isGuestApiRoute(request: Request): boolean {
+  return request.path.startsWith('/api/guest');
+}
+
 /** Hàm gắn header đo thời gian phản hồi. Mục đích: hỗ trợ theo dõi hiệu năng API trong production và qua reverse proxy. */
 function applyApiResponseTimeHeader(request: Request, response: Response, next: NextFunction): void {
   const requestStartTime = process.hrtime.bigint();
@@ -90,7 +117,13 @@ function applyApiResponseTimeHeader(request: Request, response: Response, next: 
 function applySeoAndCacheHeaders(request: Request, response: Response, next: NextFunction): void {
   response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
 
-  if (isPublicSseRoute(request)) {
+  if (isGuestApiRoute(request)) {
+    // Guest API routes must never be cached — contains wallet/session data
+    response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.setHeader('Pragma', 'no-cache');
+    response.setHeader('Expires', '0');
+    response.setHeader('Surrogate-Control', 'no-store');
+  } else if (isPublicSseRoute(request)) {
     response.setHeader('Cache-Control', 'no-cache, no-transform');
     response.setHeader('X-Accel-Buffering', 'no');
   } else if (request.method === 'GET' && isPublicApiRoute(request)) {

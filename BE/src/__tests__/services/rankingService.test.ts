@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { getCurrentRankingSnapshotPaginated, normalizeRankingQueryInput, recalculateRankingSnapshot } from './rankingService';
-import * as rankingRepository from '../repositories/rankingRepository';
+import { getCurrentRankingSnapshotPaginated, normalizeRankingQueryInput, recalculateRankingSnapshot } from '../../services/rankingService';
+import * as rankingRepository from '../../repositories/rankingRepository';
 
-vi.mock('../repositories/rankingRepository', () => ({
+vi.mock('../../repositories/rankingRepository', () => ({
   findDonationsWithMappedUserInTimeRange: vi.fn(),
-  findActiveProjectsByIds: vi.fn(),
+  findAllProjectsByIds: vi.fn(),
   saveRankingSnapshot: vi.fn(),
   findCurrentRankingSnapshot: vi.fn()
 }));
@@ -13,7 +13,7 @@ vi.mock('../repositories/rankingRepository', () => ({
 function getRepositoryMock() {
   return rankingRepository as unknown as {
     findDonationsWithMappedUserInTimeRange: ReturnType<typeof vi.fn>;
-    findActiveProjectsByIds: ReturnType<typeof vi.fn>;
+    findAllProjectsByIds: ReturnType<typeof vi.fn>;
     saveRankingSnapshot: ReturnType<typeof vi.fn>;
     findCurrentRankingSnapshot: ReturnType<typeof vi.fn>;
   };
@@ -48,7 +48,7 @@ describe('rankingService', () => {
       { donationRecord: { amount: 0, projectId: 'P2', donorAddress: '0xD' }, mappedUser: { isSybil: false } },
       { donationRecord: { amount: 9, projectId: 'P2', donorAddress: '0xE' }, mappedUser: { isSybil: true } }
     ]);
-    repositoryMock.findActiveProjectsByIds.mockResolvedValue([
+    repositoryMock.findAllProjectsByIds.mockResolvedValue([
       { projectId: 'P1', name: 'Project One', organizationId: 'Org1' },
       { projectId: 'P2', name: 'Project Two', organizationId: 'Org2' }
     ]);
