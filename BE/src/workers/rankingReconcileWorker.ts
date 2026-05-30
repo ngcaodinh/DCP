@@ -1,5 +1,6 @@
 import { getLogger } from '../config/logger';
 import { reconcileAllProjectMetrics } from '../services/rankingIncrementalService';
+import { runGuestCleanupOnce } from './guestCleanupWorker';
 
 /**
  * Thời điểm chạy reconcile mỗi ngày: 00:00 (nửa đêm).
@@ -66,7 +67,11 @@ export function startRankingReconcileWorker(): void {
       try {
         if (isReconcileTime()) {
           logger.info('Ranking reconcile worker bắt đầu reconcile ngày.');
-          await reconcileAllProjectMetrics(DEFAULT_WINDOW_HOURS);
+          // Reconcile metrics và cleanup guest sessions chạy song song — không phụ thuộc nhau
+          await Promise.all([
+            reconcileAllProjectMetrics(DEFAULT_WINDOW_HOURS),
+            runGuestCleanupOnce()
+          ]);
           logger.info('Ranking reconcile worker hoàn tất reconcile ngày.');
         }
       } catch (error) {

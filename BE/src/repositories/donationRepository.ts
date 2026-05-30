@@ -73,4 +73,9 @@ export async function findPublicDonorListPaginated(pageNumber: number, limitCoun
 export async function upsertDonationRecordByTransactionHash(payload: DonationRecord): Promise<DonationRecord> { return upsertDonationByTransactionHash(payload); }
 /** Hàm lấy block mới nhất đã index. Mục đích: hỗ trợ sync event theo cơ chế incremental. */
 export async function getLatestIndexedBlockNumberFromRepository(): Promise<number> { return findLatestIndexedBlockNumber(); }
+/** Hàm đếm tổng số donation (anonymous + registered) trong một khoảng thời gian. Mục đích: tính % guest donations phục vụ anti-farming check. */
+export async function countTotalDonationsSince(sinceDate: Date): Promise<number> {
+  const { countDonationsSince } = await import('../models/donationModel');
+  return countDonationsSince(sinceDate);
+}
 

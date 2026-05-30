@@ -1,4 +1,5 @@
 type LogMetadata = {
+  sessionId?: string;
   correlationId?: string;
   errorMessage?: string;
   errorStack?: string;
@@ -26,6 +27,12 @@ type LogMetadata = {
   reason?: string;
   userId?: string;
   action?: string;
+  newRenewalCount?: number;
+  expiredSessions?: number;
+  purgedSessions?: number;
+  newClusters?: number;
+  farmingDetected?: boolean;
+  hasPendingDonation?: boolean;
 };
 
 /**

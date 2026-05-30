@@ -200,3 +200,20 @@ export async function markGuestSessionAsClaimed(
     claimedByUserId
   });
 }
+
+/**
+ * Hàm tìm nhiều phiên guest wallet theo danh sách sessionId.
+ * Mục đích: batch fetch phục vụ cluster detection trong cleanup worker.
+ * Tránh N+1 query khi cần session data cho nhiều cluster suspects.
+ *
+ * @param sessionIds - Danh sách sessionId cần tìm
+ * @returns Array các session records
+ */
+export async function findGuestWalletSessionsByIds(
+  sessionIds: string[]
+): Promise<GuestWalletSession[]> {
+  if (!sessionIds.length) return [];
+  return GuestWalletSessionModel.find({ sessionId: { $in: sessionIds } })
+    .lean<GuestWalletSession[]>()
+    .exec();
+}

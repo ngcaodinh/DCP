@@ -1,0 +1,128 @@
+/**
+ * Controller xử lý HTTP requests cho pending donation endpoint (Frontend Sweeper).
+ * Nhiệm vụ: cho phép frontend polling kiểm tra xem session có pending donation hay không.
+ * Được gọi bởi GuestWalletProvider khi hasPendingDonation flag được set.
+ */
+import { Request, Response } from 'express';
+import { findGuestWalletSessionById, updateGuestWalletSession } from '../repositories/guestWalletSessionRepository';
+import { findUnindexedAudits } from '../repositories/anonymousDonationAuditRepository';
+import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
+import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
+import { getLogger } from '../config/logger';
+
+const logger = getLogger();
+
+/**
+ * Response shape cho pending donation status.
+ */
+type PendingDonationStatus = {
+  sessionId: string;
+  walletAddress: string;
+  hasPendingDonation: boolean;
+  pendingAuditCount: number;
+  donationCount: number;
+  totalDonatedAmount: number;
+  status: string;
+};
+
+/**
+ * Hàm xử lý lấy trạng thái pending donation của một session.
+ * Endpoint: GET /api/guest/pending-donation
+ * Middleware: guestAuthMiddleware đã verify token và gắn guestSession vào request.
+ *
+ * Response trả về:
+ * - hasPendingDonation: true nếu reconciliation worker đã set flag
+ * - pendingAuditCount: số audit records chưa được index
+ * - donationCount, totalDonatedAmount: thông tin donation hiện tại
+ */
+export async function handleGetPendingDonationStatus(
+  request: GuestSessionRequest,
+  response: Response
+): Promise<void> {
+  const guestSession = request.guestSession;
+  if (!guestSession) {
+    sendErrorResponse(response, 401, 'Vui lòng cung cấp guest session token hợp lệ.', 'GUEST_SESSION_REQUIRED');
+    return;
+  }
+
+  try {
+    const session = await findGuestWalletSessionById(guestSession.sessionId);
+    if (!session) {
+      sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
+      return;
+    }
+
+    // Lọc theo sessionId ngay tại MongoDB query thay vì filter sau trong JS
+    const unindexedAudits = await findUnindexedAudits(10, guestSession.sessionId);
+    const pendingAuditCount = unindexedAudits.length;
+
+    const status: PendingDonationStatus = {
+      sessionId: session.sessionId,
+      walletAddress: session.walletAddress,
+      hasPendingDonation: session.hasPendingDonation,
+      pendingAuditCount,
+      donationCount: session.donationCount,
+      totalDonatedAmount: session.totalDonatedAmount,
+      status: session.status
+    };
+
+    logger.info('Pending donation status queried.', {
+      sessionId: session.sessionId,
+      hasPendingDonation: session.hasPendingDonation
+    });
+
+    sendSuccessResponse(response, 200, 'Lấy trạng thái pending donation thành công.', status);
+  } catch (error: unknown) {
+    logger.error('Lỗi khi lấy pending donation status.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: guestSession.sessionId
+    });
+    sendErrorFromUnknown(response, error, 'Không thể lấy trạng thái pending donation.');
+  }
+}
+
+/**
+ * Hàm xử lý xóa flag pending donation sau khi frontend đã resume thành công.
+ * Endpoint: POST /api/guest/pending-donation/clear
+ * Middleware: guestAuthMiddleware đã verify token.
+ *
+ * Khi frontend sweep thành công, gọi endpoint này để clear flag.
+ */
+export async function handleClearPendingDonation(
+  request: GuestSessionRequest,
+  response: Response
+): Promise<void> {
+  const guestSession = request.guestSession;
+  if (!guestSession) {
+    sendErrorResponse(response, 401, 'Vui lòng cung cấp guest session token hợp lệ.', 'GUEST_SESSION_REQUIRED');
+    return;
+  }
+
+  try {
+    const session = await findGuestWalletSessionById(guestSession.sessionId);
+    if (!session) {
+      sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
+      return;
+    }
+
+    await updateGuestWalletSession(session.sessionId, {
+      hasPendingDonation: false,
+      updatedAt: new Date()
+    });
+
+    logger.info('Clearing pending donation flag.', {
+      sessionId: session.sessionId
+    });
+
+    sendSuccessResponse(response, 200, 'Đã xóa flag pending donation.', {
+      sessionId: session.sessionId,
+      hasPendingDonation: false
+    });
+  } catch (error: unknown) {
+    logger.error('Lỗi khi xóa pending donation flag.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: guestSession.sessionId
+    });
+    sendErrorFromUnknown(response, error, 'Không thể xóa flag pending donation.');
+  }
+}

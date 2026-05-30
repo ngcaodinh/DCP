@@ -5,6 +5,8 @@ import { connectToRedisSafely } from './config/redis';
 import { startRankingWorker } from './workers/rankingWorker';
 import { startRankingScheduler } from './workers/rankingScheduler';
 import { startRankingReconcileWorker } from './workers/rankingReconcileWorker';
+import { startGuestCleanupWorker } from './workers/guestCleanupWorker';
+import { startDonationReconciliationWorker } from './workers/donationReconciliationWorker';
 import { startDisbursementTransferStatusSweepPolling } from './services/disbursementService';
 
 const serverPort = Number(process.env.PORT) || 4000;
@@ -24,11 +26,11 @@ function shouldRunWorkers(): boolean {
 function startBackgroundWorkers(): void {
   startRankingWorker();
   startRankingScheduler();
-  // Ghi chú logic phức tạp: khởi động reconcile worker để full recompute tất cả projects
-  // mỗi ngày lúc 00:00. Với incremental update, scheduler không còn cần recalc toàn bộ
-  // donations mỗi 5 phút — donation mới được cập nhật O(1) ngay khi ghi nhận.
-  // Reconcile worker đảm bảo metrics không drift theo thời gian.
   startRankingReconcileWorker();
+  // Guest cleanup worker: chạy 1 lần/ngày lúc 00:00 cùng với reconcile
+  startGuestCleanupWorker();
+  // Donation reconciliation worker: chạy mỗi 15 phút kiểm tra pending donations
+  startDonationReconciliationWorker();
   startDisbursementTransferStatusSweepPolling();
 }
 
