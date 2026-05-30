@@ -21,7 +21,8 @@ import {
 } from '../repositories/guestDonationRiskRepository';
 import {
   countRecentSessionsByIp,
-  countRecentSessionsByFingerprint
+  countRecentSessionsByFingerprint,
+  findGuestWalletSessionById
 } from '../repositories/guestWalletSessionRepository';
 import { findAuditsBySessionId } from '../repositories/anonymousDonationAuditRepository';
 
@@ -45,14 +46,23 @@ function getSharedRpcProvider(): ethers.JsonRpcProvider {
 /** Ngưỡng IP burst: ≥3 sessions/IP/1h → +30. */
 const IP_BURST_THRESHOLD = 3;
 
+/** Score khi IP burst được phát hiện. */
+const IP_BURST_SCORE = 30;
+
 /** Ngưỡng fingerprint reuse: ≥3 sessions/fingerprint/24h → +25. */
 const FINGERPRINT_REUSE_THRESHOLD = 3;
+
+/** Score khi fingerprint reuse được phát hiện. */
+const FINGERPRINT_REUSE_SCORE = 25;
 
 /** Ngưỡng wallet age: counterfactual (not deployed) → +20. */
 const WALLET_AGE_RISK_SCORE = 20;
 
 /** Ngưỡng donation pattern: tất cả donations cùng amount → +15. */
 const DONATION_PATTERN_RISK_SCORE = 15;
+
+/** Score khi session velocity cao. */
+const SESSION_VELOCITY_SCORE = 10;
 
 /** Ngưỡng session velocity: <60s → +10. */
 const SESSION_VELOCITY_THRESHOLD_MS = 60_000;
@@ -104,21 +114,39 @@ async function checkWalletAge(walletAddress: string): Promise<number> {
 /**
  * Hàm kiểm tra IP burst — đếm sessions cùng IP trong 1 giờ.
  * ≥3 sessions → cao risk vì có thể là bot/script tạo nhiều wallets.
+ * Fallback về 0 nếu DB query fail để tránh reject Promise.all.
  */
 async function checkIPBurst(ipAddress: string): Promise<number> {
-  const oneHourAgo = new Date(Date.now() - IP_BURST_WINDOW_MS);
-  const count = await countRecentSessionsByIp(ipAddress, oneHourAgo);
-  return count >= IP_BURST_THRESHOLD ? 30 : 0;
+  try {
+    const oneHourAgo = new Date(Date.now() - IP_BURST_WINDOW_MS);
+    const count = await countRecentSessionsByIp(ipAddress, oneHourAgo);
+    return count >= IP_BURST_THRESHOLD ? IP_BURST_SCORE : 0;
+  } catch (error) {
+    logger.warn('Failed to check IP burst.', {
+      ipAddress,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    return 0;
+  }
 }
 
 /**
  * Hàm kiểm tra fingerprint reuse — đếm sessions cùng fingerprint trong 24 giờ.
  * ≥3 sessions → cao risk vì cùng thiết bị tạo nhiều wallets.
+ * Fallback về 0 nếu DB query fail để tránh reject Promise.all.
  */
 async function checkFingerprintReuse(deviceFingerprintHash: string): Promise<number> {
-  const oneDayAgo = new Date(Date.now() - FINGERPRINT_REUSE_WINDOW_MS);
-  const count = await countRecentSessionsByFingerprint(deviceFingerprintHash, oneDayAgo);
-  return count >= FINGERPRINT_REUSE_THRESHOLD ? 25 : 0;
+  try {
+    const oneDayAgo = new Date(Date.now() - FINGERPRINT_REUSE_WINDOW_MS);
+    const count = await countRecentSessionsByFingerprint(deviceFingerprintHash, oneDayAgo);
+    return count >= FINGERPRINT_REUSE_THRESHOLD ? FINGERPRINT_REUSE_SCORE : 0;
+  } catch (error) {
+    logger.warn('Failed to check fingerprint reuse.', {
+      deviceFingerprintHash,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    return 0;
+  }
 }
 
 /**
@@ -148,13 +176,16 @@ async function checkDonationPattern(sessionId: string): Promise<number> {
  * Hàm kiểm tra session velocity — session mới được tạo <60s sau session trước từ cùng IP.
  * Dấu hiệu automated session creation.
  * Dùng countRecentSessionsByIp thay vì findGuestWalletSessionsByIp để tránh load tất cả documents.
+ *
+ * Lưu ý: count > 1 (không phải > 0) để tránh false positive khi chỉ có 1 session
+ * (chính là session đang được tạo). Nếu ≥2 sessions tồn tại trong 60s trước →
+ * suspicious vì cho thấy rapid sequential creation.
  */
 async function checkSessionVelocity(ipAddress: string): Promise<number> {
   try {
     const sinceDate = new Date(Date.now() - SESSION_VELOCITY_THRESHOLD_MS);
     const count = await countRecentSessionsByIp(ipAddress, sinceDate);
-    // Có session mới được tạo trong vòng 60 giây trước → suspicious
-    return count > 0 ? 10 : 0;
+    return count > 1 ? SESSION_VELOCITY_SCORE : 0;
   } catch (error) {
     logger.warn('Failed to check session velocity.', {
       ipAddress,
@@ -193,7 +224,9 @@ export async function evaluateGuestRisk(
     walletAgeScore + ipBurstScore + fingerprintReuseScore + donationPatternScore + sessionVelocityScore
   );
 
-  // computeRiskLevelAndMultiplier từ repository không trả blocked (luôn false vì risk >= 70 dùng Token Paymaster, không block)
+  // blocked = true chỉ khi riskLevel === 'CRITICAL' (riskScore >= 91)
+  // HIGH (70-90): dùng Token Paymaster, KHÔNG block
+  // CRITICAL (91-100): BLOCK — không sponsor gas
   const { riskLevel, trustMultiplier } = computeRiskLevelAndMultiplier(riskScore);
 
   const result: RiskEvaluationResult = {
@@ -207,7 +240,7 @@ export async function evaluateGuestRisk(
       donationPatternScore,
       sessionVelocityScore
     },
-    blocked: false
+    blocked: riskLevel === 'CRITICAL'
   };
 
   logger.info('Guest risk evaluated.', {
@@ -251,32 +284,33 @@ export async function evaluateAndSaveGuestRisk(
 /**
  * Hàm đánh giá và lưu risk với re-evaluation khi donation thất bại.
  * Dùng để tăng risk score nếu có suspicious activity.
+ * Lookup session để lấy deviceFingerprintHash gốc — riskRecord không lưu trường này.
  */
 export async function reEvaluateGuestRisk(
   sessionId: string,
   ipAddress: string
 ): Promise<RiskEvaluationResult> {
-  const riskRecord = await findGuestDonationRiskBySessionId(sessionId);
+  let riskRecord;
+  let session;
 
-  // Nếu không có record cũ, vẫn evaluate để có baseline risk score
-  // deviceFingerprintHash rỗng sẽ cho fingerprintReuseScore = 0 (conservative)
-  const sessionData = riskRecord
-    ? {
-        sessionId: riskRecord.sessionId,
-        walletAddress: riskRecord.walletAddress,
-        deviceFingerprintHash: ''
-      }
-    : null;
+  try {
+    [riskRecord, session] = await Promise.all([
+      findGuestDonationRiskBySessionId(sessionId),
+      findGuestWalletSessionById(sessionId)
+    ]);
+  } catch (error) {
+    throw new Error('Không tìm thấy risk record hoặc session cho phiên này.');
+  }
 
-  if (!sessionData) {
-    throw new Error('Không tìm thấy risk record cho phiên này.');
+  if (!riskRecord || !session) {
+    throw new Error('Không tìm thấy risk record hoặc session cho phiên này.');
   }
 
   return evaluateGuestRisk(
     {
-      sessionId: sessionData.sessionId,
-      walletAddress: sessionData.walletAddress,
-      deviceFingerprintHash: sessionData.deviceFingerprintHash
+      sessionId: riskRecord.sessionId,
+      walletAddress: riskRecord.walletAddress,
+      deviceFingerprintHash: session.deviceFingerprintHash
     },
     ipAddress
   );

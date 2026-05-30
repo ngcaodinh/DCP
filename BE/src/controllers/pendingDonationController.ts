@@ -5,7 +5,6 @@
  */
 import { Request, Response } from 'express';
 import { findGuestWalletSessionById, updateGuestWalletSession } from '../repositories/guestWalletSessionRepository';
-import { findUnindexedAudits } from '../repositories/anonymousDonationAuditRepository';
 import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { getLogger } from '../config/logger';
@@ -19,7 +18,6 @@ type PendingDonationStatus = {
   sessionId: string;
   walletAddress: string;
   hasPendingDonation: boolean;
-  pendingAuditCount: number;
   donationCount: number;
   totalDonatedAmount: number;
   status: string;
@@ -32,7 +30,6 @@ type PendingDonationStatus = {
  *
  * Response trả về:
  * - hasPendingDonation: true nếu reconciliation worker đã set flag
- * - pendingAuditCount: số audit records chưa được index
  * - donationCount, totalDonatedAmount: thông tin donation hiện tại
  */
 export async function handleGetPendingDonationStatus(
@@ -46,21 +43,19 @@ export async function handleGetPendingDonationStatus(
   }
 
   try {
+    // Middleware đã fetch session và gắn vào request với type giới hạn.
+    // Controller cần thêm fields (hasPendingDonation, donationCount, totalDonatedAmount)
+    // nên phải fetch lại — đây là DB access cần thiết cho business logic.
     const session = await findGuestWalletSessionById(guestSession.sessionId);
     if (!session) {
       sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
       return;
     }
 
-    // Lọc theo sessionId ngay tại MongoDB query thay vì filter sau trong JS
-    const unindexedAudits = await findUnindexedAudits(10, guestSession.sessionId);
-    const pendingAuditCount = unindexedAudits.length;
-
     const status: PendingDonationStatus = {
       sessionId: session.sessionId,
       walletAddress: session.walletAddress,
       hasPendingDonation: session.hasPendingDonation,
-      pendingAuditCount,
       donationCount: session.donationCount,
       totalDonatedAmount: session.totalDonatedAmount,
       status: session.status

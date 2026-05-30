@@ -138,11 +138,15 @@ export interface ExecuteClaimResponse {
 
 /**
  * Response trạng thái pending donation cho Frontend Sweeper.
+ * Shape khớp với backend PendingDonationStatus trong pendingDonationController.ts.
  */
 export interface PendingDonationStatusResponse {
+  sessionId: string;
+  walletAddress: string;
   hasPendingDonation: boolean;
-  pendingAmount?: number;
-  pendingProjectId?: string;
+  donationCount: number;
+  totalDonatedAmount: number;
+  status: string;
 }
 
 /* ============================================================
@@ -195,6 +199,10 @@ export class GuestApiError extends Error {
     this.statusCode = response.statusCode ?? 500;
     this.errorCode = (response.errorCode as GuestApiErrorCode) ?? 'UNKNOWN_ERROR';
     this.details = response.details;
+    // Preserve stack trace for better debugging
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, GuestApiError);
+    }
   }
 }
 
@@ -389,16 +397,47 @@ export async function getPendingDonationStatus(
  *
  * @param token - guestSessionToken (Bearer)
  * @throws GuestApiError khi session không hợp lệ
+ *
+ * @remarks
+ * Backend trả 204 No Content khi thành công (không có response body).
+ * Dùng buildApiUrl() để đảm bảo consistency với các method khác trong file.
+ * Raw fetch được giữ lại vì cần handle 204 No Content đặc biệt (không có JSON body).
  */
 export async function clearPendingDonation(token: string): Promise<void> {
-  const response = await fetchApi<Record<string, never>>(
-    buildApiUrl('/api/guest/pending-donation/clear'),
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+  const url = buildApiUrl('/api/guest/pending-donation/clear');
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`
     }
-  );
-  void response;
+  });
+
+  if (!response.ok) {
+    const body = await parseJsonSafelyFromResponse(response);
+    throw new GuestApiError({
+      success: false,
+      message: body && typeof body === 'object' && 'message' in body
+        ? String((body as { message: string }).message)
+        : 'Không thể xóa pending donation.',
+      errorCode: body && typeof body === 'object' && 'errorCode' in body
+        ? String((body as { errorCode: string }).errorCode)
+        : 'UNKNOWN_ERROR',
+      statusCode: response.status
+    });
+  }
+}
+
+/**
+ * Parse response body as JSON một cách an toàn, trả null nếu body rỗng.
+ * Dùng cho các endpoint trả 204 No Content.
+ */
+async function parseJsonSafelyFromResponse(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }

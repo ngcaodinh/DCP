@@ -1,3 +1,53 @@
+/**
+ * Hàm redact sensitive data khỏi metadata object trước khi log.
+ * Ngăn chặn việc log các thông tin nhạy cảm như tokens, passwords, PII.
+ *
+ * Các fields cần redact: token, body, deviceFingerprintHash, ipAddress, walletAddress
+ * Chỉ redact khi giá trị là string dài (>8 chars để tránh truncate ngắn).
+ */
+function redactSensitiveData(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+
+  const redacted = { ...metadata };
+
+  // Redact token - có thể chứa Bearer tokens hoặc session tokens
+  if (redacted.token && typeof redacted.token === 'string' && redacted.token.length > 8) {
+    redacted.token = `${redacted.token.substring(0, 8)}...[REDACTED]`;
+  }
+
+  // Redact body - có thể chứa passwords, PII - luôn redact vì có thể chứa sensitive data
+  if (redacted.body && typeof redacted.body === 'string') {
+    redacted.body = `[BODY_LENGTH:${redacted.body.length}][REDACTED]`;
+  }
+
+  // Redact deviceFingerprintHash - có thể dùng để track users across sessions
+  if (redacted.deviceFingerprintHash && typeof redacted.deviceFingerprintHash === 'string') {
+    redacted.deviceFingerprintHash = '[FINGERPRINT_REDACTED]';
+  }
+
+  // Redact IP address trong risk context - có thể dùng để track users
+  if (redacted.ipAddress && typeof redacted.ipAddress === 'string') {
+    redacted.ipAddress = '[IP_REDACTED]';
+  }
+
+  // Redact wallet address - có thể link với on-chain activity
+  if (redacted.walletAddress && typeof redacted.walletAddress === 'string') {
+    redacted.walletAddress = `${redacted.walletAddress.substring(0, 6)}...[REDACTED]`;
+  }
+
+  // Redact session ID - có thể dùng để track user sessions
+  if (redacted.sessionId && typeof redacted.sessionId === 'string') {
+    redacted.sessionId = `[SESSION_REDACTED]`;
+  }
+
+  // Redact smart account address - có thể link với on-chain activity
+  if (redacted.smartAccountAddress && typeof redacted.smartAccountAddress === 'string') {
+    redacted.smartAccountAddress = `${redacted.smartAccountAddress.substring(0, 6)}...[REDACTED]`;
+  }
+
+  return redacted;
+}
+
 type LogMetadata = {
   sessionId?: string;
   correlationId?: string;
@@ -46,6 +96,7 @@ type LogMetadata = {
   amount?: number;
   riskLevel?: string;
   factors?: Record<string, number>;
+  deviceFingerprintHash?: string;
 };
 
 /**
@@ -70,7 +121,8 @@ const logger = {
    */
   info(message: string, metadata?: LogMetadata): void {
     if (metadata) {
-      console.log(message, metadata);
+      const safeMetadata = redactSensitiveData(metadata);
+      console.log(message, safeMetadata);
       return;
     }
     console.log(message);
@@ -81,7 +133,8 @@ const logger = {
    */
   warn(message: string, metadata?: LogMetadata): void {
     if (metadata) {
-      console.warn(message, metadata);
+      const safeMetadata = redactSensitiveData(metadata);
+      console.warn(message, safeMetadata);
       return;
     }
     console.warn(message);
@@ -92,7 +145,8 @@ const logger = {
    */
   error(message: string, metadata?: LogMetadata): void {
     if (metadata) {
-      console.error(message, metadata);
+      const safeMetadata = redactSensitiveData(metadata);
+      console.error(message, safeMetadata);
       return;
     }
     console.error(message);

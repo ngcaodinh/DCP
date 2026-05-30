@@ -84,4 +84,4 @@ E2E.Tests
 # Agent capabilities
 .agents/
 
-FE\tsconfig.tsbuildinfo
+FE/tsconfig.tsbuildinfo
