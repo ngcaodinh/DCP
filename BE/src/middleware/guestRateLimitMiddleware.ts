@@ -219,8 +219,9 @@ async function checkGuestSessionRedisLimit(clientIp: string): Promise<boolean> {
 
     return true;
   } catch (error) {
-    logger.warn('Redis rate limit check failed, allowing request.', {
-      errorMessage: error instanceof Error ? error.message : String(error)
+    logger.error('[checkGuestSessionRedisLimit] Redis rate limit check failed, bypassing layer 2.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      context: { clientIp }
     });
     return true;
   }
@@ -247,8 +248,9 @@ async function checkGuestDonationRedisLimit(sessionId: string): Promise<boolean>
 
     return currentCount <= 3;
   } catch (error) {
-    logger.warn('Redis donation rate limit check failed, allowing request.', {
-      errorMessage: error instanceof Error ? error.message : String(error)
+    logger.error('[checkGuestDonationRedisLimit] Redis donation rate limit check failed, bypassing layer 2.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      context: { sessionId }
     });
     return true;
   }

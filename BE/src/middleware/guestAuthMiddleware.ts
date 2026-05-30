@@ -13,6 +13,9 @@ import { verifyGuestSessionToken, type GuestSessionClaims } from '../config/gues
 import { findGuestWalletSessionById } from '../repositories/guestWalletSessionRepository';
 import { sendErrorResponse } from '../utils/apiResponse';
 import { extractBearerToken } from '../utils/tokenExtractor';
+import { getLogger } from '../config/logger';
+
+const logger = getLogger();
 
 /** Request type mở rộng để chứa guest session data. */
 export type GuestSessionRequest = Request & {
@@ -49,7 +52,17 @@ export function createGuestAuthMiddleware() {
       return;
     }
 
-    const session = await findGuestWalletSessionById(claims.sessionId);
+    let session;
+    try {
+      session = await findGuestWalletSessionById(claims.sessionId);
+    } catch (error) {
+      logger.error('[guestAuthMiddleware] Lỗi khi truy vấn guest session từ DB.', {
+        errorMessage: error instanceof Error ? error.message : String(error)
+      });
+      sendErrorResponse(response, 500, 'Lỗi hệ thống khi xác thực phiên.', 'INTERNAL_SERVER_ERROR');
+      return;
+    }
+
     if (!session) {
       sendErrorResponse(response, 401, 'Guest session không tồn tại.', 'GUEST_SESSION_NOT_FOUND');
       return;

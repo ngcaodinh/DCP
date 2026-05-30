@@ -13,8 +13,14 @@ import { createDisbursementRoutes } from './routes/disbursementRoutes';
 import { createAdminDashboardRoutes } from './routes/adminDashboardRoutes';
 import { createNotificationRoutes } from './routes/notificationRoutes';
 import { createGuestRoutes } from './routes/guestRoutes';
+import { validateGuestJwtConfig } from './config/guestJsonWebToken';
 
 const application = express();
+
+// Fail-fast: kiểm tra GUEST_JWT_SECRET ngay khi app khởi động.
+// Nếu thiếu hoặc quá ngắn → crash ngay lập tức thay vì đợi request đầu tiên.
+// Giúp dev phát hiện thiếu .env sớm nhất có thể.
+validateGuestJwtConfig();
 
 /** Hàm cấu hình middleware chính cho ứng dụng. Mục đích: áp dụng bảo mật, tối ưu hiệu năng và parse request body cho toàn hệ thống. */
 function configureMiddlewares(): void {

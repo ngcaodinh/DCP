@@ -95,6 +95,7 @@ type LogMetadata = {
   ipAddress?: string;
   amount?: number;
   riskLevel?: string;
+  context?: Record<string, unknown>;
   factors?: Record<string, number>;
   deviceFingerprintHash?: string;
 };

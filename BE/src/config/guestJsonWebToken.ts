@@ -26,6 +26,27 @@ export type GuestSessionClaims = {
 };
 
 /**
+ * Hàm xác thực cấu hình guest JWT tại startup — fail-fast.
+ * Mục đích: phát hiện thiếu/misconfigured GUEST_JWT_SECRET ngay khi server khởi động,
+ * thay vì đợi request đầu tiên mới ném lỗi → dev không thấy cảnh báo rõ ràng.
+ */
+export function validateGuestJwtConfig(): void {
+  const secretKey = process.env.GUEST_JWT_SECRET;
+  if (!secretKey) {
+    throw new Error(
+      '[GuestJWT] GUEST_JWT_SECRET chưa được cấu hình trong .env. ' +
+      'Vui lòng thêm GUEST_JWT_SECRET=your_strong_guest_jwt_secret_min_32_chars vào .env'
+    );
+  }
+  if (secretKey.length < 32) {
+    throw new Error(
+      `[GuestJWT] GUEST_JWT_SECRET phải có ít nhất 32 ký tự (hiện tại: ${secretKey.length}). ` +
+      'Vui lòng cập nhật giá trị GUEST_JWT_SECRET trong .env'
+    );
+  }
+}
+
+/**
  * Hàm lấy khóa bí mật ký guest session token.
  * Mục đích: tách biệt hoàn toàn với JWT_SECRET của user thường.
  */
