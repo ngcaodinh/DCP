@@ -96,10 +96,15 @@ export async function handleClearPendingDonation(
   try {
     // Sử dụng guestSession từ middleware thay vì fetch lại từ DB
     // (request.guestSession đã được auth middleware xác thực)
-    await updateGuestWalletSession(guestSession.sessionId, {
+    const updatedSession = await updateGuestWalletSession(guestSession.sessionId, {
       hasPendingDonation: false,
       updatedAt: new Date()
     });
+
+    if (!updatedSession) {
+      sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
+      return;
+    }
 
     logger.info('Clearing pending donation flag.', {
       sessionId: guestSession.sessionId

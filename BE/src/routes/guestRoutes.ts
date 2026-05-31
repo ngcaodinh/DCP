@@ -8,13 +8,17 @@
  * - createGuestSessionRateLimitMiddleware: Lớp 2 business limit (Redis)
  * - createGuestAuthMiddleware: xác thực guest JWT
  * - createGuestDonationRateLimitMiddleware: Lớp 2 donation sponsor limit (Redis)
+ * - createAuthenticationMiddleware: xác thực registered user JWT (cho claim endpoints)
  */
 import { Router } from 'express';
 import {
   handleCreateGuestSession,
   handleRefreshGuestSession,
   handleGetGuestSessionStatus,
-  handleSponsorGuestPaymaster
+  handleSponsorGuestPaymaster,
+  handlePrepareGuestClaim,
+  handleExecuteGuestClaim,
+  handlePartialGuestClaim
 } from '../controllers/guestSessionController';
 import {
   handleGetPendingDonationStatus,
@@ -26,6 +30,7 @@ import {
   createGuestDonationRateLimitMiddleware
 } from '../middleware/guestRateLimitMiddleware';
 import { createGuestAuthMiddleware } from '../middleware/guestAuthMiddleware';
+import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
 import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
 
 /**
@@ -40,6 +45,7 @@ export function createGuestRoutes(): Router {
   const guestAuth = createGuestAuthMiddleware();
   const donationRateLimit = createGuestDonationRateLimitMiddleware();
   const metadata = attachRequestMetadata();
+  const authMiddleware = createAuthenticationMiddleware();
 
   // POST /api/guest/session — tạo phiên guest wallet mới
   // Chain: metadata → layer1 → redis-session-limit → handler
@@ -100,6 +106,36 @@ export function createGuestRoutes(): Router {
     guestAuth,
     donationRateLimit,
     handleSponsorGuestPaymaster
+  );
+
+  // POST /api/guest/claim/prepare — chuẩn bị claim EOA (Keyless Claim)
+  // Chain: metadata → layer1 (anti-DDoS) → auth (registered user JWT) → handler
+  router.post(
+    '/claim/prepare',
+    metadata,
+    layer1RateLimit,
+    authMiddleware,
+    handlePrepareGuestClaim
+  );
+
+  // POST /api/guest/claim/execute — thực thi keyless claim
+  // Chain: metadata → layer1 (anti-DDoS) → auth (registered user JWT) → handler
+  router.post(
+    '/claim/execute',
+    metadata,
+    layer1RateLimit,
+    authMiddleware,
+    handleExecuteGuestClaim
+  );
+
+  // POST /api/guest/claim/partial — partial claim (fallback khi owner key mất)
+  // Chain: metadata → layer1 (anti-DDoS) → auth (registered user JWT) → handler
+  router.post(
+    '/claim/partial',
+    metadata,
+    layer1RateLimit,
+    authMiddleware,
+    handlePartialGuestClaim
   );
 
   return router;

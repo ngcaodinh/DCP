@@ -302,15 +302,19 @@ export async function purgeOldGuestSessions(cutoffDate: Date): Promise<number> {
 /**
  * Hàm đánh dấu phiên guest wallet đã được claim.
  * Mục đích: cập nhật trạng thái sau khi user claim ví ẩn danh thành tài khoản.
+ * @param sessionId - ID của session cần đánh dấu
+ * @param claimedByUserId - ID của user đã claim
+ * @param mongoSession - MongoDB session cho transaction (tùy chọn)
  */
 export async function markGuestSessionAsClaimed(
   sessionId: string,
-  claimedByUserId: string
+  claimedByUserId: string,
+  mongoSession?: mongoose.ClientSession
 ): Promise<GuestWalletSession | null> {
   return updateGuestWalletSession(sessionId, {
     status: 'CLAIMED',
     claimedByUserId
-  });
+  }, mongoSession);
 }
 
 /**

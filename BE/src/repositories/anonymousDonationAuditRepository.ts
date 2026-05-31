@@ -221,11 +221,13 @@ export async function updateAuditByTransactionHash(
  * Mục đích: cập nhật claimedByUserId sau khi guest wallet được migrate sang tài khoản.
  * @param sessionId - ID của phiên guest session
  * @param claimedByUserId - ID của user đã claim
+ * @param mongoSession - MongoDB session cho transaction (tùy chọn)
  * @returns Số bản ghi đã được cập nhật
  */
 export async function linkAuditsToClaimedUser(
   sessionId: string,
-  claimedByUserId: string
+  claimedByUserId: string,
+  mongoSession?: mongoose.ClientSession
 ): Promise<number> {
   const result = await AnonymousDonationAuditModel.updateMany(
     { sessionId },
@@ -233,7 +235,8 @@ export async function linkAuditsToClaimedUser(
       $set: {
         claimedByUserId
       }
-    }
+    },
+    { session: mongoSession }
   );
   return result.modifiedCount;
 }

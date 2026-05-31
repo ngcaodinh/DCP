@@ -15,6 +15,7 @@ export type WalletClaimHistory = {
   claimType: ClaimType;
   keyMigrated: boolean;
   donationsMerged: boolean;
+  changeOwnerTxHash: string;
   ipAddress: string;
   userAgent: string;
   claimedAt: Date;
@@ -34,6 +35,7 @@ const walletClaimHistorySchema = new Schema<WalletClaimHistory>(
     },
     keyMigrated: { type: Boolean, required: true, default: false },
     donationsMerged: { type: Boolean, required: true, default: false },
+    changeOwnerTxHash: { type: String, required: true, default: '' },
     ipAddress: { type: String, required: true },
     userAgent: { type: String, required: true },
     claimedAt: { type: Date, required: true },

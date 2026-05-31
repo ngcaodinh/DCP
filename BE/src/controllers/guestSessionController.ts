@@ -11,9 +11,18 @@ import {
   getSessionStatus
 } from '../services/guestSessionService';
 import { sponsorGuestDonation } from '../services/guestPaymasterService';
+import {
+  prepareClaimEOA,
+  executeKeylessClaim,
+  handlePartialClaim
+} from '../services/guestClaimService';
 import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
+import { createAuthenticationMiddleware, AuthenticatedRequest } from '../middleware/authenticationMiddleware';
 import { getLogger } from '../config/logger';
+import { verifyGuestSessionToken } from '../config/guestJsonWebToken';
+import { findGuestWalletSessionById } from '../repositories/guestWalletSessionRepository';
+import { ApplicationError } from '../utils/applicationError';
 
 const logger = getLogger();
 
@@ -40,6 +49,23 @@ function extractRequestMetadata(request: Request): { ipAddress: string; userAgen
       ? request.headers['user-agent']
       : 'unknown';
   return { ipAddress, userAgent };
+}
+
+/**
+ * Hàm handle ApplicationError bằng instanceof thay vì duck-typing.
+ * Tách riêng thành helper để tránh duplicate code across handlers.
+ * Tương thích với cả ApplicationError thật và mock trong test.
+ */
+function handleApplicationError(
+  response: Response,
+  error: unknown,
+  fallbackMessage: string
+): void {
+  if (error instanceof ApplicationError) {
+    sendErrorResponse(response, error.statusCode, error.message, error.errorCode);
+    return;
+  }
+  sendErrorFromUnknown(response, error, fallbackMessage);
 }
 
 /**
@@ -121,23 +147,7 @@ export async function handleCreateGuestSession(
       walletAddress
     });
 
-    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
-    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
-    // để tránh prototype chain mismatch giữa mock class và real class.
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'statusCode' in error &&
-      'errorCode' in error &&
-      typeof (error as Record<string, unknown>).statusCode === 'number' &&
-      typeof (error as Record<string, unknown>).errorCode === 'string'
-    ) {
-      const appError = error as { statusCode: number; errorCode: string; message: string };
-      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
-      return;
-    }
-
-    sendErrorFromUnknown(response, error, 'Không thể tạo phiên guest. Vui lòng thử lại.');
+    handleApplicationError(response, error, 'Không thể tạo phiên guest. Vui lòng thử lại.');
   }
 }
 
@@ -173,23 +183,7 @@ export async function handleRefreshGuestSession(
       sessionId: guestSession.sessionId
     });
 
-    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
-    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
-    // để tránh prototype chain mismatch giữa mock class và real class.
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'statusCode' in error &&
-      'errorCode' in error &&
-      typeof (error as Record<string, unknown>).statusCode === 'number' &&
-      typeof (error as Record<string, unknown>).errorCode === 'string'
-    ) {
-      const appError = error as { statusCode: number; errorCode: string; message: string };
-      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
-      return;
-    }
-
-    sendErrorFromUnknown(response, error, 'Không thể làm mới phiên guest. Vui lòng thử lại.');
+    handleApplicationError(response, error, 'Không thể làm mới phiên guest. Vui lòng thử lại.');
   }
 }
 
@@ -322,22 +316,293 @@ export async function handleSponsorGuestPaymaster(
       sessionId: guestSession.sessionId
     });
 
-    // Dùng duck-typing để handle cả ApplicationError thật (từ service)
-    // lẫn mock ApplicationError trong test — kiểm tra cấu trúc thay vì instanceof
-    // để tránh prototype chain mismatch giữa mock class và real class.
-    if (
-      typeof error === 'object' &&
-      error !== null &&
-      'statusCode' in error &&
-      'errorCode' in error &&
-      typeof (error as Record<string, unknown>).statusCode === 'number' &&
-      typeof (error as Record<string, unknown>).errorCode === 'string'
-    ) {
-      const appError = error as { statusCode: number; errorCode: string; message: string };
-      sendErrorResponse(response, appError.statusCode, appError.message, appError.errorCode);
+    handleApplicationError(response, error, 'Không thể sponsor Paymaster. Vui lòng thử lại.');
+  }
+}
+
+/**
+ * Hàm xử lý prepare claim EOA cho user.
+ * Endpoint: POST /api/guest/claim/prepare
+ * Auth: registered user JWT (authenticationMiddleware)
+ *
+ * Quy trình:
+ * 1. Extract authenticated user từ request (đã được middleware verify)
+ * 2. Validate guestSessionToken + guestWalletAddress
+ * 3. Gọi prepareClaimEOA() service
+ * 4. Return claimEOAAddress + claimNonce + expiresAt
+ */
+export async function handlePrepareGuestClaim(
+  request: Request,
+  response: Response
+): Promise<void> {
+  const authRequest = request as AuthenticatedRequest;
+  const authenticatedUser = authRequest.authenticatedUser;
+
+  if (!authenticatedUser || !authenticatedUser.userId) {
+    sendErrorResponse(response, 401, 'Vui lòng đăng nhập để tiếp tục.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  const body = request.body as {
+    guestSessionToken?: string;
+    guestWalletAddress?: string;
+  };
+
+  if (!body.guestSessionToken || typeof body.guestSessionToken !== 'string') {
+    sendErrorResponse(response, 400, 'guestSessionToken là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  if (!body.guestWalletAddress || !isValidEthereumAddress(body.guestWalletAddress)) {
+    sendErrorResponse(response, 400, 'Địa chỉ ví không hợp lệ.', 'INVALID_WALLET_ADDRESS');
+    return;
+  }
+
+  const { ipAddress, userAgent } = extractRequestMetadata(request);
+
+  // Bước bảo mật: Xác thực guestSessionToken thuộc về user đã đăng nhập
+  // Ngăn chặn IDOR - attacker có JWT hợp lệ không thể claim ví guest của người khác
+  let decodedToken: { sessionId: string; walletAddress: string };
+  try {
+    decodedToken = verifyGuestSessionToken(body.guestSessionToken);
+  } catch {
+    sendErrorResponse(response, 401, 'Guest session token không hợp lệ hoặc đã hết hạn.', 'INVALID_SESSION_TOKEN');
+    return;
+  }
+
+  // Verify session tồn tại và các ràng buộc trước khi gọi service.
+  // Controller pre-validation là fail-fast layer — không tạo claimEOA nếu session invalid.
+  // Service cũng validate lại để defense-in-depth (chống trường hợp gọi thẳng service không qua controller).
+  // Tradeoff: 2 DB queries thay vì 1 để đảm bảo early rejection không tốn resource tạo EOA.
+  try {
+    const sessionFromDb = await findGuestWalletSessionById(decodedToken.sessionId);
+
+    if (!sessionFromDb) {
+      sendErrorResponse(response, 404, 'Guest session không tồn tại.', 'GUEST_SESSION_NOT_FOUND');
       return;
     }
 
-    sendErrorFromUnknown(response, error, 'Không thể sponsor Paymaster. Vui lòng thử lại.');
+    if (sessionFromDb.walletAddress.toLowerCase() !== body.guestWalletAddress.toLowerCase()) {
+      sendErrorResponse(response, 403, 'Wallet address không khớp với session.', 'GUEST_WALLET_MISMATCH');
+      return;
+    }
+
+    if (sessionFromDb.status !== 'ACTIVE') {
+      sendErrorResponse(
+        response,
+        403,
+        `Session đang ở trạng thái "${sessionFromDb.status}", không thể bắt đầu claim.`,
+        'GUEST_SESSION_NOT_ACTIVE'
+      );
+      return;
+    }
+  } catch (error: unknown) {
+    logger.error('Unexpected error during session pre-validation.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: '[SESSION_REDACTED]'
+    });
+    sendErrorResponse(response, 500, 'Lỗi khi xác thực session. Vui lòng thử lại.', 'INTERNAL_ERROR');
+    return;
+  }
+
+  try {
+    const result = await prepareClaimEOA(
+      decodedToken.sessionId,
+      body.guestWalletAddress,
+      authenticatedUser.userId,
+      ipAddress,
+      userAgent
+    );
+
+    logger.info('Guest claim prepared via API.', {
+      claimNonce: result.claimNonce,
+      userId: authenticatedUser.userId,
+      guestWalletAddress: body.guestWalletAddress
+    });
+
+    sendSuccessResponse(response, 201, 'Chuẩn bị claim thành công. Vui lòng ký transaction trong 10 phút.', result);
+  } catch (error: unknown) {
+    logger.warn('Guest claim prepare failed.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      userId: authenticatedUser.userId
+    });
+
+    handleApplicationError(response, error, 'Không thể chuẩn bị claim. Vui lòng thử lại.');
+  }
+}
+
+/**
+ * Hàm xử lý execute keyless claim.
+ * Endpoint: POST /api/guest/claim/execute
+ * Auth: registered user JWT (authenticationMiddleware)
+ *
+ * Quy trình:
+ * 1. Validate authenticated user
+ * 2. Validate request body (claimNonce, signedUserOp, isNewAccount)
+ * 3. Gọi executeKeylessClaim() service
+ * 4. Return claimId, claimType, changeOwnerTxHash, donationsMerged
+ */
+export async function handleExecuteGuestClaim(
+  request: Request,
+  response: Response
+): Promise<void> {
+  const authRequest = request as AuthenticatedRequest;
+  const authenticatedUser = authRequest.authenticatedUser;
+
+  if (!authenticatedUser || !authenticatedUser.userId) {
+    sendErrorResponse(response, 401, 'Vui lòng đăng nhập để tiếp tục.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  const body = request.body as {
+    guestSessionToken?: string;
+    guestWalletAddress?: string;
+    claimNonce?: string;
+    signedUserOp?: unknown;
+    isNewAccount?: boolean;
+  };
+
+  if (!body.guestSessionToken || typeof body.guestSessionToken !== 'string') {
+    sendErrorResponse(response, 400, 'guestSessionToken là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  if (!body.guestWalletAddress || !isValidEthereumAddress(body.guestWalletAddress)) {
+    sendErrorResponse(response, 400, 'Địa chỉ ví không hợp lệ.', 'INVALID_WALLET_ADDRESS');
+    return;
+  }
+
+  if (!body.claimNonce || typeof body.claimNonce !== 'string') {
+    sendErrorResponse(response, 400, 'claimNonce là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  if (!body.signedUserOp || typeof body.signedUserOp !== 'object') {
+    sendErrorResponse(response, 400, 'signedUserOp là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  const signedUserOp = body.signedUserOp as Record<string, unknown>;
+
+  if (!signedUserOp.sender || typeof signedUserOp.sender !== 'string') {
+    sendErrorResponse(response, 400, 'signedUserOp.sender là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  if (!signedUserOp.callData || typeof signedUserOp.callData !== 'string') {
+    sendErrorResponse(response, 400, 'signedUserOp.callData là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  // Decode JWT để lấy sessionId (UUID) — tách biệt với claimNonce
+  let decodedToken: { sessionId: string; walletAddress: string };
+  try {
+    decodedToken = verifyGuestSessionToken(body.guestSessionToken);
+  } catch {
+    sendErrorResponse(response, 401, 'Guest session token không hợp lệ hoặc đã hết hạn.', 'INVALID_SESSION_TOKEN');
+    return;
+  }
+
+  const { ipAddress, userAgent } = extractRequestMetadata(request);
+
+  try {
+    const result = await executeKeylessClaim(
+      {
+        // sessionId: UUID từ JWT payload — định danh phiên guest trong DB
+        // claimNonce: UUID độc lập từ prepare step — idempotency key
+        sessionId: decodedToken.sessionId,
+        guestWalletAddress: body.guestWalletAddress,
+        claimNonce: body.claimNonce,
+        claimedByUserId: authenticatedUser.userId,
+        signedUserOp: signedUserOp as Parameters<typeof executeKeylessClaim>[0]['signedUserOp'],
+        isNewAccount: Boolean(body.isNewAccount)
+      },
+      ipAddress,
+      userAgent
+    );
+
+    logger.info('Guest claim executed via API.', {
+      claimId: result.claimId,
+      claimType: result.claimType,
+      userId: authenticatedUser.userId
+    });
+
+    sendSuccessResponse(response, 200, 'Claim ví guest thành công! Donations đã được liên kết.', result);
+  } catch (error: unknown) {
+    logger.warn('Guest claim execute failed.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      userId: authenticatedUser.userId
+    });
+
+    handleApplicationError(response, error, 'Không thể thực hiện claim. Vui lòng thử lại.');
+  }
+}
+
+/**
+ * Hàm xử lý partial claim (fallback khi owner key mất).
+ * Endpoint: POST /api/guest/claim/partial
+ * Auth: registered user JWT (authenticationMiddleware)
+ *
+ * Khi user không thể ký Kernel.changeOwner() (owner key đã mất),
+ * chỉ link donation history mà không migrate wallet ownership.
+ */
+export async function handlePartialGuestClaim(
+  request: Request,
+  response: Response
+): Promise<void> {
+  const authRequest = request as AuthenticatedRequest;
+  const authenticatedUser = authRequest.authenticatedUser;
+
+  if (!authenticatedUser || !authenticatedUser.userId) {
+    sendErrorResponse(response, 401, 'Vui lòng đăng nhập để tiếp tục.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  const body = request.body as {
+    guestSessionToken?: string;
+    guestWalletAddress?: string;
+  };
+
+  if (!body.guestSessionToken || typeof body.guestSessionToken !== 'string') {
+    sendErrorResponse(response, 400, 'guestSessionToken là bắt buộc.', 'VALIDATION_ERROR');
+    return;
+  }
+
+  if (!body.guestWalletAddress || !isValidEthereumAddress(body.guestWalletAddress)) {
+    sendErrorResponse(response, 400, 'Địa chỉ ví không hợp lệ.', 'INVALID_WALLET_ADDRESS');
+    return;
+  }
+
+  const { ipAddress, userAgent } = extractRequestMetadata(request);
+
+  try {
+    // Decode guestSessionToken (JWT) để lấy sessionId (UUID) cho service
+    const decodedToken = verifyGuestSessionToken(body.guestSessionToken);
+    const result = await handlePartialClaim(
+      decodedToken.sessionId,
+      body.guestWalletAddress,
+      authenticatedUser.userId,
+      ipAddress,
+      userAgent
+    );
+
+    logger.info('Guest partial claim executed via API.', {
+      claimId: result.claimId,
+      userId: authenticatedUser.userId
+    });
+
+    sendSuccessResponse(
+      response,
+      200,
+      'Donation history đã được liên kết. Wallet ownership không thể migrate do thiếu owner key.',
+      result
+    );
+  } catch (error: unknown) {
+    logger.warn('Guest partial claim failed.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      userId: authenticatedUser.userId
+    });
+
+    handleApplicationError(response, error, 'Không thể thực hiện partial claim. Vui lòng thử lại.');
   }
 }

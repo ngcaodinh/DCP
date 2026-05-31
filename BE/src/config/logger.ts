@@ -45,6 +45,11 @@ function redactSensitiveData(metadata?: Record<string, unknown>): Record<string,
     redacted.smartAccountAddress = `${redacted.smartAccountAddress.substring(0, 6)}...[REDACTED]`;
   }
 
+  // Redact guest wallet address - có thể link với on-chain activity
+  if (redacted.guestWalletAddress && typeof redacted.guestWalletAddress === 'string') {
+    redacted.guestWalletAddress = `${redacted.guestWalletAddress.substring(0, 6)}...[REDACTED]`;
+  }
+
   return redacted;
 }
 
@@ -100,6 +105,18 @@ type LogMetadata = {
   deviceFingerprintHash?: string;
   originalError?: string;
   donorAddress?: string;
+  errorCode?: string;
+  userAgent?: string;
+  claimNonce?: string;
+  claimEOAAddress?: string;
+  claimId?: string;
+  claimType?: string;
+  changeOwnerTxHash?: string;
+  donationsMerged?: number;
+  guestWalletAddress?: string;
+  attempt?: number;
+  maxAttempts?: number;
+  delayMs?: number;
 };
 
 /**
