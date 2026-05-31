@@ -1,9 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { generateDeviceFingerprint } from '@/app/utils/deviceFingerprint';
+import { generateDeviceFingerprint, resetCanvasFingerprintCache } from '@/app/utils/deviceFingerprint';
+
+// Reset canvas fingerprint cache giữa các tests để tránh order-dependent failures
+function resetCanvasCache() {
+  resetCanvasFingerprintCache();
+}
 
 describe('generateDeviceFingerprint', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetCanvasCache();
+  });
+
+  it('should return a hex string on success', async () => {
     vi.stubGlobal('navigator', {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
       language: 'vi-VN',
@@ -15,9 +25,7 @@ describe('generateDeviceFingerprint', () => {
         digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)),
       },
     });
-  });
 
-  it('should return a hex string on success', async () => {
     const fingerprint = await generateDeviceFingerprint();
 
     expect(typeof fingerprint).toBe('string');
@@ -25,6 +33,18 @@ describe('generateDeviceFingerprint', () => {
   });
 
   it('should be deterministic for the same browser attributes', async () => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+      language: 'vi-VN',
+      platform: 'Win32',
+      hardwareConcurrency: 8,
+    });
+    vi.stubGlobal('crypto', {
+      subtle: {
+        digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)),
+      },
+    });
+
     const first = await generateDeviceFingerprint();
     const second = await generateDeviceFingerprint();
 
@@ -32,6 +52,12 @@ describe('generateDeviceFingerprint', () => {
   });
 
   it('should return empty string when crypto.subtle.digest throws', async () => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+      language: 'vi-VN',
+      platform: 'Win32',
+      hardwareConcurrency: 8,
+    });
     vi.stubGlobal('crypto', {
       subtle: {
         digest: vi.fn().mockRejectedValue(new Error('Digest failed')),
@@ -59,16 +85,21 @@ describe('generateDeviceFingerprint', () => {
     expect(fingerprint.length).toBeGreaterThan(0);
   });
 
-  it('should log error when fingerprint generation fails', async () => {
+  it('should return empty string silently when Web Crypto is unavailable', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('navigator', {
+      userAgent: 'TestBrowser/1.0',
+      language: 'en-US',
+      platform: 'Linux',
+    });
     vi.stubGlobal('crypto', {
       subtle: undefined,
     });
 
-    await generateDeviceFingerprint();
+    const fingerprint = await generateDeviceFingerprint();
 
-    expect(consoleSpy).toHaveBeenCalled();
+    expect(fingerprint).toBe('');
+    expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
-
 });

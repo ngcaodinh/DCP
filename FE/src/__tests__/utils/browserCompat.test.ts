@@ -1,21 +1,74 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { detectBrowserCompatibility } from '@/app/utils/browserCompat';
 
+function setupMinimalNavigator() {
+  vi.stubGlobal('navigator', {
+    brave: undefined,
+    storage: undefined,
+  } as unknown as Navigator);
+}
+
+function setupNavigatorWithBrave(isBrave: boolean) {
+  vi.stubGlobal('navigator', {
+    brave: { isBrave: vi.fn().mockResolvedValue(isBrave) },
+    storage: undefined,
+  } as unknown as Navigator);
+}
+
+function setupNavigatorWithSafariPrivate(quota: number) {
+  vi.stubGlobal('navigator', {
+    brave: undefined,
+    storage: { estimate: vi.fn().mockResolvedValue({ quota }) },
+  } as unknown as Navigator);
+}
+
+function setupNavigatorWithBraveAndSafari(isBrave: boolean, quota: number) {
+  vi.stubGlobal('navigator', {
+    brave: { isBrave: vi.fn().mockResolvedValue(isBrave) },
+    storage: { estimate: vi.fn().mockResolvedValue({ quota }) },
+  } as unknown as Navigator);
+}
+
+function setupWorkingLocalStorage() {
+  vi.stubGlobal('localStorage', {
+    setItem: vi.fn(() => {}),
+    getItem: vi.fn(() => '1'),
+    removeItem: vi.fn(),
+  });
+}
+
+function setupBlockedLocalStorage() {
+  vi.stubGlobal('localStorage', {
+    setItem: vi.fn(() => {}),
+    getItem: vi.fn(() => null),
+    removeItem: vi.fn(),
+  });
+}
+
+function setupCryptoAvailable() {
+  vi.stubGlobal('crypto', {
+    randomUUID: vi.fn().mockReturnValue('test-uuid-000'),
+    subtle: { digest: vi.fn() },
+  });
+}
+
+function setupCryptoUnavailable() {
+  vi.stubGlobal('crypto', {
+    randomUUID: vi.fn().mockReturnValue('test-uuid-000'),
+    subtle: null,
+  });
+}
+
 describe('detectBrowserCompatibility', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('should return SAFE when all checks pass', async () => {
-    vi.stubGlobal('localStorage', {
-      setItem: vi.fn(() => {}),
-      getItem: vi.fn(() => '1'),
-      removeItem: vi.fn(),
-    });
-    vi.stubGlobal('navigator', {
-      brave: undefined,
-      storage: undefined,
-    });
+    setupMinimalNavigator();
+    setupWorkingLocalStorage();
+    setupCryptoAvailable();
 
     const result = await detectBrowserCompatibility();
 
@@ -24,15 +77,9 @@ describe('detectBrowserCompatibility', () => {
   });
 
   it('should return CRITICAL when LocalStorage is unavailable', async () => {
-    vi.stubGlobal('localStorage', {
-      setItem: vi.fn(() => {}),
-      getItem: vi.fn(() => null),
-      removeItem: vi.fn(),
-    });
-    vi.stubGlobal('navigator', {
-      brave: undefined,
-      storage: undefined,
-    });
+    setupMinimalNavigator();
+    setupBlockedLocalStorage();
+    setupCryptoAvailable();
 
     const result = await detectBrowserCompatibility();
 
@@ -43,15 +90,9 @@ describe('detectBrowserCompatibility', () => {
   });
 
   it('should return WARNING when Brave Strict mode is detected', async () => {
-    vi.stubGlobal('localStorage', {
-      setItem: vi.fn(() => {}),
-      getItem: vi.fn(() => '1'),
-      removeItem: vi.fn(),
-    });
-    vi.stubGlobal('navigator', {
-      brave: { isBrave: vi.fn().mockResolvedValue(true) },
-      storage: undefined,
-    });
+    setupNavigatorWithBrave(true);
+    setupWorkingLocalStorage();
+    setupCryptoAvailable();
 
     const result = await detectBrowserCompatibility();
 
@@ -62,15 +103,9 @@ describe('detectBrowserCompatibility', () => {
   });
 
   it('should return WARNING when only Safari Private Mode is detected', async () => {
-    vi.stubGlobal('localStorage', {
-      setItem: vi.fn(() => {}),
-      getItem: vi.fn(() => '1'),
-      removeItem: vi.fn(),
-    });
-    vi.stubGlobal('navigator', {
-      brave: undefined,
-      storage: { estimate: vi.fn().mockResolvedValue({ quota: 500_000 }) },
-    });
+    setupNavigatorWithSafariPrivate(500_000);
+    setupWorkingLocalStorage();
+    setupCryptoAvailable();
 
     const result = await detectBrowserCompatibility();
 
@@ -81,15 +116,9 @@ describe('detectBrowserCompatibility', () => {
   });
 
   it('should return CRITICAL when two issues are detected', async () => {
-    vi.stubGlobal('localStorage', {
-      setItem: vi.fn(() => {}),
-      getItem: vi.fn(() => '1'),
-      removeItem: vi.fn(),
-    });
-    vi.stubGlobal('navigator', {
-      brave: { isBrave: vi.fn().mockResolvedValue(true) },
-      storage: { estimate: vi.fn().mockResolvedValue({ quota: 500_000 }) },
-    });
+    setupNavigatorWithBraveAndSafari(true, 500_000);
+    setupWorkingLocalStorage();
+    setupCryptoAvailable();
 
     const result = await detectBrowserCompatibility();
 
@@ -104,25 +133,37 @@ describe('detectBrowserCompatibility', () => {
 
   it('should use randomized key for LocalStorage test', async () => {
     const mockSetItem = vi.fn(() => {});
-    const mockGetItem = vi.fn(() => '1');
     const mockRemoveItem = vi.fn();
     vi.stubGlobal('localStorage', {
       setItem: mockSetItem,
-      getItem: mockGetItem,
+      getItem: vi.fn(() => '1'),
       removeItem: mockRemoveItem,
     });
     vi.stubGlobal('navigator', {
       brave: undefined,
       storage: undefined,
-    });
+    } as unknown as Navigator);
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn().mockReturnValue('test-uuid-123'),
-      subtle: {},
+      subtle: { digest: vi.fn() },
     });
 
     await detectBrowserCompatibility();
 
     expect(mockSetItem).toHaveBeenCalledWith('__dcp_ls_test_test-uuid-123__', '1');
     expect(mockRemoveItem).toHaveBeenCalledWith('__dcp_ls_test_test-uuid-123__');
+  });
+
+  it('should return CRITICAL when Web Crypto is unavailable', async () => {
+    setupMinimalNavigator();
+    setupWorkingLocalStorage();
+    setupCryptoUnavailable();
+
+    const result = await detectBrowserCompatibility();
+
+    expect(result.riskLevel).toBe('CRITICAL');
+    expect(result.details).toContain(
+      'Trình duyệt không hỗ trợ Web Crypto API. Không thể mã hóa owner key.'
+    );
   });
 });

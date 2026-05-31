@@ -16,9 +16,9 @@ export interface BrowserCompatibilityResult {
  * Mục đích: phát hiện trình duyệt chặn LocalStorage (Private Mode, Safari, Firefox Strict).
  * @returns true nếu LocalStorage hoạt động bình thường
  */
-function isLocalStorageAvailable(): boolean {
+async function isLocalStorageAvailable(): Promise<boolean> {
   try {
-    const testKey = `__dcp_ls_test_${crypto.randomUUID ? crypto.randomUUID() : Date.now()}__`;
+    const testKey = `__dcp_ls_test_${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now()}__`;
     localStorage.setItem(testKey, '1');
     const result = localStorage.getItem(testKey) === '1';
     localStorage.removeItem(testKey);
@@ -79,7 +79,8 @@ async function isSafariPrivateMode(): Promise<boolean> {
  */
 function isWebCryptoUnavailable(): boolean {
   try {
-    return typeof crypto === 'undefined' || typeof crypto.subtle === 'undefined';
+    // Kiểm tra cả null lẫn undefined vì jsdom environment có crypto.subtle = null
+    return typeof crypto === 'undefined' || crypto.subtle === null || typeof crypto.subtle === 'undefined';
   } catch {
     return true;
   }
@@ -92,15 +93,16 @@ function isWebCryptoUnavailable(): boolean {
 export async function detectBrowserCompatibility(): Promise<BrowserCompatibilityResult> {
   const details: string[] = [];
 
-  if (!isLocalStorageAvailable()) {
-    details.push('Trình duyệt không hỗ trợ LocalStorage. Dữ liệu ví sẽ không được lưu giữ.');
-  }
-
-  const [braveStrict, safariPrivate, cryptoUnavailable] = await Promise.all([
+  const [localStorageAvailable, braveStrict, safariPrivate, cryptoUnavailable] = await Promise.all([
+    isLocalStorageAvailable(),
     isBraveStrictMode(),
     isSafariPrivateMode(),
     Promise.resolve(isWebCryptoUnavailable()),
   ]);
+
+  if (!localStorageAvailable) {
+    details.push('Trình duyệt không hỗ trợ LocalStorage. Dữ liệu ví sẽ không được lưu giữ.');
+  }
 
   if (braveStrict) {
     details.push('Brave Strict mode đang bật. Một số tính năng bảo mật có thể bị ảnh hưởng.');
@@ -117,13 +119,9 @@ export async function detectBrowserCompatibility(): Promise<BrowserCompatibility
   // Xác định mức độ rủi ro
   let riskLevel: BrowserCompatibilityRiskLevel = 'SAFE';
 
-  if (details.length === 0) {
-    riskLevel = 'SAFE';
-  } else if (cryptoUnavailable || !isLocalStorageAvailable()) {
+  if (details.length >= 2 || cryptoUnavailable || !localStorageAvailable) {
     riskLevel = 'CRITICAL';
-  } else if (details.length >= 2) {
-    riskLevel = 'CRITICAL';
-  } else {
+  } else if (details.length >= 1) {
     riskLevel = 'WARNING';
   }
 
