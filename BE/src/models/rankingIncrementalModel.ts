@@ -10,9 +10,11 @@ import mongoose, { Schema } from 'mongoose';
 export type ProjectIncrementalMetrics = {
   projectId: string;
   totalRaisedAmount: number;      // Σ dᵢ — tổng tiền quyên góp của tất cả donor hợp lệ
-  sumSqrtDonations: number;       // Σ √dᵢ — tổng căn bậc 2 của từng khoản donation
+  sumSqrtDonations: number;       // Σ √dᵢ — tổng căn bậc 2 của từng khoản donation (chưa weighted)
+  weightedSumSqrtDonations: number; // Σ √dᵢ × trustMultiplier — dùng cho QF chính thức khi > 0
   donorAddresses: string[];       // Danh sách địa chỉ ví donor duy nhất (dùng $addToSet)
   totalDonationCount: number;     // Tổng số lần quyên góp (kể cả trùng donor)
+  guestDonationCount: number;     // Số lần quyên góp ẩn danh (trustMultiplier < 1.0)
   lastDonationAt: Date | null;    // Timestamp donation gần nhất (để sort/invalidate cache)
   lastFullRecomputeAt: Date | null; // Timestamp recompute cuối cùng (phát hiện drift)
   recomputeVersion: number;       // Version counter — tăng mỗi full recompute, dùng detect drift
@@ -23,8 +25,10 @@ const incrementalSchema = new Schema<ProjectIncrementalMetrics>({
   projectId: { type: String, required: true, unique: true, index: true },
   totalRaisedAmount: { type: Number, default: 0 },
   sumSqrtDonations: { type: Number, default: 0 },
+  weightedSumSqrtDonations: { type: Number, default: 0 },
   donorAddresses: { type: [String], default: [] },
   totalDonationCount: { type: Number, default: 0 },
+  guestDonationCount: { type: Number, default: 0 },
   lastDonationAt: { type: Date, default: null },
   lastFullRecomputeAt: { type: Date, default: null },
   recomputeVersion: { type: Number, default: 0 },
@@ -54,8 +58,10 @@ export async function getOrCreateProjectMetrics(projectId: string): Promise<Proj
     projectId,
     totalRaisedAmount: 0,
     sumSqrtDonations: 0,
+    weightedSumSqrtDonations: 0,
     donorAddresses: [],
     totalDonationCount: 0,
+    guestDonationCount: 0,
     lastDonationAt: null,
     lastFullRecomputeAt: null,
     recomputeVersion: 0,

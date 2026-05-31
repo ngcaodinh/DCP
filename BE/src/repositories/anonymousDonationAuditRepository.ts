@@ -151,6 +151,35 @@ export async function updateAuditOnChainData(
 }
 
 /**
+ * Hàm cập nhật audit record bằng transaction hash (reverse lookup).
+ * Mục đích: khi sync worker chạy, nó chỉ có transaction hash từ blockchain event
+ * nhưng không có userOpHash. Dùng hàm này để link audit record sau khi
+ * donation event được đồng bộ. Cập nhật idempotent — nếu đã có onChainTxHash
+ * thì bỏ qua để tránh double-update khi job chạy lại.
+ * @param onChainTxHash - Transaction hash trên blockchain
+ * @param onChainBlockNumber - Block number chứa transaction
+ * @returns Số bản ghi đã được cập nhật (0 = đã có data hoặc không tìm thấy)
+ */
+export async function updateAuditByTransactionHash(
+  onChainTxHash: string,
+  onChainBlockNumber: number
+): Promise<number> {
+  const result = await AnonymousDonationAuditModel.updateOne(
+    {
+      onChainTxHash: onChainTxHash,
+      indexedAt: null // Chỉ update nếu chưa được index (idempotent guard)
+    },
+    {
+      $set: {
+        onChainBlockNumber,
+        indexedAt: new Date()
+      }
+    }
+  );
+  return result.modifiedCount;
+}
+
+/**
  * Hàm link audit records đến user đã claim.
  * Mục đích: cập nhật claimedByUserId sau khi guest wallet được migrate sang tài khoản.
  * @param sessionId - ID của phiên guest session

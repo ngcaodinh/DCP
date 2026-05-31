@@ -52,11 +52,12 @@ export async function findGuestWalletSessionById(
 /**
  * Hàm tìm phiên guest wallet theo walletAddress.
  * Mục đích: kiểm tra ví đã có session hay chưa, phục vụ restore.
+ * Filter theo status = 'ACTIVE' để tránh trả về session đã expired/claimed/purged.
  */
 export async function findGuestWalletSessionByWalletAddress(
   walletAddress: string
 ): Promise<GuestWalletSession | null> {
-  return GuestWalletSessionModel.findOne({ walletAddress })
+  return GuestWalletSessionModel.findOne({ walletAddress, status: 'ACTIVE' })
     .lean<GuestWalletSession>()
     .exec();
 }
@@ -176,6 +177,43 @@ export async function updateGuestWalletSession(
     .lean<GuestWalletSession>()
     .exec();
   return updatedSession;
+}
+
+/**
+ * Hàm atomic increment donation counters và reset pending flag cho một session.
+ * Mục đích: dùng trong sync worker sau khi donation được index thành công.
+ *
+ * Design: Dùng atomic $inc + $set trong một findOneAndUpdate duy nhất để:
+ * 1. Tránh race condition TOCTOU — nếu sync worker xử lý 2 events cùng session gần nhau,
+ *    cả 2 sẽ đọc donationCount ban đầu và cộng dồn đúng thay vì dùng stale value.
+ * 2. Reset hasPendingDonation về false — flag này được set=true khi paymaster sponsor,
+ *    cần reset về false khi donation hoàn tất trên blockchain.
+ * 3. Đảm bảo updatedAt luôn được cập nhật.
+ *
+ * @param sessionId - ID của session cần cập nhật
+ * @param amountToAdd - Số lượng token đã donate (đơn vị: 0.01 Token)
+ * @returns Session đã được cập nhật, hoặc null nếu session không tồn tại
+ */
+export async function incrementSessionDonationCounters(
+  sessionId: string,
+  amountToAdd: number
+): Promise<GuestWalletSession | null> {
+  return GuestWalletSessionModel.findOneAndUpdate(
+    { sessionId },
+    {
+      $inc: {
+        donationCount: 1,
+        totalDonatedAmount: amountToAdd
+      },
+      $set: {
+        hasPendingDonation: false,
+        updatedAt: new Date()
+      }
+    },
+    { returnDocument: 'after' }
+  )
+    .lean<GuestWalletSession>()
+    .exec();
 }
 
 /**

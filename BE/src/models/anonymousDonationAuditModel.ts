@@ -53,6 +53,8 @@ anonymousDonationAuditSchema.index({ walletAddress: 1 });
 anonymousDonationAuditSchema.index({ projectId: 1 });
 anonymousDonationAuditSchema.index({ claimedByUserId: 1 });
 anonymousDonationAuditSchema.index({ createdAt: 1 });
+/** Index cho reverse lookup khi sync worker có transactionHash nhưng không có userOpHash. */
+anonymousDonationAuditSchema.index({ onChainTxHash: 1 });
 
 export const AnonymousDonationAuditModel = mongoose.model<AnonymousDonationAudit>(
   'AnonymousDonationAudit',

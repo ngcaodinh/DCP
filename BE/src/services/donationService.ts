@@ -17,12 +17,16 @@ import { applyDonationToMetrics } from './rankingIncrementalService';
 import { invalidateRankingCache } from './rankingCacheService';
 import { findProjectByProjectId } from '../models/projectModel';
 import { createUserNotification } from './notificationService';
+import { findGuestWalletSessionByWalletAddress } from '../repositories/guestWalletSessionRepository';
+import { findGuestDonationRiskByWalletAddress } from '../repositories/guestDonationRiskRepository';
+import { updateAuditByTransactionHash } from '../repositories/anonymousDonationAuditRepository';
+import { incrementSessionDonationCounters } from '../repositories/guestWalletSessionRepository';
 
 const logger = getLogger();
 
 type DonationStatus = 'PENDING_ONCHAIN' | 'ONCHAIN_CONFIRMED' | 'INDEXED';
 
-type DonationEventLog = {
+export type DonationEventLog = {
   transactionHash: string;
   projectId: string;
   donorAddress: string;
@@ -371,6 +375,86 @@ export async function getPublicDonorList(pageNumber: number, limitCount: number,
   return findPublicDonorListPaginated(normalizedPageNumber, normalizedLimitCount, projectId);
 }
 
+/**
+ * Hàm xử lý hậu kỳ index cho donation.
+ * Mục đích: cập nhật audit trail, session counters và metrics sau khi event on-chain được đồng bộ.
+ *
+ * Scope: Xử lý CẢ guest và registered user donations.
+ * - Guest: lookup session → atomic increment counters → reset hasPendingDonation
+ * - Registered: chỉ gọi applyDonationToMetrics với trustMultiplier = 1.0
+ *
+ * Luồng xử lý:
+ * 1. Validate amount để tránh NaN/Infinity từ lỗi parse event
+ * 2. Tìm guest session theo donorAddress với status = ACTIVE — nếu không có → registered user
+ * 3. Lấy risk record để có trustMultiplier (guest: < 1.0, registered: mặc định 1.0)
+ * 4. Cập nhật audit record bằng transaction hash (reverse lookup)
+ * 5. Guest: atomic increment counters + reset hasPendingDonation
+ * 6. LUÔN LUÔN cập nhật metrics với đúng trustMultiplier
+ *
+ * Idempotency: audit update dùng guard indexedAt: null, counters dùng atomic $inc nên re-run an toàn.
+ *
+ * @param donationEvent - Event đã được index từ blockchain
+ * @returns true nếu là guest donation, false nếu là registered user donation
+ */
+/**
+ * Export cho unit testing — không dùng trong production code.
+ * @internal
+ */
+export async function handleDonationPostIndex(
+  donationEvent: DonationEventLog
+): Promise<boolean> {
+  // Validate amount để tránh NaN/Infinity từ lỗi parse event blockchain
+  if (!Number.isFinite(donationEvent.amount) || donationEvent.amount <= 0) {
+    logger.error(`Giá trị amount không hợp lệ từ event. txHash=${donationEvent.transactionHash} amount=${donationEvent.amount}`);
+    throw new ApplicationError(
+      'Giá trị donation không hợp lệ từ blockchain event.',
+      500,
+      'INTERNAL_ERROR'
+    );
+  }
+
+  // Cả hai lời gọi độc lập — dùng Promise.all để tránh cộng dồn latency khi index nhiều events liên tục.
+  const [guestSession, riskRecord] = await Promise.all([
+    findGuestWalletSessionByWalletAddress(donationEvent.donorAddress),
+    findGuestDonationRiskByWalletAddress(donationEvent.donorAddress)
+  ]);
+
+  // isGuestDonation: BẮT BUỘC cả hai điều kiện — (1) event đánh dấu ẩn danh VÀ
+  // (2) ví có session đang ACTIVE. Nếu guest gọi contract trực tiếp với isAnonymous=false,
+  // backend không được tính đây là guest donation để tránh sai lệch session counter.
+  const isGuestDonation = !!(donationEvent.isAnonymous && guestSession && guestSession.status === 'ACTIVE');
+  const trustMultiplier = riskRecord?.trustMultiplier ?? 1.0;
+
+  // Cập nhật audit record bằng transaction hash (reverse lookup — sync worker
+  // không có userOpHash, chỉ có txHash từ blockchain event)
+  const auditUpdated = await updateAuditByTransactionHash(
+    donationEvent.transactionHash,
+    donationEvent.blockNumber
+  );
+  if (auditUpdated > 0) {
+    logger.info(`Audit record linked to on-chain tx. txHash=${donationEvent.transactionHash}`);
+  }
+
+  // Dùng atomic increment thay vì read-then-write để tránh race condition.
+  // Hàm này cũng reset hasPendingDonation = false khi donation hoàn tất trên blockchain.
+  // Kiểm tra rõ ràng guestSession !== null vì TypeScript không tự suy luận narrowing
+  // qua biến cờ boolean bên ngoài.
+  if (isGuestDonation && guestSession) {
+    await incrementSessionDonationCounters(guestSession.sessionId, donationEvent.amount);
+  }
+
+  // LUÔN LUÔN cập nhật metrics với đúng trustMultiplier (cả guest và registered)
+  await applyDonationToMetrics(
+    donationEvent.projectId,
+    donationEvent.amount,
+    donationEvent.donorAddress,
+    trustMultiplier
+  );
+
+  logger.info(`Donation post-indexed. isGuest=${isGuestDonation} sessionId=${guestSession?.sessionId ?? 'n/a'} projectId=${donationEvent.projectId} trustMultiplier=${trustMultiplier}`);
+  return isGuestDonation;
+}
+
 /** Hàm đồng bộ event DonationReceived từ blockchain. Mục đích: index giao dịch on-chain về MongoDB để API history truy vấn nhanh. */
 export async function syncDonationEventsFromBlockchain() {
   const blockchainRpcUrl = process.env.BLOCKCHAIN_RPC_URL?.trim() || '';
@@ -422,13 +506,31 @@ export async function syncDonationEventsFromBlockchain() {
     };
   });
 
+  const processedTransactionHashes: string[] = [];
+  const failedTransactionHashes: string[] = [];
+
   for (const donationEvent of donationEventList) {
-    // Ghi chú logic phức tạp: sử dụng upsert theo transactionHash để đảm bảo đồng bộ idempotent khi job chạy lặp.
-    await upsertDonationRecordByTransactionHash(donationEvent);
-    await createDonationReceivedNotification(donationEvent);
-    // Incremental update running totals — O(1) thay vì full recalculate.
-    // Mỗi event từ blockchain được cập nhật running totals ngay lập tức.
-    await applyDonationToMetrics(donationEvent.projectId, donationEvent.amount, donationEvent.donorAddress);
+    try {
+      // Ghi chú logic phức tạp: sử dụng upsert theo transactionHash để đảm bảo đồng bộ idempotent khi job chạy lặp.
+      await upsertDonationRecordByTransactionHash(donationEvent);
+      await createDonationReceivedNotification(donationEvent);
+
+      // Xử lý post-index: guest donations cần trustMultiplier cho weighted QF,
+      // registered users dùng trustMultiplier=1.0. Hàm này gọi applyDonationToMetrics
+      // với đúng trustMultiplier tương ứng. Hàm này idempotent — audit update dùng guard
+      // indexedAt: null, session counters dùng atomic $inc nên re-run an toàn.
+      await handleDonationPostIndex(donationEvent);
+      processedTransactionHashes.push(donationEvent.transactionHash);
+    } catch (error) {
+      // Ghi chú logic phức tạp: không halt toàn bộ job khi 1 event fail.
+      // Tiếp tục với các event còn lại, log lỗi để operator có thể retry thủ công.
+      failedTransactionHashes.push(donationEvent.transactionHash);
+      logger.error(`Xử lý event donation thất bại. txHash=${donationEvent.transactionHash}`, {
+        errorMessage: (error as Error).message,
+        projectId: donationEvent.projectId,
+        donorAddress: donationEvent.donorAddress
+      });
+    }
   }
 
   // Ghi chú logic phức tạp: invalidate cache sau khi đồng bộ để GET /rankings trả dữ liệu mới.
@@ -437,8 +539,14 @@ export async function syncDonationEventsFromBlockchain() {
     await invalidateRankingCache();
   }
 
-  logger.info(`Donation events synced successfully. totalSyncedEvents=${donationEventList.length} fromBlockNumber=${fromBlockNumber}`);
-  return { totalSyncedEvents: donationEventList.length, fromBlockNumber };
+  logger.info(`Donation events synced. total=${donationEventList.length} success=${processedTransactionHashes.length} failed=${failedTransactionHashes.length} fromBlockNumber=${fromBlockNumber}`);
+  return {
+    totalSyncedEvents: donationEventList.length,
+    successCount: processedTransactionHashes.length,
+    failedCount: failedTransactionHashes.length,
+    failedTransactionHashes,
+    fromBlockNumber
+  };
 }
 
 
@@ -552,10 +660,14 @@ export async function recordDonationFromTransactionHash(authenticatedUserId: str
   await upsertDonationRecordByTransactionHash(donationEventRecord);
   await createDonationReceivedNotification(donationEventRecord);
 
-  // Ghi chú logic phức tạp: incremental update — O(1) update running totals thay vì
-  // recalculate toàn bộ donations (trước đây dùng triggerRealtimeRankingUpdate + enqueueRankingRecalculate).
-  // Phương pháp mới: applyDonationToMetrics cập nhật running totals trong metrics document,
-  // không cần query lại tất cả donations. Bảng xếp hạng phản ánh ngay kết quả donation.
+  // Ghi chú logic phức tạp: KHÔNG dùng handleDonationPostIndex ở đây vì:
+  // - Path này dành cho registered users (có tài khoản đã đăng nhập), không phải guest.
+  // - Audit record cho registered users được tạo ở bước sponsor (trong guestPaymasterService)
+  //   hoặc không cần thiết (donation qua UC3.1 khác flow).
+  // - Session counters chỉ áp dụng cho guest wallets, không có guest session ở đây.
+  // - Chỉ cần cập nhật metrics với trustMultiplier = 1.0 (registered user).
+  // Nếu thêm handleDonationPostIndex vào đây → double-count metrics vì audit lookup
+  // sẽ không match (registered user không có audit record với onChainTxHash từ path này).
   await applyDonationToMetrics(
     donationEventRecord.projectId,
     donationEventRecord.amount,

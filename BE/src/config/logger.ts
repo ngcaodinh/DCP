@@ -99,6 +99,7 @@ type LogMetadata = {
   factors?: Record<string, number>;
   deviceFingerprintHash?: string;
   originalError?: string;
+  donorAddress?: string;
 };
 
 /**

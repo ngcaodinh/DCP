@@ -21,13 +21,20 @@ const logger = getLogger();
  *   QF_Score = (Σ√dᵢ)²
  *   Matching = max(QF_Score - totalRaisedAmount, 0)
  *   TotalScore = totalRaisedAmount + Matching
+ *
+ * Trust weighting: khi có weightedSumSqrtDonations > 0 (tức có guest donations với trustMultiplier < 1.0),
+ * dùng nó cho QF calculation chính thức. Fallback về sumSqrtDonations nếu chưa có weighted data
+ * (backward compatibility cho existing calls từ registered users).
  */
 export function computeQFScoreFromMetrics(metrics: ProjectIncrementalMetrics): {
   quadraticScoreRaw: number;
   matchingAmount: number;
   totalFundingScore: number;
 } {
-  const quadraticScoreRaw = normalizeScoreNumber(metrics.sumSqrtDonations * metrics.sumSqrtDonations);
+  const sumSqrt = metrics.weightedSumSqrtDonations > 0
+    ? metrics.weightedSumSqrtDonations
+    : metrics.sumSqrtDonations;
+  const quadraticScoreRaw = normalizeScoreNumber(sumSqrt * sumSqrt);
   const matchingAmount = normalizeScoreNumber(Math.max(quadraticScoreRaw - metrics.totalRaisedAmount, 0));
   const totalFundingScore = normalizeScoreNumber(metrics.totalRaisedAmount + matchingAmount);
   return { quadraticScoreRaw, matchingAmount, totalFundingScore };
@@ -40,14 +47,18 @@ export function computeQFScoreFromMetrics(metrics: ProjectIncrementalMetrics): {
  * @param projectId - ID của project được donation
  * @param amount - Số lượng token donate
  * @param donorAddress - Địa chỉ ví donor
+ * @param trustMultiplier - Hệ số tin cậy (mặc định 1.0). Giá trị < 1.0 nghĩa là donation ẩn danh từ guest wallet.
+ *                        trustMultiplier ảnh hưởng đến weightedSumSqrtDonations dùng trong QF chính thức.
  */
 export async function applyDonationToMetrics(
   projectId: string,
   amount: number,
-  donorAddress: string
+  donorAddress: string,
+  trustMultiplier: number = 1.0
 ): Promise<void> {
   const lowerCaseAddress = donorAddress.toLowerCase();
   const now = new Date();
+  const isGuestDonation = trustMultiplier < 1.0;
 
   // Ghi chú logic phức tạp: dùng $inc để tăng atomic, $addToSet để thêm donor không trùng.
   // Không cần đọc document trước → hoàn toàn O(1), không race condition.
@@ -55,7 +66,13 @@ export async function applyDonationToMetrics(
     $inc: {
       totalRaisedAmount: amount,
       sumSqrtDonations: Math.sqrt(amount),
-      totalDonationCount: 1
+      totalDonationCount: 1,
+      ...(isGuestDonation
+        ? {
+            weightedSumSqrtDonations: Math.sqrt(amount) * trustMultiplier,
+            guestDonationCount: 1
+          }
+        : {}),
     },
     $addToSet: { donorAddresses: lowerCaseAddress },
     $set: {
@@ -64,7 +81,7 @@ export async function applyDonationToMetrics(
     }
   });
 
-  logger.info(`Incremental metrics updated for project=${projectId}, amount=${amount}, donor=${lowerCaseAddress}`);
+  logger.info(`Incremental metrics updated for project=${projectId}, amount=${amount}, donor=${lowerCaseAddress}, trustMultiplier=${trustMultiplier}, isGuestDonation=${isGuestDonation}`);
 }
 
 /**
@@ -120,8 +137,10 @@ export async function recomputeProjectMetrics(
     $set: {
       totalRaisedAmount,
       sumSqrtDonations,
+      weightedSumSqrtDonations: 0,
       donorAddresses: Array.from(donorSet),
       totalDonationCount: donations.length,
+      guestDonationCount: 0,
       lastDonationAt: donations.length > 0 ? donations[0].timestamp : null,
       lastFullRecomputeAt: now,
       recomputeVersion: 1,
@@ -149,8 +168,10 @@ async function rebuildIncrementalMetricsFromSnapshot(snapshot: { rankingItems: A
         $set: {
           totalRaisedAmount: item.totalRaisedAmount,
           sumSqrtDonations: Math.sqrt(item.totalRaisedAmount), // Ước lượng từ totalRaisedAmount
+          weightedSumSqrtDonations: 0,
           donorAddresses: [],                                   // Không có trong snapshot cũ
-          totalDonationCount: item.uniqueDonorCount,           // Dùng donorCount thay thế
+          totalDonationCount: item.uniqueDonorCount,          // Dùng donorCount thay thế
+          guestDonationCount: 0,
           lastDonationAt: null,
           lastFullRecomputeAt: new Date(),
           recomputeVersion: 1,
