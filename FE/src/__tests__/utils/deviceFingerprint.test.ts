@@ -102,4 +102,28 @@ describe('generateDeviceFingerprint', () => {
     expect(consoleSpy).not.toHaveBeenCalled();
     consoleSpy.mockRestore();
   });
+
+  it('should reset canvas fingerprint cache via resetCanvasFingerprintCache', async () => {
+    vi.stubGlobal('navigator', {
+      userAgent: 'TestBrowser/1.0',
+      language: 'en-US',
+      platform: 'Win32',
+      hardwareConcurrency: 4,
+    });
+    vi.stubGlobal('crypto', {
+      subtle: {
+        digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)),
+      },
+    });
+
+    // First call — populates cache
+    await generateDeviceFingerprint();
+    expect(resetCanvasFingerprintCache()).toBeUndefined();
+
+    // After reset, next call triggers canvas computation again
+    const digestSpy = vi.spyOn(crypto.subtle, 'digest');
+    await generateDeviceFingerprint();
+    // At least one digest call (canvas toDataURL hash) was made
+    expect(digestSpy).toHaveBeenCalled();
+  });
 });

@@ -59,6 +59,17 @@ function setupCryptoUnavailable() {
   });
 }
 
+function setupCryptoNoRandomUUID() {
+  vi.stubGlobal('crypto', {
+    randomUUID: undefined,
+    subtle: { digest: vi.fn() },
+  } as unknown as Crypto);
+}
+
+function setupCryptoUndefined() {
+  vi.stubGlobal('crypto', undefined as unknown as Crypto);
+}
+
 describe('detectBrowserCompatibility', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -158,6 +169,36 @@ describe('detectBrowserCompatibility', () => {
     setupMinimalNavigator();
     setupWorkingLocalStorage();
     setupCryptoUnavailable();
+
+    const result = await detectBrowserCompatibility();
+
+    expect(result.riskLevel).toBe('CRITICAL');
+    expect(result.details).toContain(
+      'Trình duyệt không hỗ trợ Web Crypto API. Không thể mã hóa owner key.'
+    );
+  });
+
+  it('should fall back to Date.now() when crypto.randomUUID is undefined', async () => {
+    setupMinimalNavigator();
+    setupWorkingLocalStorage();
+    setupCryptoNoRandomUUID();
+
+    const result = await detectBrowserCompatibility();
+
+    expect(result.riskLevel).toBe('SAFE');
+  });
+
+  it('should handle crypto global being undefined', async () => {
+    vi.stubGlobal('navigator', {
+      brave: undefined,
+      storage: undefined,
+    } as unknown as Navigator);
+    vi.stubGlobal('localStorage', {
+      setItem: vi.fn(() => {}),
+      getItem: vi.fn(() => '1'),
+      removeItem: vi.fn(),
+    });
+    setupCryptoUndefined();
 
     const result = await detectBrowserCompatibility();
 

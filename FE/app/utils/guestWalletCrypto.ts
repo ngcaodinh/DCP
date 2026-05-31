@@ -58,6 +58,14 @@ export function generateClientSalt(): string {
 }
 
 /**
+ * Nhường quyền điều khiển cho main thread trước khi thực hiện PBKDF2.
+ * Mục đích: tránh blocking UI vì PBKDF2 (100k iterations) có thể tốn ~100-300ms.
+ */
+async function yieldToMain(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
  * Derive AES-256 key từ password (deviceFingerprint + serverSalt) sử dụng PBKDF2.
  * Mục đích: biến fingerprint và server salt thành cryptographic key ổn định.
  * @param deviceFingerprint - SHA-256 hash của device fingerprint (hex)
@@ -76,6 +84,9 @@ async function deriveAesKey(
 
   // Dùng ArrayBuffer thuần cho salt — tránh SharedArrayBuffer TypeScript error
   const combinedSalt = hexToArrayBuffer(serverSalt + clientSalt);
+
+  // Nhường quyền cho main thread trước khi bắt đầu CPU-intensive PBKDF2
+  await yieldToMain();
 
   const keyMaterial = await crypto.subtle.importKey(
     'raw',

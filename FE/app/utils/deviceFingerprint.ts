@@ -80,7 +80,7 @@ async function getCanvasFingerprintHash(): Promise<string> {
       ctx.fillText('DCP Guest Wallet Fingerprint', 4, 17);
 
       ctx.font = '30px Arial';
-      ctx.fillText('🔐', 150, 10);
+      ctx.fillText('lock', 150, 10);
 
       const gradient = ctx.createLinearGradient(0, 0, 200, 0);
       gradient.addColorStop(0, 'red');
