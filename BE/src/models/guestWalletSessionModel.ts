@@ -46,6 +46,7 @@ const guestWalletSessionSchema = new Schema<GuestWalletSession>(
       default: 'ACTIVE'
     },
     donationCount: { type: Number, required: true, default: 0 },
+    /** Tổng amount đã donate, đơn vị: 0.01 Token (ví dụ: 100 = 1 Token). Dùng integer để tránh floating point errors. */
     totalDonatedAmount: { type: Number, required: true, default: 0 },
     totalSponsoredGas: { type: Number, required: true, default: 0 },
     renewalCount: { type: Number, required: true, default: 0 },

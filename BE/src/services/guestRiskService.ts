@@ -226,7 +226,8 @@ async function checkSessionVelocity(
   try {
     const sinceDate = new Date(sessionCreatedAt.getTime() - SESSION_VELOCITY_THRESHOLD_MS);
     const count = await countRecentSessionsByIpExcluding(ipAddress, sinceDate, excludeSessionId);
-    return count > 1 ? SESSION_VELOCITY_SCORE : 0;
+    // Nếu có >= 1 session trong window 60s → session mới được tạo quá nhanh → suspicious
+    return count >= 1 ? SESSION_VELOCITY_SCORE : 0;
   } catch (error) {
     logger.warn('Failed to check session velocity.', {
       ipAddress,
@@ -269,9 +270,11 @@ export async function evaluateGuestRisk(
     walletAgeScore + ipBurstScore + fingerprintReuseScore + donationPatternScore + sessionVelocityScore
   );
 
-  // blocked = true chỉ khi riskLevel === 'CRITICAL' (riskScore >= 91)
-  // HIGH (70-90): dùng Token Paymaster, KHÔNG block
-  // CRITICAL (91-100): BLOCK — không sponsor gas
+  // blocked = true khi riskLevel === 'CRITICAL' (riskScore >= 91).
+  // HIGH (70-90): dùng Token Paymaster, KHÔNG block theo design.
+  // CRITICAL (91-100): dùng Token Paymaster, trustMultiplier = 0.2. KHÔNG block.
+  // 'blocked' field dùng để track trong DB, không trigger reject ở Paymaster layer.
+  // Quyết định block/sponsor thực tế phụ thuộc vào business logic ở service layer.
   const { riskLevel, trustMultiplier } = computeRiskLevelAndMultiplier(riskScore);
 
   const result: RiskEvaluationResult = {

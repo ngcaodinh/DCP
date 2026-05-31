@@ -9,37 +9,35 @@ import { v4 as uuidv4 } from 'uuid';
 import { getZeroDevConfig } from '../config/zeroDev';
 import { getLogger } from '../config/logger';
 import { ApplicationError } from '../utils/applicationError';
-import {
-  findGuestWalletSessionById,
-  updateGuestWalletSession
-} from '../repositories/guestWalletSessionRepository';
-import {
-  upsertGuestDonationRisk
-} from '../repositories/guestDonationRiskRepository';
+import { findGuestWalletSessionById, reserveDonationSlot } from '../repositories/guestWalletSessionRepository';
+import { upsertGuestDonationRisk } from '../repositories/guestDonationRiskRepository';
 import { findAuditByUserOpHash, createAuditRecord } from '../repositories/anonymousDonationAuditRepository';
 import { evaluateGuestRisk } from './guestRiskService';
 import { GuestWalletSession } from '../models/guestWalletSessionModel';
+import { findProjectById } from '../repositories/projectRepository';
 import mongoose from 'mongoose';
+import {
+  MAX_TOTAL_AMOUNT_PER_SESSION,
+  MAX_AMOUNT_PER_DONATION,
+  MIN_AMOUNT_PER_DONATION,
+  RISK_THRESHOLD_FOR_TOKEN_PAYMASTER,
+  TOKEN_PAYMASTER_GAS_FEE_TOKEN,
+  AMOUNT_TOLERANCE
+} from '../constants/guestDonation';
 
 const logger = getLogger();
 
-/** Giới hạn donation count mỗi session (FR5.G). */
-const MAX_DONATION_PER_SESSION = 3;
-
-/** Tổng số tiền tối đa mỗi session (USD equivalent, ~200 token). */
-const MAX_TOTAL_AMOUNT_PER_SESSION = 200;
-
-/** Số tiền donation tối đa mỗi lần cho guest. */
-const MAX_AMOUNT_PER_DONATION = 100;
-
-/** Ngưỡng risk score: >= 70 → dùng Token Paymaster. */
-const RISK_THRESHOLD_FOR_TOKEN_PAYMASTER = 70;
-
-/** Số CharityToken khấu trừ khi dùng Token Paymaster. */
-const TOKEN_PAYMASTER_GAS_FEE_TOKEN = 1;
-
-/** Địa chỉ charity token trên Amoy — validate khi dùng Token Paymaster. */
-const CHARITY_TOKEN_ADDRESS = process.env.CHARITY_TOKEN_ADDRESS || '';
+/** Địa chỉ charity token trên Amoy — validate khi module được import đầu tiên. */
+const CHARITY_TOKEN_ADDRESS = (() => {
+  const addr = process.env.CHARITY_TOKEN_ADDRESS;
+  if (!addr || !addr.startsWith('0x')) {
+    throw new Error(
+      'CHARITY_TOKEN_ADDRESS chưa được cấu hình hợp lệ. ' +
+      'Đặt CHARITY_TOKEN_ADDRESS trong .env để Token Paymaster hoạt động cho riskScore >= 70.'
+    );
+  }
+  return addr;
+})();
 
 /** Chain ID Polygon Amoy. */
 const CHAIN_ID_AMOY = 80002;
@@ -86,76 +84,66 @@ export type SponsorPaymasterRequest = {
   sessionId: string;
 };
 
-/**
- * Hàm chuyển hex string thành ASCII string.
- * Mục đích: decode calldata từ UserOp thành readable text.
- */
-function hexToAscii(hex: string): string {
-  const cleanHex = hex.replace(/^0x/i, '');
-  const bytes = new Uint8Array(cleanHex.length / 2);
-  for (let idx = 0; idx < cleanHex.length; idx += 2) {
-    bytes[idx / 2] = parseInt(cleanHex.slice(idx, idx + 2), 16);
-  }
-  return new TextDecoder('ascii').decode(bytes);
-}
+/** Interface cho Charity contract donate function. */
+const CHARITY_INTERFACE = new ethers.Interface([
+  'function donate(uint256 projectId, uint256 amount, bool isAnonymous)'
+]);
 
 /**
  * Hàm decode calldata để verify donation method và extract parameters.
- * Mục đích: đảm bảo chỉ sponsor các UserOp thực hiện donate() hợp lệ.
- * Security: calldata được verify tại backend trước khi gọi ZeroDev Paymaster API
- * để tránh sponsor các operation không phải donate (e.g., token transfer).
- * Giá trị amount từ calldata được dùng thay cho request body để chống tampering attack.
+ * Dùng ethers.Interface để ABI-decode đúng chuẩn EIP-4337.
+ * Calldata là ABI-encoded hex, KHÔNG phải comma-separated ASCII.
  *
- * Format calldata: method,projectId,amount,isAnonymous
+ * Security: chỉ sponsor các UserOp thực hiện donate() hợp lệ,
+ * chống attacker craft calldata gọi function khác.
  */
 function decodeDonationCalldata(calldata: string): {
   valid: true;
   data: { projectId: string; amount: number };
 } | { valid: false; reason: string } {
   try {
-    const asciiString = hexToAscii(calldata);
-    const parts = asciiString.split(',');
+    const cleanCalldata = calldata.startsWith('0x') ? calldata : `0x${calldata}`;
 
-    if (parts.length < 4) {
-      return {
-        valid: false,
-        reason: `Calldata format không hợp lệ. Cần 4 phần tử, nhận được ${parts.length}.`
-      };
+    const parsed = CHARITY_INTERFACE.parseTransaction({ data: cleanCalldata });
+
+    if (!parsed || parsed.name !== 'donate') {
+      return { valid: false, reason: 'Calldata không phải donate function.' };
     }
 
-    const [method, projectId, amountStr, isAnonymousStr] = parts;
-    const trimmedMethod = method.trim().toLowerCase();
-    const trimmedProjectId = projectId.trim();
-    const trimmedAmount = amountStr.trim();
-    const trimmedAnonymous = isAnonymousStr.trim().toLowerCase();
+    const [projectIdRaw, amountRaw, isAnonymousRaw] = parsed.args;
 
-    if (trimmedMethod !== 'donate') {
-      return { valid: false, reason: `Method "${trimmedMethod}" không được phép sponsor.` };
+    // projectId: convert BigInt → string
+    const projectId = projectIdRaw.toString();
+
+    // amount: convert from wei (18 decimals) → token amount
+    const amountInToken = Number(ethers.formatUnits(amountRaw, 18));
+
+    // isAnonymous phải là true cho guest flow
+    const isAnonymous = Boolean(isAnonymousRaw);
+    if (!isAnonymous) {
+      return { valid: false, reason: 'Chỉ hỗ trợ donate ẩn danh qua guest flow.' };
     }
 
-    if (!trimmedProjectId || trimmedProjectId.length < 10) {
+    // Validate projectId format
+    if (!projectId || projectId.length < 10) {
       return { valid: false, reason: 'ProjectId không hợp lệ.' };
     }
 
-    const parsedAmount = parseFloat(trimmedAmount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      return { valid: false, reason: 'Amount donation phải lớn hơn 0.' };
+    // Validate amount range (sau khi convert từ wei)
+    if (amountInToken < MIN_AMOUNT_PER_DONATION) {
+      return { valid: false, reason: `Amount donation phải lớn hơn hoặc bằng ${MIN_AMOUNT_PER_DONATION} Token.` };
     }
-
-    if (parsedAmount > MAX_AMOUNT_PER_DONATION) {
+    if (amountInToken > MAX_AMOUNT_PER_DONATION) {
       return { valid: false, reason: `Amount donation tối đa ${MAX_AMOUNT_PER_DONATION} Token cho guest.` };
-    }
-
-    if (trimmedAnonymous !== 'true') {
-      return { valid: false, reason: 'Chỉ hỗ trợ donate ẩn danh qua guest flow.' };
     }
 
     return {
       valid: true,
-      data: { projectId: trimmedProjectId, amount: parsedAmount }
+      data: { projectId, amount: amountInToken }
     };
   } catch {
-    return { valid: false, reason: 'Lỗi khi decode calldata.' };
+    // Lỗi decode → không phải valid donate calldata
+    return { valid: false, reason: 'Không thể decode calldata. Calldata không đúng định dạng ABI.' };
   }
 }
 
@@ -176,7 +164,8 @@ function computeUserOpHash(
     ethers.isAddress(userOp.sender) ? userOp.sender : '0x0000000000000000000000000000000000000000',
     32
   );
-  const nonce = ethers.zeroPadValue(ethers.toBeHex(String(userOp.nonce), 32), 32);
+  const nonceValue = BigInt(String(userOp.nonce).replace(/n$/, ''));
+  const nonce = ethers.zeroPadValue(ethers.toBeHex(nonceValue, 32), 32);
   const callDataHash = ethers.keccak256(userOp.callData || '0x');
   const initCodeHash = ethers.keccak256(userOp.initCode || '0x');
 
@@ -193,7 +182,7 @@ function normalizeUserOpForApi(
 ): Record<string, string> {
   return {
     sender: String(userOp.sender),
-    nonce: String(userOp.nonce),
+    nonce: String(userOp.nonce).replace(/n$/, ''),
     initCode: String(userOp.initCode || '0x'),
     callData: String(userOp.callData),
     callGasLimit: String(userOp.callGasLimit || '21000'),
@@ -207,17 +196,24 @@ function normalizeUserOpForApi(
 }
 
 /**
+ * Hàm build base URL cho Paymaster API endpoint.
+ * Chuyển từ /rpc suffix sang /paymaster hoặc /token-paymaster.
+ */
+function buildPaymasterBaseUrl(config: ReturnType<typeof getZeroDevConfig>): string {
+  return config.paymasterUrl.includes('/rpc')
+    ? config.paymasterUrl.replace('/rpc', '/paymaster')
+    : config.paymasterUrl;
+}
+
+/**
  * Hàm gọi ZeroDev Paymaster API để sponsor gas miễn phí cho low-risk sessions.
  */
 async function callFreePaymaster(
-  projectId: string,
+  sessionId: string,
   userOp: SponsorPaymasterRequest['unsignedUserOp']
 ): Promise<{ paymasterAndData: string; userOpHash: string }> {
   const config = getZeroDevConfig();
-
-  const baseUrl = config.paymasterUrl.includes('/rpc')
-    ? config.paymasterUrl.replace('/rpc', '/paymaster')
-    : config.paymasterUrl;
+  const baseUrl = buildPaymasterBaseUrl(config);
   const endpoint = `${baseUrl}/v3/${config.projectId}/paymaster`;
 
   const normalizedUserOp = normalizeUserOpForApi(userOp);
@@ -241,11 +237,16 @@ async function callFreePaymaster(
   });
 
   if (!response.ok) {
-    const rawBody = await response.text();
+    let rawBody = '[unreadable body]';
+    try {
+      rawBody = await response.text();
+    } catch {
+      // Non-parseable body — log what we can
+    }
     logger.warn('ZeroDev Free Paymaster API error.', {
       status: response.status,
       body: rawBody.length > 200 ? `${rawBody.slice(0, 200)}...` : rawBody,
-      sessionId: projectId
+      sessionId
     });
     throw new ApplicationError(
       `ZeroDev Paymaster từ chối sponsorship. Status: ${response.status}`,
@@ -275,22 +276,11 @@ async function callFreePaymaster(
  * Tài trợ gas trước, khấu trừ CharityToken từ ví guest sau.
  */
 async function callTokenPaymaster(
-  projectId: string,
+  sessionId: string,
   userOp: SponsorPaymasterRequest['unsignedUserOp']
 ): Promise<{ paymasterAndData: string; userOpHash: string }> {
-  if (!CHARITY_TOKEN_ADDRESS || !CHARITY_TOKEN_ADDRESS.startsWith('0x')) {
-    throw new ApplicationError(
-      'CHARITY_TOKEN_ADDRESS chưa được cấu hình hợp lệ cho Token Paymaster.',
-      500,
-      'INTERNAL_ERROR'
-    );
-  }
-
   const config = getZeroDevConfig();
-
-  const baseUrl = config.paymasterUrl.includes('/rpc')
-    ? config.paymasterUrl.replace('/rpc', '/paymaster')
-    : config.paymasterUrl;
+  const baseUrl = buildPaymasterBaseUrl(config);
   const endpoint = `${baseUrl}/v3/${config.projectId}/token-paymaster`;
 
   const normalizedUserOp = normalizeUserOpForApi(userOp);
@@ -316,9 +306,13 @@ async function callTokenPaymaster(
     })
   });
 
-  let rawBody = '';
   if (!response.ok) {
-    rawBody = await response.text();
+    let rawBody = '[unreadable body]';
+    try {
+      rawBody = await response.text();
+    } catch {
+      // Non-parseable body — log what we can
+    }
     logger.warn('ZeroDev Token Paymaster API error.', {
       status: response.status,
       body: rawBody.length > 200 ? `${rawBody.slice(0, 200)}...` : rawBody
@@ -347,13 +341,14 @@ async function callTokenPaymaster(
 }
 
 /**
- * Hàm validate session và quota trước khi sponsor.
- * Mục đích: kiểm tra tất cả business rules tại một nơi.
+ * Hàm validate session cơ bản trước khi sponsor.
+ * Mục đích: kiểm tra wallet match và expiry.
+ * Các quota checks (donationCount, hasPendingDonation, totalDonatedAmount)
+ * được handle atomically bởi reserveDonationSlot bên trong transaction.
  */
 async function validateSessionForSponsorship(
   sessionId: string,
-  walletAddress: string,
-  donationAmount: number
+  walletAddress: string
 ): Promise<GuestWalletSession> {
   const session = await findGuestWalletSessionById(sessionId);
 
@@ -378,30 +373,6 @@ async function validateSessionForSponsorship(
       'Guest session đã hết hạn. Vui lòng tạo phiên mới.',
       401,
       'GUEST_SESSION_EXPIRED'
-    );
-  }
-
-  if (session.donationCount >= MAX_DONATION_PER_SESSION) {
-    throw new ApplicationError(
-      `Đã đạt giới hạn ${MAX_DONATION_PER_SESSION} donation/session. Vui lòng claim ví để tiếp tục.`,
-      429,
-      'GUEST_DONATION_QUOTA_EXCEEDED'
-    );
-  }
-
-  if (session.hasPendingDonation) {
-    throw new ApplicationError(
-      'Đang có donation đang chờ xử lý. Vui lòng đợi vài phút rồi thử lại.',
-      409,
-      'CONFLICT'
-    );
-  }
-
-  if (session.totalDonatedAmount + donationAmount > MAX_TOTAL_AMOUNT_PER_SESSION) {
-    throw new ApplicationError(
-      `Tổng donation vượt giới hạn $${MAX_TOTAL_AMOUNT_PER_SESSION}/session.`,
-      400,
-      'GUEST_AMOUNT_LIMIT_EXCEEDED'
     );
   }
 
@@ -431,12 +402,13 @@ export async function sponsorGuestDonation(
   const { unsignedUserOp, projectId, sessionId } = request;
   const sponsorshipId = uuidv4();
 
-  // Buoc 1: Validate session + quota (dùng request body amount để check limit)
+  // Buoc 1: Validate session cơ bản (wallet match, expiry)
   // Session được fetch ở đây và reuse trong suốt function để tránh duplicate DB calls
+  // Quota checks (donationCount, hasPendingDonation, totalDonatedAmount) được handle
+  // atomically bởi reserveDonationSlot bên trong transaction ở Bước 8.
   const session = await validateSessionForSponsorship(
     sessionId,
-    unsignedUserOp.sender,
-    request.amount
+    unsignedUserOp.sender
   );
 
   // Buoc 2: Decode + validate calldata — trích xuất amount thực từ calldata
@@ -446,11 +418,10 @@ export async function sponsorGuestDonation(
   }
 
   // Buoc 3: Cross-check request body amount vs calldata amount để chống tampering
-  // Cho phép ±5% tolerance vì frontend có thể làm tròn
+  // Tolerance = 0.001 (AMOUNT_TOLERANCE), nhỏ hơn đơn vị tối thiểu để ngăn tampering.
   const amountFromCalldata = decodedResult.data.amount;
   const amountFromBody = request.amount;
-  const tolerance = amountFromCalldata * 0.05;
-  if (Math.abs(amountFromCalldata - amountFromBody) > tolerance) {
+  if (Math.abs(amountFromCalldata - amountFromBody) > AMOUNT_TOLERANCE) {
     throw new ApplicationError(
       'Số tiền donation không khớp với calldata. Vui lòng thử lại.',
       400,
@@ -458,18 +429,28 @@ export async function sponsorGuestDonation(
     );
   }
 
-  // Buoc 4: Compute userOpHash for duplicate check
+  // Buoc 4: Validate project tồn tại và đang ACTIVE
+  const projectRecord = await findProjectById(projectId);
+  if (!projectRecord) {
+    throw new ApplicationError('Dự án không tồn tại.', 404, 'PROJECT_NOT_FOUND');
+  }
+  if (projectRecord.status !== 'ACTIVE') {
+    throw new ApplicationError('Dự án không còn nhận donation.', 400, 'PROJECT_NOT_ACTIVE');
+  }
+
+  // Buoc 5: Compute userOpHash for duplicate check
   const userOpHash = computeUserOpHash(unsignedUserOp);
   const existingAudit = await findAuditByUserOpHash(userOpHash);
   if (existingAudit) {
     throw new ApplicationError('UserOperation đã được sponsor trước đó.', 409, 'DUPLICATE_USEROP');
   }
 
-  // Buoc 5: Re-evaluate risk score trước mỗi donation để phát hiện thay đổi
+  // Buoc 6: Re-evaluate risk score trước mỗi donation để phát hiện thay đổi
   // Fresh evaluation phản ánh tình trạng thực tế tại thời điểm sponsor.
   // Truyền session object thay vì chỉ deviceFingerprintHash — tránh duplicate DB fetch
   // bên trong evaluateGuestRisk → checkDonationPattern → findAuditsBySessionId.
-  const freshRisk = await evaluateGuestRisk(session, ipAddress);
+  // Truyền session.createdAt để checkSessionVelocity hoạt động chính xác.
+  const freshRisk = await evaluateGuestRisk(session, ipAddress, session.createdAt);
   const riskScore = freshRisk.riskScore;
   const trustMultiplier = freshRisk.trustMultiplier;
 
@@ -481,12 +462,16 @@ export async function sponsorGuestDonation(
     riskLevel: freshRisk.riskLevel,
     trustMultiplier: freshRisk.trustMultiplier,
     factors: freshRisk.factors,
-    blocked: false
+    blocked: freshRisk.blocked,
+    blockedAt: freshRisk.blocked ? new Date() : null,
+    blockedReason: freshRisk.blocked ? 'Risk score exceeds CRITICAL threshold' : null
   });
 
+  // Risk >= 70 → Token Paymaster (thu ~1 CharityToken). Không block CRITICAL sessions.
+  // Token Paymaster sẽ reject nếu user không đủ token.
   const useTokenPaymaster = riskScore >= RISK_THRESHOLD_FOR_TOKEN_PAYMASTER;
 
-  // Buoc 6: Gọi Paymaster API tương ứng
+  // Buoc 7: Gọi Paymaster API tương ứng
   let paymasterResult: { paymasterAndData: string; userOpHash: string };
 
   if (useTokenPaymaster) {
@@ -495,17 +480,40 @@ export async function sponsorGuestDonation(
       riskScore,
       walletAddress: unsignedUserOp.sender
     });
-    paymasterResult = await callTokenPaymaster(projectId, unsignedUserOp);
+    paymasterResult = await callTokenPaymaster(sessionId, unsignedUserOp);
   } else {
-    paymasterResult = await callFreePaymaster(projectId, unsignedUserOp);
+    paymasterResult = await callFreePaymaster(sessionId, unsignedUserOp);
   }
 
-  // Buoc 7: Tạo audit record + set hasPendingDonation trong 1 MongoDB transaction
-  // Nếu step 2 fail → cả 2 đều rollback, tránh orphan audit record.
+  // Buoc 8: Tạo audit record + reserve donation slot trong 1 MongoDB transaction
+  // Dùng reserveDonationSlot thay vì riêng check + set hasPendingDonation
+  // để tránh race condition TOCTOU khi nhiều request đồng thời.
+  // reserveDonationSlot atomically check tất cả quota conditions và set hasPendingDonation = true.
+  // Giới hạn totalDonatedAmount hiện tại để sau khi cộng thêm amountFromCalldata
+  // không vượt quá MAX_TOTAL_AMOUNT_PER_SESSION * 100 (đơn vị: 0.01 Token).
+  // reserveDonationSlot check: session.totalDonatedAmount <= maxAllowedCurrentTotal.
+  // Nếu amountFromCalldata quá lớn (tiệm cận limit), maxAllowedCurrentTotal sẽ âm
+  // → MongoDB $lte sẽ không match → reject với CONFLICT.
+  const maxAllowedCurrentTotal = MAX_TOTAL_AMOUNT_PER_SESSION * 100 - amountFromCalldata * 100;
   const now = new Date();
   const mongoSession = await mongoose.startSession();
   try {
     await mongoSession.withTransaction(async () => {
+      // Reserve slot atomically — check-and-set trong một operation
+      const reservedSession = await reserveDonationSlot(
+        sessionId,
+        unsignedUserOp.sender.toLowerCase(),
+        maxAllowedCurrentTotal,
+        mongoSession
+      );
+      if (!reservedSession) {
+        throw new ApplicationError(
+          'Không thể bắt đầu donation. Quota đã hết hoặc có donation đang chờ.',
+          409,
+          'CONFLICT'
+        );
+      }
+
       await createAuditRecord({
         auditId: uuidv4(),
         sessionId,
@@ -517,7 +525,7 @@ export async function sponsorGuestDonation(
         userOpHash,
         onChainTxHash: null,
         onChainBlockNumber: null,
-        paymasterSponsoredGas: true,
+        paymasterSponsoredGas: !useTokenPaymaster,
         claimedByUserId: null,
         isAnonymous: true,
         ipAddress,
@@ -525,11 +533,7 @@ export async function sponsorGuestDonation(
         createdAt: now,
         indexedAt: null
       }, mongoSession);
-
-      await updateGuestWalletSession(sessionId, {
-        hasPendingDonation: true,
-        updatedAt: now
-      }, mongoSession);
+      // hasPendingDonation đã được set = true bởi reserveDonationSlot ở trên
     });
   } finally {
     await mongoSession.endSession();
@@ -545,13 +549,13 @@ export async function sponsorGuestDonation(
     amount: amountFromCalldata
   });
 
-  // Buoc 8: Return result
+  // Buoc 9: Return result
   const result: SponsorPaymasterResult = {
     paymasterAndData: paymasterResult.paymasterAndData,
     userOpHash: paymasterResult.userOpHash,
     sponsorshipId,
     paymasterType: useTokenPaymaster ? 'TOKEN' : 'FREE',
-    paymasterSponsoredGas: true,
+    paymasterSponsoredGas: !useTokenPaymaster,
     trustMultiplier,
     riskScore
   };

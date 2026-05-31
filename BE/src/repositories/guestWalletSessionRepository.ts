@@ -3,6 +3,7 @@ import {
   GuestWalletSessionModel,
   GuestWalletSession
 } from '../models/guestWalletSessionModel';
+import { MAX_DONATIONS_PER_SESSION } from '../constants/guestDonation';
 
 /**
  * Loại chỉ cho phép update các fields có thể thay đổi sau khi tạo.
@@ -175,6 +176,53 @@ export async function updateGuestWalletSession(
     .lean<GuestWalletSession>()
     .exec();
   return updatedSession;
+}
+
+/**
+ * Hàm atomic reserve donation slot cho một session.
+ * Dùng findOneAndUpdate để check-and-set tất cả conditions trong một operation nguyên tử,
+ * tránh race condition TOCTOU khi nhiều request đồng thời cùng sessionId
+ * cùng pass các check riêng lẻ trước khi transaction hoàn tất.
+ *
+ * Conditions được check atomically:
+ * - status === 'ACTIVE'
+ * - donationCount < MAX_DONATIONS_PER_SESSION
+ * - hasPendingDonation === false
+ * - totalDonatedAmount <= limit
+ * - expiresAt > now
+ *
+ * @param sessionId - ID của session cần reserve
+ * @param walletAddress - Địa chỉ ví để verify (case-insensitive)
+ * @param maxStoredAmount - Giới hạn tổng amount (đơn vị: 0.01 Token, stored format)
+ * @param mongoSession - MongoDB session cho transaction
+ * @returns Session đã được reserved (hasPendingDonation = true) nếu thành công, null nếu không đủ điều kiện
+ */
+export async function reserveDonationSlot(
+  sessionId: string,
+  walletAddress: string,
+  maxStoredAmount: number,
+  mongoSession: mongoose.ClientSession
+): Promise<GuestWalletSession | null> {
+  return GuestWalletSessionModel.findOneAndUpdate(
+    {
+      sessionId,
+      walletAddress: walletAddress.toLowerCase(),
+      status: 'ACTIVE',
+      donationCount: { $lt: MAX_DONATIONS_PER_SESSION },
+      hasPendingDonation: false,
+      totalDonatedAmount: { $lte: maxStoredAmount },
+      expiresAt: { $gt: new Date() }
+    },
+    {
+      $set: {
+        hasPendingDonation: true,
+        updatedAt: new Date()
+      }
+    },
+    { returnDocument: 'after', session: mongoSession }
+  )
+    .lean<GuestWalletSession>()
+    .exec();
 }
 
 /**

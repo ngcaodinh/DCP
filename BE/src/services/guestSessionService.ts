@@ -20,6 +20,7 @@ import {
 } from '../repositories/guestDonationRiskRepository';
 import { getLogger } from '../config/logger';
 import { ApplicationError } from '../utils/applicationError';
+import { MAX_DONATIONS_PER_SESSION } from '../constants/guestDonation';
 
 const logger = getLogger();
 
@@ -37,9 +38,6 @@ const MAX_RENEWAL_COUNT = 5;
 
 /** Số bytes của server salt. */
 const SERVER_SALT_BYTES = 32;
-
-/** Giới hạn donation per session — dùng chung cho cả service. */
-const MAX_DONATIONS_PER_SESSION = 3;
 
 /** Response type cho tạo session thành công. */
 export type CreateGuestSessionResult = {

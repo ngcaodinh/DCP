@@ -94,23 +94,19 @@ export async function handleClearPendingDonation(
   }
 
   try {
-    const session = await findGuestWalletSessionById(guestSession.sessionId);
-    if (!session) {
-      sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
-      return;
-    }
-
-    await updateGuestWalletSession(session.sessionId, {
+    // Sử dụng guestSession từ middleware thay vì fetch lại từ DB
+    // (request.guestSession đã được auth middleware xác thực)
+    await updateGuestWalletSession(guestSession.sessionId, {
       hasPendingDonation: false,
       updatedAt: new Date()
     });
 
     logger.info('Clearing pending donation flag.', {
-      sessionId: session.sessionId
+      sessionId: guestSession.sessionId
     });
 
     sendSuccessResponse(response, 200, 'Đã xóa flag pending donation.', {
-      sessionId: session.sessionId,
+      sessionId: guestSession.sessionId,
       hasPendingDonation: false
     });
   } catch (error: unknown) {
