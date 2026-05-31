@@ -40,8 +40,7 @@ async function isBraveStrictMode(): Promise<boolean> {
     }
     const brave = navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } };
     if (brave.brave?.isBrave) {
-      const isBrave = await brave.brave.isBrave();
-      return isBrave;
+      return brave.brave.isBrave();
     }
     return false;
   } catch {

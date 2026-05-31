@@ -33,7 +33,7 @@ export function buildApiUrl(pathname: string): string {
 }
 
 /** Hàm parse response JSON an toàn. Mục đích: tránh lỗi runtime khi API trả body rỗng hoặc sai định dạng. */
-async function parseJsonSafely(response: Response): Promise<unknown> {
+export async function parseJsonSafely(response: Response): Promise<unknown> {
   const responseText = await response.text();
   if (!responseText) {
     return null;
@@ -46,8 +46,18 @@ async function parseJsonSafely(response: Response): Promise<unknown> {
   }
 }
 
-/** Hàm fetch API chuẩn hóa. Mục đích: trả về dữ liệu thành công hoặc throw payload lỗi chuẩn để UI xử lý. */
-export async function fetchApi<T>(input: RequestInfo | URL, init?: RequestInit): Promise<ApiSuccessResponse<T>> {
+/**
+ * Hàm fetch API chuẩn hóa. Mục đích: trả về dữ liệu thành công hoặc throw payload lỗi chuẩn để UI xử lý.
+ *
+ * @param T - generic type cho data payload khi thành công
+ * @param options.skipBodyValidation - nếu true, bỏ qua kiểm tra response body
+ *                                    (dùng cho các endpoint trả 204 No Content không có body)
+ */
+export async function fetchApi<T>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  options?: { skipBodyValidation?: boolean }
+): Promise<ApiSuccessResponse<T>> {
   const response = await fetch(input, {
     ...init,
     headers: {
@@ -77,6 +87,16 @@ export async function fetchApi<T>(input: RequestInfo | URL, init?: RequestInit):
       ...defaultErrorResponse,
       statusCode: response.status
     } as ApiErrorResponse;
+  }
+
+  // Endpoint trả 204 No Content không có body — trả về shape rỗng thay vì throw
+  if (options?.skipBodyValidation) {
+    return {
+      success: true,
+      message: '',
+      data: {} as T,
+      correlationId: null
+    };
   }
 
   if (!responseBody || typeof responseBody !== 'object') {

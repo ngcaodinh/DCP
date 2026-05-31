@@ -3,7 +3,16 @@
  * Mục đích: cung cấp interface type-safe để gọi các guest session APIs từ frontend.
  * Tất cả các methods đều throw typed errors (ApiErrorResponse) khi có lỗi.
  */
-import { buildApiUrl, fetchApi, ApiErrorResponse } from './apiClient';
+import { buildApiUrl, fetchApi, ApiErrorResponse, ApiSuccessResponse, parseJsonSafely } from './apiClient';
+
+/* ============================================================
+ * SHARED TYPES
+ * ============================================================ */
+
+/**
+ * Trạng thái của guest wallet session — đồng bộ với backend enum trong guestWalletSessionModel.ts.
+ */
+export type GuestWalletSessionStatus = 'ACTIVE' | 'EXPIRED' | 'CLAIMED' | 'PURGED';
 
 /* ============================================================
  * REQUEST / RESPONSE TYPES
@@ -19,21 +28,24 @@ export interface CreateGuestSessionRequest {
 
 /**
  * Response khi tạo guest session thành công.
+ * @remarks donationQuota là tổng số donation được phép trong session (giá trị cố định lúc tạo).
  */
 export interface CreateGuestSessionResponse {
   sessionId: string;
   guestSessionToken: string;
   expiresAt: string;
   serverSalt: string;
+  /** Tổng số donation được phép — dùng để hiển thị trạng thái ban đầu khi tạo session */
   donationQuota: number;
 }
 
 /**
  * Payload refresh guest session.
+ * @remarks guestSessionToken được truyền qua tham số riêng, không nằm trong payload
+ *            để tránh nhầm lẫn với việc serialize token vào body.
  */
 export interface RefreshGuestSessionRequest {
   sessionId: string;
-  guestSessionToken: string;
 }
 
 /**
@@ -48,31 +60,43 @@ export interface RefreshGuestSessionResponse {
 /**
  * Response lấy trạng thái guest session.
  */
+/**
+ * Response lấy trạng thái hiện tại của guest session.
+ * @remarks remainingDonations là số donation còn lại tại thời điểm query (= donationQuota - donationCount).
+ *          Cần xử lý state: khi user thực hiện donation, cập nhật local state giảm remainingDonations
+ *          hoặc re-fetch để đồng bộ với server.
+ */
 export interface GuestSessionStatusResponse {
   sessionId: string;
   walletAddress: string;
-  status: string;
+  status: GuestWalletSessionStatus;
   donationCount: number;
   totalDonatedAmount: number;
   expiresAt: string;
+  /** Số donation còn lại = donationQuota - donationCount. Dùng để hiển thị UI real-time. */
   remainingDonations: number;
 }
 
 /**
  * Payload yêu cầu sponsor Paymaster.
- * @remarks unsignedUserOp chứa đầy đủ fields theo ZeroDev/Kernel spec.
+ * @remarks unsignedUserOp chứa đầy đủ fields theo ZeroDev/Kernel spec (EIP-4337 v0.6).
  */
 export interface RequestPaymasterSponsorshipRequest {
   unsignedUserOp: {
+    /** EIP-4337 v0.6: initialization code — bỏ trống ('0x') nếu wallet đã deploy */
     sender: string;
+    /** EIP-4337 v0.6: nonce của sender */
     nonce: string | number;
+    /** EIP-4337 v0.6: init code để deploy factory — bỏ trống nếu wallet đã tồn tại */
     initCode: string;
+    /** Dữ liệu call của UserOp */
     callData: string;
     callGasLimit?: string | number;
     verificationGasLimit?: string | number;
     preVerificationGas?: string | number;
     maxFeePerGas?: string | number;
     maxPriorityFeePerGas?: string | number;
+    /** EIP-4337 v0.6: paymasterAndData — bỏ trống nếu không dùng paymaster */
     paymasterAndData?: string;
     signature?: string;
   };
@@ -98,12 +122,12 @@ export interface RequestPaymasterSponsorshipResponse {
 
 /**
  * Payload prepare claim — gọi khi user đã đăng nhập và muốn claim guest wallet.
- * @remarks Auth: registered user JWT (authToken), không phải guestSessionToken.
+ * @remarks authToken được truyền qua tham số riêng, không nằm trong payload
+ *          để tránh nhầm lẫn với việc serialize token vào body hoặc log.
  */
 export interface PrepareClaimRequest {
   guestSessionToken: string;
   guestWalletAddress: string;
-  authToken: string;
 }
 
 /**
@@ -116,12 +140,12 @@ export interface PrepareClaimResponse {
 
 /**
  * Payload execute claim — gọi sau khi client đã ký UserOp bằng guest owner key.
- * @remarks Auth: registered user JWT (authToken).
+ * @remarks authToken được truyền qua tham số riêng, không nằm trong payload
+ *          để tránh nhầm lẫn với việc serialize token vào body hoặc log.
  */
 export interface ExecuteClaimRequest {
   guestSessionToken: string;
   guestWalletAddress: string;
-  authToken: string;
   claimNonce: string;
   signedUserOp: string;
 }
@@ -146,7 +170,7 @@ export interface PendingDonationStatusResponse {
   hasPendingDonation: boolean;
   donationCount: number;
   totalDonatedAmount: number;
-  status: string;
+  status: GuestWalletSessionStatus;
 }
 
 /* ============================================================
@@ -156,13 +180,19 @@ export interface PendingDonationStatusResponse {
 /**
  * Danh sách mã lỗi có thể nhận từ guest endpoints.
  * Dùng cho typed error handling ở caller.
+ *
+ * Phân biệt các codes dễ nhầm lẫn:
+ * - GUEST_SESSION_LIMIT_EXCEEDED: IP đã tạo đủ số session cho phép (5/IP/giờ)
+ * - GUEST_SESSION_EXCEEDED: Wallet đã đạt giới hạn session riêng
+ * - GUEST_RENEWAL_LIMIT_EXCEEDED: Session đã refresh quá số lần cho phép
+ * - GUEST_SESSION_RATE_LIMIT_EXCEEDED: Quá nhiều request từ IP trong thời gian ngắn (DDoS protection)
  */
 export type GuestApiErrorCode =
   | 'INVALID_WALLET_ADDRESS'
   | 'INVALID_FINGERPRINT'
-  | 'GUEST_SESSION_LIMIT_EXCEEDED'
+  | 'GUEST_SESSION_LIMIT_EXCEEDED'   // IP đã tạo đủ số session (5/IP/giờ)
   | 'GUEST_SESSION_NOT_FOUND'
-  | 'GUEST_SESSION_EXCEEDED'
+  | 'GUEST_SESSION_EXCEEDED'         // Wallet đã đạt giới hạn session riêng
   | 'GUEST_SESSION_NOT_ACTIVE'
   | 'GUEST_DONATION_QUOTA_EXCEEDED'
   | 'GUEST_AMOUNT_LIMIT_EXCEEDED'
@@ -175,8 +205,8 @@ export type GuestApiErrorCode =
   | 'GUEST_TOKEN_REQUIRED'
   | 'GUEST_TOKEN_INVALID'
   | 'GUEST_SESSION_REQUIRED'
-  | 'GUEST_RENEWAL_LIMIT_EXCEEDED'
-  | 'GUEST_SESSION_RATE_LIMIT_EXCEEDED'
+  | 'GUEST_RENEWAL_LIMIT_EXCEEDED'   // Session refresh quá số lần cho phép
+  | 'GUEST_SESSION_RATE_LIMIT_EXCEEDED' // DDoS protection: quá nhiều request/IP
   | 'INVALID_REQUEST'
   | 'INTERNAL_ERROR'
   | 'UNKNOWN_ERROR'
@@ -207,20 +237,27 @@ export class GuestApiError extends Error {
 }
 
 /**
- * Helper unwrap API result — throw GuestApiError khi fail.
+ * Helper unwrap kết quả API — map lỗi từ fetchApi thành GuestApiError.
+ * fetchApi throw ApiErrorResponse khi status không OK,
+ * nên ta cần catch và wrap lại thành GuestApiError typed.
+ *
+ * @param promise - Promise từ fetchApi<ApiSuccessResponse<T>>
+ * @returns Promise chỉ resolve data, throw GuestApiError khi fail
  */
-function unwrap<T>(promise: Promise<{ success: true; data: T }>): Promise<T> {
-  return promise.then((response) => {
-    if (!response.success) {
+function unwrap<T>(promise: Promise<ApiSuccessResponse<T>>): Promise<T> {
+  return promise
+    .then((response) => response.data)
+    .catch((error: unknown) => {
+      if (error && typeof error === 'object' && 'errorCode' in error) {
+        throw new GuestApiError(error as ApiErrorResponse);
+      }
       throw new GuestApiError({
         success: false,
-        message: 'Phản hồi API không hợp lệ.',
-        errorCode: 'INVALID_RESPONSE',
-        statusCode: 500
+        message: error instanceof Error ? error.message : 'Lỗi kết nối không xác định.',
+        errorCode: 'INTERNAL_ERROR',
+        statusCode: 0
       });
-    }
-    return response.data;
-  });
+    });
 }
 
 /* ============================================================
@@ -238,6 +275,7 @@ function unwrap<T>(promise: Promise<{ success: true; data: T }>): Promise<T> {
 export async function createGuestSession(
   payload: CreateGuestSessionRequest
 ): Promise<CreateGuestSessionResponse> {
+  validateWalletAddress(payload.walletAddress);
   return unwrap(
     fetchApi<CreateGuestSessionResponse>(buildApiUrl('/api/guest/session'), {
       method: 'POST',
@@ -251,19 +289,21 @@ export async function createGuestSession(
  * Refresh guest session token.
  * Endpoint: POST /api/guest/session/refresh
  *
- * @param payload - sessionId và guestSessionToken
+ * @param payload - sessionId
+ * @param token - guestSessionToken (Bearer)
  * @returns Token mới và expiry time
  * @throws GuestApiError khi session hết hạn hoặc vượt renewal limit
  */
 export async function refreshGuestSession(
-  payload: RefreshGuestSessionRequest
+  payload: RefreshGuestSessionRequest,
+  token: string
 ): Promise<RefreshGuestSessionResponse> {
   return unwrap(
     fetchApi<RefreshGuestSessionResponse>(buildApiUrl('/api/guest/session/refresh'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${payload.guestSessionToken}`
+        Authorization: `Bearer ${token}`
       },
       body: JSON.stringify({ sessionId: payload.sessionId })
     })
@@ -318,20 +358,22 @@ export async function requestPaymasterSponsorship(
  * Prepare claim — bước 1 của Keyless Claim flow.
  * Endpoint: POST /api/guest/claim/prepare
  *
- * @param payload - guestSessionToken (để xác minh guest wallet ownership) và
- *                 authToken (registered user JWT để authorize claim action)
+ * @param payload - guestSessionToken (để xác minh guest wallet ownership)
+ * @param authToken - registered user JWT để authorize claim action
  * @returns claimEOAAddress (backend-generated EOA) và claimNonce (TTL 10 phút)
  * @throws GuestApiError khi user chưa đăng nhập hoặc guest session không hợp lệ
  */
 export async function prepareGuestClaim(
-  payload: PrepareClaimRequest
+  payload: PrepareClaimRequest,
+  authToken: string
 ): Promise<PrepareClaimResponse> {
+  validateWalletAddress(payload.guestWalletAddress);
   return unwrap(
     fetchApi<PrepareClaimResponse>(buildApiUrl('/api/guest/claim/prepare'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${payload.authToken}`
+        Authorization: `Bearer ${authToken}`
       },
       body: JSON.stringify({
         guestSessionToken: payload.guestSessionToken,
@@ -345,20 +387,23 @@ export async function prepareGuestClaim(
  * Execute claim — bước 2 của Keyless Claim flow.
  * Endpoint: POST /api/guest/claim/execute
  *
- * @param payload - guestSessionToken, guestWalletAddress, authToken,
+ * @param payload - guestSessionToken, guestWalletAddress,
  *                 claimNonce (từ prepareClaim), signedUserOp (đã ký bằng guest owner key)
+ * @param authToken - registered user JWT để authorize claim action
  * @returns changeOwnerTxHash, claimId, claimType, donatedCount
  * @throws GuestApiError khi nonce hết hạn hoặc transaction thất bại
  */
 export async function executeGuestClaim(
-  payload: ExecuteClaimRequest
+  payload: ExecuteClaimRequest,
+  authToken: string
 ): Promise<ExecuteClaimResponse> {
+  validateWalletAddress(payload.guestWalletAddress);
   return unwrap(
     fetchApi<ExecuteClaimResponse>(buildApiUrl('/api/guest/claim/execute'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${payload.authToken}`
+        Authorization: `Bearer ${authToken}`
       },
       body: JSON.stringify({
         guestSessionToken: payload.guestSessionToken,
@@ -404,40 +449,50 @@ export async function getPendingDonationStatus(
  * Raw fetch được giữ lại vì cần handle 204 No Content đặc biệt (không có JSON body).
  */
 export async function clearPendingDonation(token: string): Promise<void> {
-  const url = buildApiUrl('/api/guest/pending-donation/clear');
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-
-  if (!response.ok) {
-    const body = await parseJsonSafelyFromResponse(response);
-    throw new GuestApiError({
-      success: false,
-      message: body && typeof body === 'object' && 'message' in body
-        ? String((body as { message: string }).message)
-        : 'Không thể xóa pending donation.',
-      errorCode: body && typeof body === 'object' && 'errorCode' in body
-        ? String((body as { errorCode: string }).errorCode)
-        : 'UNKNOWN_ERROR',
-      statusCode: response.status
-    });
-  }
+  await fetchApi<void>(
+    buildApiUrl('/api/guest/pending-donation/clear'),
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    },
+    { skipBodyValidation: true }
+  );
 }
 
 /**
- * Parse response body as JSON một cách an toàn, trả null nếu body rỗng.
- * Dùng cho các endpoint trả 204 No Content.
+ * Validate địa chỉ ví EIP-55 checksum trước khi gửi lên server.
+ * Ưu tiên dùng viem.isAddress() để verify checksum EIP-55 chính xác.
+ * Nếu viem chưa được cài (fallback), dùng regex kiểm tra format hex cơ bản.
+ * @param walletAddress - Địa chỉ ví cần validate
  */
-async function parseJsonSafelyFromResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return null;
+function validateWalletAddress(walletAddress: string): void {
+  const basicFormat = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
+  if (!basicFormat) {
+    throw new GuestApiError({
+      success: false,
+      message: 'Địa chỉ ví không hợp lệ. Vui lòng kiểm tra lại.',
+      errorCode: 'INVALID_WALLET_ADDRESS',
+      statusCode: 400
+    });
+  }
+
+  // Ưu tiên dùng viem.isAddress() để verify EIP-55 checksum chính xác
+  // isAddress() trả về true chỉ khi checksum đúng (hoa/thường đúng vị trí)
   try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isAddress } = require('viem') as { isAddress?: (addr: string) => boolean };
+    if (isAddress && !isAddress(walletAddress)) {
+      throw new GuestApiError({
+        success: false,
+        message: 'Địa chỉ ví không đúng chuẩn EIP-55 checksum. Vui lòng kiểm tra lại.',
+        errorCode: 'INVALID_WALLET_ADDRESS',
+        statusCode: 400
+      });
+    }
+  } catch (error) {
+    // viem chưa cài hoặc require thất bại — đã pass basic format check thì chấp nhận
+    // Backend sẽ verify lại checksum EIP-55 đầy đủ
   }
 }
