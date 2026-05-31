@@ -68,6 +68,43 @@ export async function findAuditsByWalletAddress(
 }
 
 /**
+ * Hàm tìm audit records theo projectId.
+ * Mục đích: rebuild weighted QF metrics trong recomputeProjectMetrics.
+ * Mỗi audit record chứa trustMultiplier của guest donation tại thời điểm donate.
+ * @param projectId - ID của project
+ * @returns Danh sách audit records của project đó
+ */
+export async function findAuditsByProjectId(
+  projectId: string
+): Promise<AnonymousDonationAudit[]> {
+  return AnonymousDonationAuditModel.find({ projectId })
+    .lean<AnonymousDonationAudit[]>()
+    .exec();
+}
+
+/**
+ * Hàm tìm audit records theo projectId trong cửa sổ thời gian.
+ * Mục đích: rebuild weighted QF metrics với lọc thời gian ở Database layer.
+ * Trả về đúng lượng record trong window, không load toàn bộ project audits vào RAM.
+ * @param projectId - ID của project
+ * @param startedAt - Thời điểm bắt đầu cửa sổ
+ * @param endedAt - Thời điểm kết thúc cửa sổ
+ * @returns Danh sách audit records trong window
+ */
+export async function findAuditsForProjectInWindow(
+  projectId: string,
+  startedAt: Date,
+  endedAt: Date
+): Promise<AnonymousDonationAudit[]> {
+  return AnonymousDonationAuditModel.find({
+    projectId,
+    createdAt: { $gte: startedAt, $lte: endedAt }
+  })
+    .lean<AnonymousDonationAudit[]>()
+    .exec();
+}
+
+/**
  * Hàm tìm các audit records chưa được index on-chain.
  * Mục đích: reconciliation worker tìm các donation đã sponsor nhưng chưa có onChainTxHash.
  * Những record này có thể là token kẹt trong pipeline.
