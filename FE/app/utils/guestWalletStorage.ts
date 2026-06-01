@@ -1,15 +1,24 @@
 /**
- * Lớp wrapper cho LocalStorage dùng lưu trữ dữ liệu Guest Wallet.
+ * Lớp wrapper cho LocalStorage và SessionStorage dùng lưu trữ dữ liệu Guest Wallet.
  * Mục đích: cung cấp interface type-safe để lưu/truy xuất dữ liệu ví guest
- * từ LocalStorage, bao gồm encrypted owner key và session metadata.
+ * từ browser storage, bao gồm encrypted owner key và session metadata.
+ *
+ * NGUYÊN TẮC BẢO MẬT:
+ * - encryptedOwnerKey: lưu trong localStorage (cần persistent cho việc restore)
+ * - guestSessionToken: lưu trong sessionStorage (chỉ tồn tại trong tab, tự clear khi đóng tab)
+ * - serverSalt: lưu trong localStorage (cần persistent)
  */
 
-/** Key dùng để lưu trữ guest wallet data trong LocalStorage */
+/** Key dùng để lưu trữ dữ liệu ví guest trong LocalStorage (encrypted key, salts) */
 const GUEST_WALLET_STORAGE_KEY = 'dcp_guest_wallet';
+
+/** Key dùng để lưu trữ JWT token trong SessionStorage (tự clear khi đóng tab) */
+const GUEST_SESSION_TOKEN_KEY = 'dcp_guest_session_token';
 
 /**
  * Cấu trúc dữ liệu lưu trong LocalStorage cho Guest Wallet.
- * Chứa owner key đã mã hóa và metadata cần thiết để khôi phục session.
+ * Lưu ý: guestSessionToken KHÔNG lưu trong LocalStorage — dùng sessionStorage riêng.
+ * Việc tách token ra khỏi localStorage giảm thiểu rủi ro nếu localStorage bị đọc trái phép.
  */
 export interface GuestWalletStorageData {
   /** Chuỗi hex của owner key đã được mã hóa AES-256-GCM */
@@ -28,6 +37,8 @@ export interface GuestWalletStorageData {
   expiresAt: string;
   /** Thời điểm tạo wallet (ISO timestamp) */
   createdAt: string;
+  /** Tổng số donation được phép trong session (từ API response) */
+  donationQuota: number;
 }
 
 /**
@@ -47,26 +58,31 @@ export function hasGuestWallet(): boolean {
  * @param rawData - Dữ liệu thô parse từ JSON
  * @returns true nếu dữ liệu hợp lệ với đầy đủ required fields
  */
+const STORAGE_STRING_FIELDS: (keyof GuestWalletStorageData)[] = [
+  'encryptedOwnerKey',
+  'clientSalt',
+  'serverSalt',
+  'iv',
+  'walletAddress',
+  'sessionId',
+  'expiresAt',
+  'createdAt',
+];
+
 function validateStorageData(rawData: unknown): rawData is GuestWalletStorageData {
   if (!rawData || typeof rawData !== 'object') {
     return false;
   }
 
-  const requiredFields: (keyof GuestWalletStorageData)[] = [
-    'encryptedOwnerKey',
-    'clientSalt',
-    'serverSalt',
-    'iv',
-    'walletAddress',
-    'sessionId',
-    'expiresAt',
-    'createdAt',
-  ];
-
-  for (const field of requiredFields) {
+  for (const field of STORAGE_STRING_FIELDS) {
     if (!(field in rawData) || typeof (rawData as Record<string, unknown>)[field] !== 'string') {
       return false;
     }
+  }
+
+  // donationQuota là number, không phải string
+  if (!('donationQuota' in rawData) || typeof (rawData as Record<string, unknown>).donationQuota !== 'number') {
+    return false;
   }
 
   return true;
@@ -86,14 +102,16 @@ export function loadGuestWallet(): GuestWalletStorageData | null {
     const parsedData = JSON.parse(rawJson) as unknown;
 
     if (!validateStorageData(parsedData)) {
+      // Chỉ log message, không log error object để tránh lộ thông tin internal
       console.warn('[GuestWalletStorage] Dữ liệu trong LocalStorage không hợp lệ, xóa bỏ.');
       localStorage.removeItem(GUEST_WALLET_STORAGE_KEY);
       return null;
     }
 
     return parsedData;
-  } catch (error) {
-    console.error('[GuestWalletStorage] Lỗi khi đọc dữ liệu từ LocalStorage:', error);
+  } catch {
+    // Chỉ log message, không log error object
+    console.error('[GuestWalletStorage] Lỗi khi đọc dữ liệu từ LocalStorage.');
     return null;
   }
 }
@@ -106,8 +124,9 @@ export function saveGuestWallet(data: GuestWalletStorageData): void {
   try {
     const jsonString = JSON.stringify(data);
     localStorage.setItem(GUEST_WALLET_STORAGE_KEY, jsonString);
-  } catch (error) {
-    console.error('[GuestWalletStorage] Lỗi khi lưu dữ liệu vào LocalStorage:', error);
+  } catch {
+    // Chỉ log message, không log error object
+    console.error('[GuestWalletStorage] Lỗi khi lưu dữ liệu vào LocalStorage.');
     throw new Error('Không thể lưu dữ liệu guest wallet vào LocalStorage.');
   }
 }
@@ -119,8 +138,9 @@ export function saveGuestWallet(data: GuestWalletStorageData): void {
 export function clearGuestWallet(): void {
   try {
     localStorage.removeItem(GUEST_WALLET_STORAGE_KEY);
-  } catch (error) {
-    console.error('[GuestWalletStorage] Lỗi khi xóa dữ liệu từ LocalStorage:', error);
+  } catch {
+    // Chỉ log message, không log error object
+    console.error('[GuestWalletStorage] Lỗi khi xóa dữ liệu từ LocalStorage.');
   }
 }
 
@@ -138,5 +158,56 @@ export function isSessionExpired(data: GuestWalletStorageData): boolean {
     return Date.now() > expiryTime;
   } catch {
     return true;
+  }
+}
+
+/* ============================================================
+ * SESSION TOKEN MANAGEMENT (sessionStorage)
+ * Token lưu riêng trong sessionStorage — không tồn tại khi đóng tab
+ * ============================================================ */
+
+/**
+ * Lưu guest session token vào sessionStorage.
+ * Token chỉ tồn tại trong tab hiện tại — tự clear khi đóng tab.
+ * @param token - JWT token từ server
+ * @param expiresAt - Thời điểm hết hạn (để kiểm tra khi đọc)
+ */
+export function saveGuestSessionToken(token: string, expiresAt: string): void {
+  try {
+    sessionStorage.setItem(GUEST_SESSION_TOKEN_KEY, JSON.stringify({ token, expiresAt }));
+  } catch {
+    // sessionStorage có thể bị blocked trong một số trình duyệt (Safari Private Mode)
+    throw new Error('Không thể lưu session token. Trình duyệt có thể đang chặn sessionStorage.');
+  }
+}
+
+/**
+ * Đọc guest session token từ sessionStorage.
+ * @returns Token và expiry nếu tồn tại và chưa hết hạn, null nếu không có hoặc hết hạn
+ */
+export function loadGuestSessionToken(): { token: string; expiresAt: string } | null {
+  try {
+    const raw = sessionStorage.getItem(GUEST_SESSION_TOKEN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { token: string; expiresAt: string };
+    const expiryTime = new Date(parsed.expiresAt).getTime();
+    if (Number.isNaN(expiryTime) || Date.now() > expiryTime) {
+      sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Xóa guest session token khỏi sessionStorage.
+ */
+export function clearGuestSessionToken(): void {
+  try {
+    sessionStorage.removeItem(GUEST_SESSION_TOKEN_KEY);
+  } catch {
+    // ignore
   }
 }

@@ -6,14 +6,14 @@
 /** Giới hạn donation count mỗi session (FR5.G). */
 export const MAX_DONATIONS_PER_SESSION = 3;
 
-/** Tổng số tiền tối đa mỗi session (USD equivalent, ~200 token). */
-export const MAX_TOTAL_AMOUNT_PER_SESSION = 200;
+/** Tổng số tiền tối đa mỗi session (USD equivalent, ~600000 token). */
+export const MAX_TOTAL_AMOUNT_PER_SESSION = 600000;
 
 /** Số tiền donation tối thiểu mỗi lần cho guest. */
 export const MIN_AMOUNT_PER_DONATION = 1;
 
 /** Số tiền donation tối đa mỗi lần cho guest. */
-export const MAX_AMOUNT_PER_DONATION = 100;
+export const MAX_AMOUNT_PER_DONATION = 200000;
 
 /** Ngưỡng risk score: >= 70 → dùng Token Paymaster. */
 export const RISK_THRESHOLD_FOR_TOKEN_PAYMASTER = 70;

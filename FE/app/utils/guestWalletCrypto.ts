@@ -38,7 +38,14 @@ function arrayBufferToHex(source: ArrayBuffer | ArrayBufferLike | Uint8Array): s
  * @returns ArrayBuffer chứa bytes tương ứng
  */
 function hexToArrayBuffer(hex: string): ArrayBuffer {
-  const cleanHex = hex.replace(/[^a-fA-F0-9]/g, '');
+  // Strip 0x prefix nếu có
+  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
+
+  // Phát hiện ký tự không hợp lệ — throw thay vì silent strip để tránh confuse
+  if (!/^[a-fA-F0-9]+$/.test(cleanHex)) {
+    throw new Error('Chuỗi hex không hợp lệ: có ký tự không phải hex.');
+  }
+
   const bytes = new Uint8Array(cleanHex.length / 2);
   for (let index = 0; index < cleanHex.length; index += 2) {
     bytes[index / 2] = parseInt(cleanHex.substring(index, index + 2), 16);
@@ -114,7 +121,7 @@ async function deriveAesKey(
 
 /**
  * Mã hóa owner key bằng AES-256-GCM.
- * @param ownerKey - Private key dạng hex (không có prefix 0x)
+ * @param ownerKey - Private key dạng hex (có hoặc không có prefix 0x — chuẩn hóa bên trong)
  * @param deviceFingerprint - SHA-256 hash của device fingerprint (hex)
  * @param serverSalt - Server salt nhận được từ backend (hex)
  * @returns Object chứa encrypted data và metadata cần thiết để giải mã
@@ -137,8 +144,11 @@ export async function encryptOwnerKey(
 
   const aesKey = await deriveAesKey(deviceFingerprint, serverSalt, clientSalt);
 
+  // Chuẩn hóa: ethers v6 Wallet.privateKey luôn có prefix 0x, strip trước khi encrypt
+  // để đảm bảo consistent format: 64 ký tự hex không có 0x (dùng cho cả ethers và non-ethers)
+  const cleanOwnerKey = ownerKey.startsWith('0x') ? ownerKey.slice(2) : ownerKey;
   const encoder = new TextEncoder();
-  const ownerKeyBuffer = encoder.encode(ownerKey);
+  const ownerKeyBuffer = encoder.encode(cleanOwnerKey);
 
   const encryptedBuffer = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: ivBuffer },

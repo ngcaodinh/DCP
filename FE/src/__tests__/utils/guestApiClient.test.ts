@@ -12,7 +12,7 @@ import {
   type GuestApiErrorCode,
 } from '@/app/utils/guestApiClient';
 
-const FIXTURE_WALLET = '0x742d35Cc6634C0532925a3b844Bc9e7595f0E8eD';
+const FIXTURE_WALLET = '0x742d35Cc6634C0532925a3b844Bc9e7595f0E8eD'.toLowerCase();
 const FIXTURE_FINGERPRINT = 'a'.repeat(64);
 const FIXTURE_TOKEN = 'guest.jwt.token';
 
@@ -108,7 +108,7 @@ describe('guestApiClient', () => {
       }, false, 429));
 
       try {
-        await getGuestSessionStatus(FIXTURE_TOKEN);
+        await getGuestSessionStatus('session-123', FIXTURE_TOKEN);
         expect.fail('Should have thrown GuestApiError');
       } catch (error) {
         expect(error).toBeInstanceOf(GuestApiError);
@@ -126,7 +126,7 @@ describe('guestApiClient', () => {
       }, false, 500));
 
       try {
-        await getGuestSessionStatus(FIXTURE_TOKEN);
+        await getGuestSessionStatus('session-123', FIXTURE_TOKEN);
         expect.fail('Should have thrown GuestApiError');
       } catch (error) {
         expect(error).toBeInstanceOf(GuestApiError);
@@ -143,7 +143,7 @@ describe('guestApiClient', () => {
       } as unknown as Response));
 
       try {
-        await getGuestSessionStatus(FIXTURE_TOKEN);
+        await getGuestSessionStatus('session-123', FIXTURE_TOKEN);
         expect.fail('Should have thrown GuestApiError');
       } catch (error) {
         expect(error).toBeInstanceOf(GuestApiError);
@@ -303,7 +303,7 @@ describe('guestApiClient', () => {
         correlationId: null,
       }, true, 200));
 
-      const result = await getGuestSessionStatus(FIXTURE_TOKEN);
+      const result = await getGuestSessionStatus('session-123', FIXTURE_TOKEN);
 
       expect(result.sessionId).toBe('sess-001');
       expect(result.status).toBe('ACTIVE');
@@ -318,7 +318,7 @@ describe('guestApiClient', () => {
         details: [],
       }, false, 404));
 
-      await expect(getGuestSessionStatus('invalid-token')).rejects.toMatchObject({
+      await expect(getGuestSessionStatus('invalid-token', FIXTURE_TOKEN)).rejects.toMatchObject({
         errorCode: 'GUEST_SESSION_NOT_FOUND',
         statusCode: 404,
       });

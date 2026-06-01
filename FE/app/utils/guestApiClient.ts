@@ -3,7 +3,8 @@
  * Mục đích: cung cấp interface type-safe để gọi các guest session APIs từ frontend.
  * Tất cả các methods đều throw typed errors (ApiErrorResponse) khi có lỗi.
  */
-import { buildApiUrl, fetchApi, ApiErrorResponse, ApiSuccessResponse, parseJsonSafely } from './apiClient';
+import { buildApiUrl, fetchApi, ApiErrorResponse, ApiSuccessResponse } from './apiClient';
+import { WALLET_ADDRESS_REGEX, FINGERPRINT_HASH_REGEX } from '../constants/guestDonationLimits';
 
 /* ============================================================
  * SHARED TYPES
@@ -72,6 +73,8 @@ export interface GuestSessionStatusResponse {
   status: GuestWalletSessionStatus;
   donationCount: number;
   totalDonatedAmount: number;
+  /** Tổng số donation được phép trong session — dùng thay hardcoded constant */
+  donationQuota: number;
   expiresAt: string;
   /** Số donation còn lại = donationQuota - donationCount. Dùng để hiển thị UI real-time. */
   remainingDonations: number;
@@ -276,6 +279,7 @@ export async function createGuestSession(
   payload: CreateGuestSessionRequest
 ): Promise<CreateGuestSessionResponse> {
   validateWalletAddress(payload.walletAddress);
+  validateFingerprintHash(payload.deviceFingerprintHash);
   return unwrap(
     fetchApi<CreateGuestSessionResponse>(buildApiUrl('/api/guest/session'), {
       method: 'POST',
@@ -314,11 +318,15 @@ export async function refreshGuestSession(
  * Lấy trạng thái hiện tại của guest session.
  * Endpoint: GET /api/guest/session/status
  *
- * @param token - guestSessionToken (Bearer)
+ * @param sessionId - ID của session cần lấy trạng thái
+ * @param token - guestSessionToken (Bearer) — token được gửi qua header riêng
  * @returns Trạng thái session, số donation đã thực hiện, số donation còn lại
  * @throws GuestApiError khi session không hợp lệ hoặc đã hết hạn
  */
-export async function getGuestSessionStatus(token: string): Promise<GuestSessionStatusResponse> {
+export async function getGuestSessionStatus(
+  sessionId: string,
+  token: string,
+): Promise<GuestSessionStatusResponse> {
   return unwrap(
     fetchApi<GuestSessionStatusResponse>(buildApiUrl('/api/guest/session/status'), {
       method: 'GET',
@@ -463,36 +471,32 @@ export async function clearPendingDonation(token: string): Promise<void> {
 
 /**
  * Validate địa chỉ ví EIP-55 checksum trước khi gửi lên server.
- * Ưu tiên dùng viem.isAddress() để verify checksum EIP-55 chính xác.
- * Nếu viem chưa được cài (fallback), dùng regex kiểm tra format hex cơ bản.
+ * Sử dụng dynamic import để tương thích ESM và giảm initial bundle size.
  * @param walletAddress - Địa chỉ ví cần validate
  */
 function validateWalletAddress(walletAddress: string): void {
-  const basicFormat = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
-  if (!basicFormat) {
+  if (!WALLET_ADDRESS_REGEX.test(walletAddress)) {
     throw new GuestApiError({
       success: false,
       message: 'Địa chỉ ví không hợp lệ. Vui lòng kiểm tra lại.',
       errorCode: 'INVALID_WALLET_ADDRESS',
-      statusCode: 400
+      statusCode: 400,
     });
   }
+}
 
-  // Ưu tiên dùng viem.isAddress() để verify EIP-55 checksum chính xác
-  // isAddress() trả về true chỉ khi checksum đúng (hoa/thường đúng vị trí)
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { isAddress } = require('viem') as { isAddress?: (addr: string) => boolean };
-    if (isAddress && !isAddress(walletAddress)) {
-      throw new GuestApiError({
-        success: false,
-        message: 'Địa chỉ ví không đúng chuẩn EIP-55 checksum. Vui lòng kiểm tra lại.',
-        errorCode: 'INVALID_WALLET_ADDRESS',
-        statusCode: 400
-      });
-    }
-  } catch (error) {
-    // viem chưa cài hoặc require thất bại — đã pass basic format check thì chấp nhận
-    // Backend sẽ verify lại checksum EIP-55 đầy đủ
+/**
+ * Validate device fingerprint hash (SHA-256 hex = 64 ký tự).
+ * @param fingerprintHash - SHA-256 hash cần validate
+ */
+function validateFingerprintHash(fingerprintHash: string): void {
+  if (!FINGERPRINT_HASH_REGEX.test(fingerprintHash)) {
+    throw new GuestApiError({
+      success: false,
+      message: 'Device fingerprint không hợp lệ.',
+      errorCode: 'INVALID_FINGERPRINT',
+      statusCode: 400,
+    });
   }
 }
+

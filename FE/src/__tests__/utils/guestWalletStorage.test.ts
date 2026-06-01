@@ -17,6 +17,7 @@ const validStorageData: GuestWalletStorageData = {
   sessionId: 'session-123',
   expiresAt: '2099-12-31T23:59:59.000Z',
   createdAt: '2026-01-01T00:00:00.000Z',
+  donationQuota: 3,
 };
 
 function setupLocalStorageMock() {
