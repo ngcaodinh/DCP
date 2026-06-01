@@ -83,6 +83,7 @@ export interface UseGuestSessionManagerReturn {
     donationCount: number;
     remainingDonations: number;
     donationQuota: number;
+    hasPendingDonation?: boolean;
   }) => void;
 }
 
@@ -300,7 +301,20 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
         donationQuota: sessionResponse.donationQuota,
       };
       saveGuestWallet(storageData);
-      saveGuestSessionToken(sessionResponse.guestSessionToken, sessionResponse.expiresAt);
+
+      // Lưu token vào sessionStorage — có thể bị throw (Safari Private Mode, Brave Shields)
+      // Catch để tránh uncaught error, user sẽ thấy initError thay vì crash
+      try {
+        saveGuestSessionToken(sessionResponse.guestSessionToken, sessionResponse.expiresAt);
+      } catch (sessionStorageError) {
+        // Xóa localStorage để giữ consistent state
+        clearGuestWallet();
+        updateInitState({
+          initStatus: 'ERROR',
+          initError: 'Trình duyệt không hỗ trợ lưu trữ phiên. Vui lòng tắt chế độ Private hoặc thử trình duyệt khác.',
+        });
+        return;
+      }
 
       // Cập nhật state — KHÔNG auto-cache owner key vì bảo mật
       // Owner key chỉ decrypt khi user click Donate (lazy decryption)
@@ -415,11 +429,13 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
     donationCount: number;
     remainingDonations: number;
     donationQuota: number;
+    hasPendingDonation?: boolean;
   }) => {
     updateInitState({
       donationCount: data.donationCount,
       remainingDonations: data.remainingDonations,
       canDonate: data.donationCount < data.donationQuota,
+      hasPendingDonation: data.hasPendingDonation ?? false,
     });
   }, [updateInitState]);
 

@@ -78,6 +78,8 @@ export interface GuestSessionStatusResponse {
   expiresAt: string;
   /** Số donation còn lại = donationQuota - donationCount. Dùng để hiển thị UI real-time. */
   remainingDonations: number;
+  /** Flag backend set khi phát hiện donation bị kẹt (balance > 0 nhưng chưa indexed) */
+  hasPendingDonation?: boolean;
 }
 
 /**

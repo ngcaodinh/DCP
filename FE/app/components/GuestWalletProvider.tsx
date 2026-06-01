@@ -44,7 +44,7 @@ export interface GuestWalletContextValue {
   restoreGuestSession: () => Promise<void>;
   /** Refresh session token — kéo dài expiry mà không cần tạo lại session */
   refreshGuestSession: () => Promise<void>;
-  executeDonation: (projectId: string, amount: number) => Promise<void>;
+  executeDonation: (projectId: string, amount: number) => Promise<boolean>;
   dismissClaimPrompt: () => void;
   claimGuestWallet: (authToken: string) => Promise<boolean>;
   clearGuestWalletData: () => void;
@@ -134,8 +134,8 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
   // ============================================================
 
   const wrappedExecuteDonation = useCallback(
-    async (projectId: string, amount: number): Promise<void> => {
-      await opsExecuteDonation(projectId, amount, initState);
+    async (projectId: string, amount: number): Promise<boolean> => {
+      return await opsExecuteDonation(projectId, amount, initState);
     },
     [opsExecuteDonation, initState],
   );

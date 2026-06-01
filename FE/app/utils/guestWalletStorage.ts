@@ -80,8 +80,29 @@ function validateStorageData(rawData: unknown): rawData is GuestWalletStorageDat
     }
   }
 
-  // donationQuota là number, không phải string
+  // Validate donationQuota
   if (!('donationQuota' in rawData) || typeof (rawData as Record<string, unknown>).donationQuota !== 'number') {
+    return false;
+  }
+
+  // Validate walletAddress format (EIP-55 hex)
+  const wallet = (rawData as GuestWalletStorageData).walletAddress;
+  if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    return false;
+  }
+
+  // Validate string lengths to prevent corrupted storage data
+  const encryptedKey: string = (rawData as Record<string, unknown>).encryptedOwnerKey as string;
+  const clientSalt: string = (rawData as Record<string, unknown>).clientSalt as string;
+  const serverSalt: string = (rawData as Record<string, unknown>).serverSalt as string;
+  const iv: string = (rawData as Record<string, unknown>).iv as string;
+
+  if (
+    encryptedKey.length < 16 ||
+    clientSalt.length < 16 ||
+    serverSalt.length < 16 ||
+    iv.length < 16
+  ) {
     return false;
   }
 

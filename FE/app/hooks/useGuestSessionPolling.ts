@@ -17,6 +17,7 @@ interface UseGuestSessionPollingOptions {
     donationCount: number;
     remainingDonations: number;
     donationQuota: number;
+    hasPendingDonation?: boolean;
   }) => void;
 }
 
@@ -28,6 +29,7 @@ interface UseGuestSessionPollingReturn {
 /**
  * Hook quản lý TanStack Query polling cho guest session status.
  * Poll server mỗi SESSION_POLL_INTERVAL_MS để sync donationCount real-time.
+ * Backoff khi server errors: double interval lên đến MAX_POLL_INTERVAL_MS.
  */
 export function useGuestSessionPolling({
   sessionId,
@@ -35,6 +37,8 @@ export function useGuestSessionPolling({
   onPollData,
 }: UseGuestSessionPollingOptions): UseGuestSessionPollingReturn {
   const onPollDataRef = useRef(onPollData);
+  const backoffRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentIntervalRef = useRef(SESSION_POLL_INTERVAL_MS);
 
   // Cập nhật ref trong effect để tránh side-effect trong render phase (Concurrent Mode safe)
   useEffect(() => {
@@ -56,12 +60,31 @@ export function useGuestSessionPolling({
       return getGuestSessionStatus(sessionId, token);
     },
     enabled: isReady && !!sessionId,
-    refetchInterval: SESSION_POLL_INTERVAL_MS,
+    refetchInterval: currentIntervalRef.current,
     refetchIntervalInBackground: false,
     retry: false,
     gcTime: 1000 * 60 * 5, // 5 phút — cleanup stale queries
     throwOnError: false,
   });
+
+  // Backoff: tăng interval khi query thất bại, reset khi thành công
+  const MAX_POLL_INTERVAL_MS = 60 * 1000;
+  const BASE_POLL_INTERVAL_MS = SESSION_POLL_INTERVAL_MS;
+
+  useEffect(() => {
+    if (!sessionQuery.isError && !sessionQuery.isFetching) return;
+
+    if (sessionQuery.isError) {
+      // Tăng interval gấp đôi, tối đa MAX_POLL_INTERVAL_MS
+      currentIntervalRef.current = Math.min(
+        currentIntervalRef.current * 2,
+        MAX_POLL_INTERVAL_MS,
+      );
+    } else if (sessionQuery.isSuccess) {
+      // Reset về base interval khi query thành công
+      currentIntervalRef.current = BASE_POLL_INTERVAL_MS;
+    }
+  }, [sessionQuery.isError, sessionQuery.isFetching, sessionQuery.isSuccess]);
 
   useEffect(() => {
     if (!sessionQuery.data) return;
@@ -69,8 +92,20 @@ export function useGuestSessionPolling({
       donationCount: sessionQuery.data.donationCount,
       remainingDonations: sessionQuery.data.remainingDonations,
       donationQuota: sessionQuery.data.donationQuota,
+      hasPendingDonation: sessionQuery.data.hasPendingDonation ?? false,
     });
   }, [sessionQuery.data]);
+
+  // Cleanup: xóa interval khi hook unmount hoặc polling bị disable
+  useEffect(() => {
+    return () => {
+      if (backoffRef.current !== null) {
+        clearInterval(backoffRef.current);
+        backoffRef.current = null;
+      }
+      currentIntervalRef.current = BASE_POLL_INTERVAL_MS;
+    };
+  }, []);
 
   const refreshNow = useCallback(() => {
     void sessionQuery.refetch();

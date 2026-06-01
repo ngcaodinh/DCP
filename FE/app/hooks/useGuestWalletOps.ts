@@ -77,7 +77,7 @@ export interface GuestDonationState {
 
 export interface UseGuestWalletOpsReturn {
   donationState: GuestDonationState;
-  executeDonation: (projectId: string, amount: number, initState: GuestWalletInitState) => Promise<void>;
+  executeDonation: (projectId: string, amount: number, initState: GuestWalletInitState) => Promise<boolean>;
   claimGuestWallet: (authToken: string, initState: GuestWalletInitState) => Promise<boolean>;
   getCachedOwnerKey: () => string | null;
   setOwnerKeyCache: (key: string) => void;
@@ -226,7 +226,7 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
    * 5. Gửi signed UserOp lên Bundler → EntryPoint → on-chain donate()
    */
   const executeDonation = useCallback(
-    async (projectId: string, amount: number, initState: GuestWalletInitState): Promise<void> => {
+    async (projectId: string, amount: number, initState: GuestWalletInitState): Promise<boolean> => {
       // Validate wallet address format trước khi thực hiện donation
       // Defense-in-depth: đảm bảo dữ liệu từ LocalStorage không bị user sửa thủ công
       if (!initState.walletAddress || !initState.sessionId) {
@@ -234,33 +234,33 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
           donationStatus: 'FAILED',
           donationError: 'Guest wallet chưa được khởi tạo.',
         });
-        return;
+        return false;
       }
       if (!isValidWalletAddress(initState.walletAddress)) {
         updateDonationState({
           donationStatus: 'FAILED',
           donationError: 'Địa chỉ ví không hợp lệ. Vui lòng khởi tạo ví mới.',
         });
-        return;
+        return false;
       }
       if (initState.remainingDonations <= 0) {
         updateDonationState({
           donationStatus: 'FAILED',
           donationError: GUEST_DONATION_ERROR_MESSAGES.GUEST_DONATION_QUOTA_EXCEEDED!,
         });
-        return;
+        return false;
       }
       if (amount < MIN_AMOUNT_PER_DONATION || amount > MAX_AMOUNT_PER_DONATION) {
         updateDonationState({
           donationStatus: 'FAILED',
           donationError: `Số token quyên góp phải từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()}.`,
         });
-        return;
+        return false;
       }
 
       // Guard chống concurrent donations — ngăn double-click
       if (donationInProgressRef.current) {
-        return;
+        return false;
       }
       donationInProgressRef.current = true;
 
@@ -365,6 +365,7 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
           lastUserOpHash: paymasterResponse.userOpHash,
           lastTxHash: bundlerResponse?.txHash ?? null,
         });
+        return true;
       } catch (error) {
         // Chỉ log message, không log error object để tránh lộ thông tin internal
         console.error('[GuestWalletProvider] Lỗi executeDonation.');
@@ -372,6 +373,7 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
           donationStatus: 'FAILED',
           donationError: getDonationErrorMessage(error),
         });
+        return false;
       } finally {
         // Invalidate queries trong finally để đảm bảo cleanup luôn chạy,
         // kể cả khi component unmount trong quá trình donation.

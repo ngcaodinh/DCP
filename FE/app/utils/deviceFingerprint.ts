@@ -109,14 +109,9 @@ function getStableBrowserAttributes(): string {
     hardwareConcurrency?: number;
     language?: string;
     platform?: string;
-    userAgent?: string;
   };
 
   const attributes: string[] = [];
-
-  if (nav.userAgent) {
-    attributes.push(nav.userAgent);
-  }
 
   try {
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;

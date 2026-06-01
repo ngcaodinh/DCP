@@ -14,6 +14,8 @@ type DonationCampaignItem = {
   status: string;
   updatedAt: string;
   deadline?: string;
+  minDonation: number;
+  maxDonation: number;
 };
 
 /** Hàm định dạng số tiền. Mục đích: hiển thị số liệu gây quỹ rõ ràng và đồng nhất. */
