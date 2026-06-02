@@ -5,7 +5,6 @@ import { connectToRedisSafely } from './config/redis';
 import { startRankingWorker } from './workers/rankingWorker';
 import { startRankingScheduler } from './workers/rankingScheduler';
 import { startRankingReconcileWorker } from './workers/rankingReconcileWorker';
-import { startGuestCleanupWorker } from './workers/guestCleanupWorker';
 import { startDonationReconciliationWorker } from './workers/donationReconciliationWorker';
 import { startDisbursementTransferStatusSweepPolling } from './services/disbursementService';
 
@@ -27,8 +26,6 @@ function startBackgroundWorkers(): void {
   startRankingWorker();
   startRankingScheduler();
   startRankingReconcileWorker();
-  // Guest cleanup worker: chạy 1 lần/ngày lúc 00:00 cùng với reconcile
-  startGuestCleanupWorker();
   // Donation reconciliation worker: chạy mỗi 15 phút kiểm tra pending donations
   startDonationReconciliationWorker();
   startDisbursementTransferStatusSweepPolling();

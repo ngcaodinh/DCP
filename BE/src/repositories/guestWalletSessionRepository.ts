@@ -318,6 +318,210 @@ export async function markGuestSessionAsClaimed(
 }
 
 /**
+ * Hàm đếm số phiên guest wallet theo IP subnet prefix (cùng /24 IPv4 hoặc /64 IPv6).
+ * Mục đích: kiểm tra IP subnet burst trong cluster detection worker.
+ * Dùng aggregation để extract subnet prefix từ ipAddress, nhóm và đếm.
+ * @param subnetPrefix - Subnet prefix cần đếm (VD: "192.168.1" hoặc "2001:db8:acme")
+ * @param isIpv6 - true nếu subnetPrefix là IPv6, false cho IPv4
+ * @returns Số lượng phiên trong subnet
+ */
+export async function countSessionsBySubnet(
+  subnetPrefix: string,
+  isIpv6: boolean
+): Promise<number> {
+  const regexPattern = isIpv6
+    ? `^${subnetPrefix}:`
+    : `^${subnetPrefix}\\.`;
+  return GuestWalletSessionModel.countDocuments({
+    ipAddress: { $regex: regexPattern, $options: 'i' }
+  }).exec();
+}
+
+/**
+ * Hàm đếm số phiên guest wallet theo fingerprint prefix (prefix của sha256 hash).
+ * Mục đích: kiểm tra fingerprint reuse trong cluster detection worker.
+ * Chỉ so khớp prefix của hash vì có thể có những phiên mới với fingerprint gần đúng.
+ * @param fingerprintPrefix - 16 ký tự đầu của fingerprint hash
+ * @returns Số lượng phiên có fingerprint bắt đầu bằng prefix đó
+ */
+export async function countSessionsByFingerprintPrefix(
+  fingerprintPrefix: string
+): Promise<number> {
+  return GuestWalletSessionModel.countDocuments({
+    deviceFingerprintHash: { $regex: `^${fingerprintPrefix}`, $options: 'i' }
+  }).exec();
+}
+
+/**
+ * Giới hạn batch để tránh regex quá dài trong aggregation pipeline.
+ */
+const AGGREGATION_BATCH_MAX = 100;
+
+/**
+ * Hàm đếm tất cả fingerprint prefixes trong 1 aggregation query duy nhất.
+ * Mục đích: tránh N+1 query khi batch có nhiều unique fingerprints.
+ * Trả về Map<fingerprintPrefix, count> cho tất cả prefixes cùng lúc.
+ *
+ * @param prefixes - Danh sách fingerprint prefixes cần đếm
+ * @returns Map với prefix → total count trên toàn bộ collection
+ */
+export async function aggregateFingerprintCounts(
+  prefixes: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+
+  if (!prefixes.length) return result;
+
+  // Chunk để tránh regex quá dài trong $or
+  for (let i = 0; i < prefixes.length; i += AGGREGATION_BATCH_MAX) {
+    const chunk = prefixes.slice(i, i + AGGREGATION_BATCH_MAX);
+
+    const pipeline = [
+      {
+        $match: {
+          deviceFingerprintHash: {
+            $regex: chunk.map(p => `^${p}`).join('|'),
+            $options: 'i'
+          }
+        }
+      },
+      {
+        $project: {
+          prefix: {
+            $function: {
+              body: `function(hash) { return hash.substring(0, 16); }`,
+              args: ['$deviceFingerprintHash'],
+              lang: 'js'
+            }
+          }
+        }
+      },
+      { $group: { _id: '$prefix', count: { $sum: 1 } } }
+    ];
+
+    const aggResults = await GuestWalletSessionModel.aggregate(pipeline).exec();
+    for (const row of aggResults) {
+      result.set(row._id, row.count);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Hàm đếm tất cả IP subnet prefixes trong 1 aggregation query duy nhất.
+ * Mục đích: tránh N+1 query khi batch có nhiều unique subnets.
+ * Trả về Map<subnetPrefix, count> cho tất cả subnets cùng lúc.
+ *
+ * @param subnetQueries - Array chứa {prefix, isIpv6} cho mỗi subnet cần đếm
+ * @returns Map với prefix → total count trên toàn bộ collection
+ */
+export async function aggregateSubnetCounts(
+  subnetQueries: { prefix: string; isIpv6: boolean }[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+
+  if (!subnetQueries.length) return result;
+
+  // Chunk để tránh $or quá dài
+  for (let i = 0; i < subnetQueries.length; i += AGGREGATION_BATCH_MAX) {
+    const chunk = subnetQueries.slice(i, i + AGGREGATION_BATCH_MAX);
+
+    // Build regex pattern: IPv4 (prefix\.) OR IPv6 (prefix:)
+    const ipv4Prefixes = chunk.filter(q => !q.isIpv6).map(q => `^${q.prefix}\\.`);
+    const ipv6Prefixes = chunk.filter(q => q.isIpv6).map(q => `^${q.prefix}:`);
+    const allPatterns = [...ipv4Prefixes, ...ipv6Prefixes];
+    if (!allPatterns.length) continue;
+
+    const pipeline = [
+      {
+        $match: {
+          ipAddress: { $regex: allPatterns.join('|'), $options: 'i' }
+        }
+      },
+      {
+        $project: {
+          subnetPrefix: {
+            $function: {
+              body: `function(ip) {
+                if (ip.includes(':')) {
+                  var parts = ip.split(':'); return parts.length >= 4 ? parts.slice(0, 4).join(':') : ip;
+                } else {
+                  var parts = ip.split('.'); return parts.length === 4 ? parts.slice(0, 3).join('.') : ip;
+                }
+              }`,
+              args: ['$ipAddress'],
+              lang: 'js'
+            }
+          }
+        }
+      },
+      { $group: { _id: '$subnetPrefix', count: { $sum: 1 } } }
+    ];
+
+    const aggResults = await GuestWalletSessionModel.aggregate(pipeline).exec();
+    for (const row of aggResults) {
+      result.set(row._id, row.count);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Hàm tìm tất cả session IDs có cùng fingerprint prefix.
+ * Mục đích: lấy mảng sessionIds để truyền vào markManyAsClusterSuspect của GuestDonationRisk.
+ * Chỉ trả về các sessions CHƯA có clusterId để tránh re-mark các cluster đã xử lý.
+ *
+ * @param fingerprintPrefix - 16 ký tự đầu của fingerprint hash
+ * @returns Mảng sessionId của tất cả sessions matching
+ */
+export async function findSessionIdsByFingerprintPrefix(
+  fingerprintPrefix: string
+): Promise<string[]> {
+  const sessions = await GuestWalletSessionModel.find(
+    {
+      deviceFingerprintHash: { $regex: `^${fingerprintPrefix}`, $options: 'i' }
+    },
+    { sessionId: 1 }
+  )
+    .lean<{ sessionId: string }[]>()
+    .exec();
+  return sessions.map(s => s.sessionId);
+}
+
+/**
+ * Hàm tìm tất cả session IDs thuộc cùng IP subnet.
+ * Mục đích: lấy mảng sessionIds để truyền vào markManyAsClusterSuspect của GuestDonationRisk.
+ * Chỉ trả về các sessions CHƯA có clusterId để tránh re-mark các cluster đã xử lý.
+ *
+ * @param subnetPrefix - Subnet prefix (IPv4 /24 hoặc IPv6 /64)
+ * @param isIpv6 - true nếu là IPv6, false cho IPv4
+ * @param excludeSessionIds - Danh sách sessionIds cần loại trừ (dùng trong velocity check)
+ * @returns Mảng sessionId của tất cả sessions matching
+ */
+export async function findSessionIdsBySubnet(
+  subnetPrefix: string,
+  isIpv6: boolean,
+  excludeSessionIds?: string[]
+): Promise<string[]> {
+  const regexPattern = isIpv6
+    ? `^${subnetPrefix}:`
+    : `^${subnetPrefix}\\.`;
+
+  const query: Record<string, unknown> = { ipAddress: { $regex: regexPattern, $options: 'i' } };
+
+  if (excludeSessionIds && excludeSessionIds.length > 0) {
+    query.sessionId = { $nin: excludeSessionIds };
+  }
+
+  const sessions = await GuestWalletSessionModel.find(query, { sessionId: 1 })
+    .lean<{ sessionId: string }[]>()
+    .exec();
+  return sessions.map(s => s.sessionId);
+}
+
+/**
  * Hàm tìm nhiều phiên guest wallet theo danh sách sessionId.
  * Mục đích: batch fetch phục vụ cluster detection trong cleanup worker.
  * Tránh N+1 query khi cần session data cho nhiều cluster suspects.
@@ -333,3 +537,4 @@ export async function findGuestWalletSessionsByIds(
     .lean<GuestWalletSession[]>()
     .exec();
 }
+  

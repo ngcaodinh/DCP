@@ -15,20 +15,38 @@ const RECONCILE_SCHEDULE_MINUTE = 0;
  */
 const DEFAULT_WINDOW_HOURS = 720;
 
+/**
+ * Khoảng cách tối thiểu giữa 2 lần chạy (12 giờ).
+ * Dùng làm idempotency guard chống early-fire double-run.
+ * 12 giờ đủ lớn để phân biệt 2 lần chạy cùng ngày.
+ */
+const MIN_RUN_INTERVAL_MS = 12 * 60 * 60 * 1000;
+
 const logger = getLogger();
 
 /**
- * Hàm kiểm tra xem đã đến thời điểm chạy reconcile chưa.
- * Mục đích: chỉ chạy reconcile vào lúc 00:00 mỗi ngày.
+ * Timestamp (ms) của lần chạy cuối cùng.
+ * Dùng để đảm bảo idempotency: không chạy 2 lần trong khoảng MIN_RUN_INTERVAL_MS.
  */
-function isReconcileTime(): boolean {
+let lastRunTimestamp = 0;
+
+/**
+ * Kiểm tra xem đã đến thời điểm chạy reconcile chưa (window-based).
+ * Thay vì so sánh chính xác hours === 0 && minutes === 0,
+ * hàm này kiểm tra trong khoảng [00:00, 00:01) — tức 60 giây đầu tiên của ngày.
+ *
+ * @returns true nếu đang trong window reconcile
+ */
+function isInReconcileWindow(): boolean {
   const now = new Date();
   return now.getHours() === RECONCILE_SCHEDULE_HOUR && now.getMinutes() === RECONCILE_SCHEDULE_MINUTE;
 }
 
 /**
- * Hàm chờ đến thời điểm reconcile tiếp theo trong ngày.
- * Mục đích: tính delay (miligiây) để setTimeout tiếp theo rơi vào 00:00.
+ * Tính toán thời gian chờ (miligiây) đến thời điểm reconcile tiếp theo.
+ * Mục đích: xác định delay để setTimeout tiếp theo rơi vào 00:00.
+ *
+ * @returns Số miligiây cần chờ đến thời điểm reconcile tiếp theo
  */
 function calculateDelayUntilReconcileTime(): number {
   const now = new Date();
@@ -44,8 +62,16 @@ function calculateDelayUntilReconcileTime(): number {
 }
 
 /**
- * Hàm khởi động reconcile worker cho bảng xếp hạng QF.
+ * Khởi động reconcile worker cho bảng xếp hạng QF.
  * Mục đích: chạy full recompute cho TẤT CẢ projects mỗi ngày (00:00) để ngăn drift.
+ *
+ * Corrected Schedule Logic:
+ * - Loại bỏ isReconcileTime() boolean check vì setTimeout không đảm bảo exact timing.
+ * - Dùng timestamp-based idempotency guard: chỉ chạy nếu (now - lastRun) >= MIN_RUN_INTERVAL_MS.
+ * - Điều này đảm bảo:
+ *   (1) Late-fire: chạy muộn vẫn được thực thi (không bị skip vì đã qua 00:00)
+ *   (2) Early-fire: không chạy 2 lần liên tiếp (guard chặn)
+ *   (3) Missed: nếu bị skip hoàn toàn, ngày mai vẫn chạy bình thường
  *
  * So với approach cũ:
  *   - rankingScheduler: chạy mỗi 5 phút, query TOÀN BỘ donations → bottleneck
@@ -54,7 +80,8 @@ function calculateDelayUntilReconcileTime(): number {
  * Lưu ý:
  *   - Incremental update xử lý donation mới O(1) — không cần scheduler 5 phút.
  *   - Reconcile worker xử lý drift prevention — chạy 1 lần/ngày là đủ.
- *   - Nếu reconcile worker thất bại, ngày hôm sau sẽ retry — không cần retry trong ngày.
+ *   - Dùng Promise.allSettled để cả 2 workers đều hoàn thành dù có lỗi.
+ *     Log riêng kết quả success/failure của từng worker.
  */
 export function startRankingReconcileWorker(): void {
   logger.info('Ranking reconcile worker khởi động (chạy 00:00 mỗi ngày).');
@@ -65,14 +92,33 @@ export function startRankingReconcileWorker(): void {
 
     setTimeout(async () => {
       try {
-        if (isReconcileTime()) {
+        const now = Date.now();
+
+        // Idempotency guard: đảm bảo 2 lần chạy cách nhau ít nhất 12 giờ
+        // Chống early-fire double-run và late-fire skip
+        if (now - lastRunTimestamp >= MIN_RUN_INTERVAL_MS) {
+          lastRunTimestamp = now;
           logger.info('Ranking reconcile worker bắt đầu reconcile ngày.');
-          // Reconcile metrics và cleanup guest sessions chạy song song — không phụ thuộc nhau
-          await Promise.all([
+
+          // Dùng Promise.allSettled để cả 2 workers đều hoàn thành dù có lỗi
+          const results = await Promise.allSettled([
             reconcileAllProjectMetrics(DEFAULT_WINDOW_HOURS),
             runGuestCleanupOnce()
           ]);
+
+          // Log riêng kết quả success/failure của từng worker
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
+              logger.info(`Worker completed successfully: ${JSON.stringify(result.value)}`);
+            } else {
+              logger.error(`Worker failed: ${result.reason}`);
+            }
+          }
+
           logger.info('Ranking reconcile worker hoàn tất reconcile ngày.');
+        } else {
+          // Đã chạy gần đây (early-fire hoặc double trigger) → bỏ qua
+          logger.info(`Ranking reconcile worker bị skip (last run: ${now - lastRunTimestamp}ms ago, min interval: ${MIN_RUN_INTERVAL_MS}ms).`);
         }
       } catch (error) {
         logger.error('Ranking reconcile worker thất bại.', {

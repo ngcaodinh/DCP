@@ -16,6 +16,7 @@ export type RiskFactors = {
 };
 
 export type GuestDonationRisk = {
+  _id?: mongoose.Types.ObjectId;
   sessionId: string;
   walletAddress: string;
   riskScore: number;
