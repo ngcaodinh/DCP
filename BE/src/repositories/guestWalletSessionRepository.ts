@@ -537,4 +537,46 @@ export async function findGuestWalletSessionsByIds(
     .lean<GuestWalletSession[]>()
     .exec();
 }
+
+/**
+ * Thời gian tối thiểu (miligiây) để coi một session ACTIVE có donationCount===0
+ * là "bị orphaned" — tức là PayOS đã nạp tiền thành công vào ví nhưng user
+ * chưa bấm Donate (hoặc trình duyệt bị crash trước khi audit record được tạo).
+ * 30 phút là đủ để một giao dịch PayOS hoàn tất và blockchain index xong.
+ */
+const ORPHAN_GRACE_PERIOD_MS = 30 * 60 * 1000;
+
+/**
+ * Số bản ghi tối đa scan mỗi batch khi tìm orphaned sessions.
+ * Giới hạn để tránh collection scan quá lâu trên bảng lớn.
+ */
+const ORPHAN_BATCH_LIMIT = 200;
+
+/**
+ * Hàm tìm các session ACTIVE có donationCount === 0 nhưng không có audit record nào.
+ * Mục đích: phát hiện trường hợp PayOS đã nạp tiền thành công vào ví guest
+ * (token đã mint on-chain) nhưng trình duyệt bị crash trước khi user kịp bấm Donate.
+ * Trong trường hợp này, AnonymousDonationAudit chưa được tạo nên worker không thể
+ * phát hiện qua findUnindexedAudits(). Worker cần quét trực tiếp các session này
+ * để check balance on-chain và set hasPendingDonation flag.
+ *
+ * Điều kiện tìm kiếm:
+ * - status === 'ACTIVE'
+ * - donationCount === 0
+ * - updatedAt cách đây ≥ ORPHAN_GRACE_PERIOD_MS (tránh false positive với session mới tạo)
+ *
+ * @returns Danh sách các session bị orphaned (có thể chưa donate dù đã nạp tiền)
+ */
+export async function findOrphanedActiveSessions(): Promise<GuestWalletSession[]> {
+  const cutoffTime = new Date(Date.now() - ORPHAN_GRACE_PERIOD_MS);
+
+  return GuestWalletSessionModel.find({
+    status: 'ACTIVE',
+    donationCount: 0,
+    updatedAt: { $lt: cutoffTime }
+  })
+    .limit(ORPHAN_BATCH_LIMIT)
+    .lean<GuestWalletSession[]>()
+    .exec();
+}
   

@@ -4,7 +4,7 @@
  * Được gọi bởi GuestWalletProvider khi hasPendingDonation flag được set.
  */
 import { Request, Response } from 'express';
-import { findGuestWalletSessionById, updateGuestWalletSession } from '../repositories/guestWalletSessionRepository';
+import { updateGuestWalletSession } from '../repositories/guestWalletSessionRepository';
 import { sendErrorResponse, sendSuccessResponse, sendErrorFromUnknown } from '../utils/apiResponse';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { getLogger } from '../config/logger';
@@ -43,27 +43,22 @@ export async function handleGetPendingDonationStatus(
   }
 
   try {
-    // Middleware đã fetch session và gắn vào request với type giới hạn.
-    // Controller cần thêm fields (hasPendingDonation, donationCount, totalDonatedAmount)
-    // nên phải fetch lại — đây là DB access cần thiết cho business logic.
-    const session = await findGuestWalletSessionById(guestSession.sessionId);
-    if (!session) {
-      sendErrorResponse(response, 404, 'Phiên guest không tìm thấy.', 'SESSION_NOT_FOUND');
-      return;
-    }
+    // Sử dụng trực tiếp guestSession từ middleware mà không cần query lại DB.
+    // Middleware đã attach đầy đủ fields: hasPendingDonation, donationCount, totalDonatedAmount.
+    const guestSessionData = guestSession;
 
     const status: PendingDonationStatus = {
-      sessionId: session.sessionId,
-      walletAddress: session.walletAddress,
-      hasPendingDonation: session.hasPendingDonation,
-      donationCount: session.donationCount,
-      totalDonatedAmount: session.totalDonatedAmount,
-      status: session.status
+      sessionId: guestSessionData.sessionId,
+      walletAddress: guestSessionData.walletAddress,
+      hasPendingDonation: guestSessionData.hasPendingDonation,
+      donationCount: guestSessionData.donationCount,
+      totalDonatedAmount: guestSessionData.totalDonatedAmount,
+      status: guestSessionData.status
     };
 
     logger.info('Pending donation status queried.', {
-      sessionId: session.sessionId,
-      hasPendingDonation: session.hasPendingDonation
+      sessionId: guestSessionData.sessionId,
+      hasPendingDonation: guestSessionData.hasPendingDonation
     });
 
     sendSuccessResponse(response, 200, 'Lấy trạng thái pending donation thành công.', status);

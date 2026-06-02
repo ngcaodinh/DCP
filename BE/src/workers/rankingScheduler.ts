@@ -48,7 +48,8 @@ async function shouldInvalidateRankingCache(): Promise<boolean> {
  * Thay vào đó, chỉ invalidate cache khi nó quá cũ để rebuild từ incremental metrics.
  *
  * Flow:
- * 1. Scheduler chạy mỗi 30 phút (setInterval).
+ * 1. Scheduler chạy mỗi 30 phút bằng recursive setTimeout (thay vì setInterval)
+ *    để tránh overlapping khi process bị treo hoặc job chạy lâu hơn interval.
  * 2. Kiểm tra xem cache còn fresh không.
  * 3. Nếu cache cũ hoặc không tồn tại → invalidate cache để GET /rankings rebuild.
  * 4. Reconcile worker (00:00 hàng ngày) xử lý drift prevention.
@@ -57,26 +58,30 @@ async function shouldInvalidateRankingCache(): Promise<boolean> {
  * Scheduler không còn cần enqueue job recalculate nữa — Bull queue ranking cũng không còn cần thiết.
  */
 export function startRankingScheduler(): void {
-  setInterval(async () => {
-    try {
-      const needInvalidate = await shouldInvalidateRankingCache();
-      if (!needInvalidate) {
-        return;
+  logger.info(`Ranking scheduler khởi động (interval=${SCHEDULE_INTERVAL_MS / 1000 / 60} phút, maxSnapshotAge=${MAX_SNAPSHOT_AGE_MS / 1000 / 60} phút).`);
+
+  const runWithInterval = (): void => {
+    setTimeout(async () => {
+      try {
+        const needInvalidate = await shouldInvalidateRankingCache();
+        if (!needInvalidate) {
+          runWithInterval();
+          return;
+        }
+
+        const { invalidateRankingCache } = await import('../services/rankingCacheService');
+        await invalidateRankingCache();
+
+        logger.info('Scheduled ranking cache invalidated.');
+      } catch (error) {
+        logger.error('Scheduled ranking cache invalidation thất bại.', {
+          errorMessage: (error as Error).message
+        });
       }
 
-      // Với incremental metrics, chỉ cần invalidate cache để trigger rebuild từ O(P) read.
-      // Không còn cần recalculate toàn bộ donations (bottleneck cũ).
-      // Import ở đây để tránh circular dependency.
-      const { invalidateRankingCache } = await import('../services/rankingCacheService');
-      await invalidateRankingCache();
+      runWithInterval();
+    }, SCHEDULE_INTERVAL_MS);
+  };
 
-      logger.info('Scheduled ranking cache invalidated.');
-    } catch (error) {
-      logger.error('Scheduled ranking cache invalidation thất bại.', {
-        errorMessage: (error as Error).message
-      });
-    }
-  }, SCHEDULE_INTERVAL_MS);
-
-  logger.info(`Ranking scheduler khởi động (interval=${SCHEDULE_INTERVAL_MS / 1000 / 60} phút, maxSnapshotAge=${MAX_SNAPSHOT_AGE_MS / 1000 / 60} phút).`);
+  runWithInterval();
 }

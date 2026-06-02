@@ -17,11 +17,17 @@ import { getLogger } from '../config/logger';
 
 const logger = getLogger();
 
-/** Request type mở rộng để chứa guest session data. */
+/** Request type mở rộng để chứa guest session data.
+ * Bao gồm các fields cần thiết cho pending donation controller,
+ * tránh controller phải fetch lại từ DB (fix N+1 query).
+ */
 export type GuestSessionRequest = Request & {
   guestSession?: {
     sessionId: string;
     walletAddress: string;
+    hasPendingDonation: boolean;
+    donationCount: number;
+    totalDonatedAmount: number;
     status: string;
     expiresAt: Date;
   };
@@ -92,6 +98,9 @@ export function createGuestAuthMiddleware() {
     request.guestSession = {
       sessionId: session.sessionId,
       walletAddress: session.walletAddress,
+      hasPendingDonation: session.hasPendingDonation,
+      donationCount: session.donationCount,
+      totalDonatedAmount: session.totalDonatedAmount,
       status: session.status,
       expiresAt: session.expiresAt
     };
