@@ -14,6 +14,8 @@ import { createAdminDashboardRoutes } from './routes/adminDashboardRoutes';
 import { createNotificationRoutes } from './routes/notificationRoutes';
 import { createGuestRoutes } from './routes/guestRoutes';
 import { validateGuestJwtConfig } from './config/guestJsonWebToken';
+import { applySeoAndCacheHeaders } from './middleware/seoCacheMiddleware';
+import { API_GUEST_PREFIX } from './config/apiPrefixes';
 
 const application = express();
 
@@ -34,7 +36,9 @@ function configureMiddlewares(): void {
   application.use(
     cors({
       origin: (incomingOrigin, callback) => {
-        // Cho phép null origin (mobile apps, server-to-server) và các origin trong whitelist
+        // Cho phép null origin: mobile apps (React Native), Electron, server-to-server.
+        // Trade-off: file:// pages gửi Origin: null có thể exploit, nhưng các app này không có token nên risk thấp.
+        // Ref: https://portswigger.net/web-security/cors/null-origin
         if (!incomingOrigin || allowedOriginList.includes(incomingOrigin)) {
           callback(null, true);
         } else {
@@ -46,24 +50,10 @@ function configureMiddlewares(): void {
   );
   application.use(
     helmet({
+      // CORP = false: không set header CORP → browser default restrictive (không cho phép cross-origin embedding).
+      // Chấp nhận trade-off: FE proxy qua /api rewrite → cùng origin → không ảnh hưởng.
       crossOriginResourcePolicy: false,
-      contentSecurityPolicy: {
-        useDefaults: false,
-        directives: {
-          defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
-          styleSrc: ["'self'"],
-          imgSrc: ["'self'", 'data:'],
-          connectSrc: ["'self'"],
-          fontSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          frameSrc: ["'none'"],
-          frameAncestors: ["'none'"],
-          baseUri: ["'self'"],
-          formAction: ["'self'"]
-        }
-      },
+      contentSecurityPolicy: false,  // API-only backend, không serve HTML
       noSniff: true,
       xFrameOptions: { action: 'deny' },
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
@@ -85,26 +75,6 @@ function getRequestBodyLimit(): string {
   return process.env.REQUEST_BODY_LIMIT || '5mb';
 }
 
-/** Hàm kiểm tra request có phải API công khai hay không. Mục đích: áp dụng cache và X-Robots-Tag đúng phạm vi cần thiết. */
-function isPublicApiRoute(request: Request): boolean {
-  return (
-    request.path.startsWith('/health') ||
-    request.path.startsWith('/projects') ||
-    request.path.startsWith('/donations') ||
-    request.path.startsWith('/rankings')
-  );
-}
-
-/** Hàm kiểm tra request có phải SSE public hay không. Mục đích: tắt cache/buffering cho stream realtime để tránh trễ dữ liệu. */
-function isPublicSseRoute(request: Request): boolean {
-  return request.path === '/donations/live-feed/stream';
-}
-
-/** Hàm kiểm tra request có phải guest API hay không. Mục đích: áp dụng Cache-Control no-store cho guest endpoints để tránh lưu cache dữ liệu nhạy cảm. */
-function isGuestApiRoute(request: Request): boolean {
-  return request.path.startsWith('/api/guest');
-}
-
 /** Hàm gắn header đo thời gian phản hồi. Mục đích: hỗ trợ theo dõi hiệu năng API trong production và qua reverse proxy. */
 function applyApiResponseTimeHeader(request: Request, response: Response, next: NextFunction): void {
   const requestStartTime = process.hrtime.bigint();
@@ -116,28 +86,6 @@ function applyApiResponseTimeHeader(request: Request, response: Response, next: 
     response.setHeader('X-Response-Time', `${responseTimeInMilliseconds.toFixed(2)}ms`);
     return originalWriteHead(...(argumentsList as Parameters<Response['writeHead']>));
   }) as Response['writeHead'];
-
-  next();
-}
-
-/** Hàm gắn header SEO và cache cho API. Mục đích: ngăn index endpoint nhạy cảm và tối ưu cache cho dữ liệu công khai phù hợp. */
-function applySeoAndCacheHeaders(request: Request, response: Response, next: NextFunction): void {
-  response.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
-
-  if (isGuestApiRoute(request)) {
-    // Guest API routes must never be cached — contains wallet/session data
-    response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    response.setHeader('Pragma', 'no-cache');
-    response.setHeader('Expires', '0');
-    response.setHeader('Surrogate-Control', 'no-store');
-  } else if (isPublicSseRoute(request)) {
-    response.setHeader('Cache-Control', 'no-cache, no-transform');
-    response.setHeader('X-Accel-Buffering', 'no');
-  } else if (request.method === 'GET' && isPublicApiRoute(request)) {
-    response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-  } else {
-    response.setHeader('Cache-Control', 'no-store');
-  }
 
   next();
 }
@@ -154,11 +102,10 @@ function registerRoutes(): void {
   application.use('/api/disbursement', createDisbursementRoutes());
   application.use('/api/admin/dashboard', createAdminDashboardRoutes());
   application.use('/api/notifications', createNotificationRoutes());
-  application.use('/api/guest', createGuestRoutes());
+  application.use(API_GUEST_PREFIX, createGuestRoutes());
 }
 
 configureMiddlewares();
 registerRoutes();
 
 export default application;
-

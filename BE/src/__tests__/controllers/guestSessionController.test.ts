@@ -21,6 +21,29 @@ vi.mock('../../services/guestSessionService', () => ({
   getSessionStatus: vi.fn()
 }));
 
+/**
+ * Mock ApplicationError để controller có thể dùng instanceof check.
+ * Dùng vi.hoisted để class được define trước vi.mock() hoisting.
+ */
+const { ApplicationError } = vi.hoisted(() => {
+  class ApplicationError extends Error {
+    public readonly statusCode: number;
+    public readonly errorCode: string;
+
+    constructor(message: string, statusCode: number, errorCode: string) {
+      super(message);
+      this.name = 'ApplicationError';
+      this.statusCode = statusCode;
+      this.errorCode = errorCode;
+    }
+  }
+  return { ApplicationError };
+});
+
+vi.mock('../../utils/applicationError', () => ({
+  ApplicationError
+}));
+
 import {
   handleCreateGuestSession,
   handleRefreshGuestSession,
@@ -252,21 +275,9 @@ describe('handleCreateGuestSession', () => {
   });
 
   it('trả về 429 khi service ném ApplicationError', async () => {
-    // Tạo mock ApplicationError thay vì plain Error
-    // để test error handling chuẩn qua error.errorCode
-    class MockApplicationError extends Error {
-      public readonly statusCode: number;
-      public readonly errorCode: string;
-      constructor(message: string, statusCode: number, errorCode: string) {
-        super(message);
-        this.name = 'ApplicationError';
-        this.statusCode = statusCode;
-        this.errorCode = errorCode;
-      }
-    }
-
+    // Mock service throw ApplicationError — controller dùng instanceof để catch
     (createNewGuestSession as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new MockApplicationError(
+      new ApplicationError(
         'Đã đạt giới hạn tạo phiên',
         429,
         'GUEST_SESSION_LIMIT_EXCEEDED'

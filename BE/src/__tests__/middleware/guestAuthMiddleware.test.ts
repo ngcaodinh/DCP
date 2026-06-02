@@ -13,7 +13,8 @@ vi.mock('../../config/guestJsonWebToken', async (importOriginal) => {
 });
 
 vi.mock('../../repositories/guestWalletSessionRepository', () => ({
-  findGuestWalletSessionById: vi.fn()
+  findGuestWalletSessionById: vi.fn(),
+  updateGuestWalletSession: vi.fn().mockResolvedValue(null)
 }));
 
 describe('guestAuthMiddleware', () => {
@@ -300,6 +301,13 @@ describe('guestAuthMiddleware', () => {
         })
       );
       expect(nextFunction).not.toHaveBeenCalled();
+
+      // Verify auto-expire được gọi để sync DB state
+      await new Promise(resolve => setImmediate(resolve));
+      expect(guestWalletSessionRepository.updateGuestWalletSession).toHaveBeenCalledWith(
+        'session-123',
+        { status: 'EXPIRED' }
+      );
     });
   });
 

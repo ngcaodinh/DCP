@@ -1,6 +1,6 @@
 /**
  * Route definitions cho guest session endpoints.
- * Tất cả các tuyến đều mount dưới /api/guest/*.
+ * Tất cả các tuyến đều mount dưới API_GUEST_PREFIX.
  *
  * Middleware chain:
  * - attachRequestMetadata: gắn IP + User-Agent vào headers
@@ -20,6 +20,7 @@ import {
   handleExecuteGuestClaim,
   handlePartialGuestClaim
 } from '../controllers/guestSessionController';
+import { API_GUEST_PREFIX } from '../config/apiPrefixes';
 import {
   handleGetPendingDonationStatus,
   handleClearPendingDonation

@@ -261,20 +261,20 @@ describe('decodeDonationCalldata', () => {
     }
   });
 
-  it('chấp nhận amount == 100 (tối đa)', () => {
-    const calldata = encodeCalldataHex(TEST_PROJECT_ID, 100, true);
+  it('chấp nhận amount == 100000 (dưới tối đa 200000)', () => {
+    const calldata = encodeCalldataHex(TEST_PROJECT_ID, 100000, true);
     const result = decodeDonationCalldata(calldata);
     expect(result.valid).toBe(true);
     if (result.valid) {
-      expect(result.data.amount).toBe(100);
+      expect(result.data.amount).toBe(100000);
     }
   });
 
-  it('reject khi amount vượt giới hạn 100 token', () => {
-    const calldata = encodeCalldataHex(TEST_PROJECT_ID, 150, true);
+  it('reject khi amount vượt giới hạn 200000 token', () => {
+    const calldata = encodeCalldataHex(TEST_PROJECT_ID, 200001, true);
     const result = decodeDonationCalldata(calldata);
     expect(result.valid).toBe(false);
-    expect((result as { valid: false; reason: string }).reason).toContain('100');
+    expect((result as { valid: false; reason: string }).reason).toContain('200000');
   });
 
   it('reject khi isAnonymous != true', () => {

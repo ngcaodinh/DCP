@@ -13,11 +13,44 @@ type GuestJwtConfig = {
   expiresIn: string;
 };
 
+// Fallback values được thiết kế để nhất quán giữa instances.
+// Nếu cần isolation env (staging vs prod), set GUEST_JWT_ISSUER và GUEST_JWT_AUDIENCE
+// riêng trong mỗi environment .env file.
 const guestJwtConfig: GuestJwtConfig = {
   issuer: process.env.GUEST_JWT_ISSUER || 'dcp-guest',
   audience: process.env.GUEST_JWT_AUDIENCE || 'dcp-guest-sessions',
   expiresIn: process.env.GUEST_JWT_EXPIRES_IN || '72h'
 };
+
+/** Độ dài tối thiểu của guest JWT secret để đảm bảo độ an toàn. */
+const GUEST_JWT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Hàm kiểm tra và lấy guest JWT secret từ environment variable.
+ * Mục đích: tách logic validation chung để DRY giữa validateGuestJwtConfig() và getGuestJwtSecret().
+ * @throws Error nếu secret không tồn tại hoặc không đủ độ dài
+ * @returns Secret key đã được validate
+ */
+function validateAndGetSecret(): string {
+  const secretKey = process.env.GUEST_JWT_SECRET;
+  if (!secretKey) {
+    throw new Error(
+      '[GuestJWT] GUEST_JWT_SECRET chưa được cấu hình trong .env. ' +
+      'Vui lòng thêm GUEST_JWT_SECRET=your_strong_guest_jwt_secret_min_32_chars vào .env'
+    );
+  }
+  if (secretKey.length < GUEST_JWT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `[GuestJWT] GUEST_JWT_SECRET phải có ít nhất ${GUEST_JWT_SECRET_MIN_LENGTH} ký tự (hiện tại: ${secretKey.length}). ` +
+      'Vui lòng cập nhật giá trị GUEST_JWT_SECRET trong .env'
+    );
+  }
+  return secretKey;
+}
+
+// Cache secret sau lần validate đầu tiên — tránh re-validate mỗi request.
+// validateGuestJwtConfig() chạy lúc startup sẽ warm cache sẵn.
+let cachedSecret: string | null = null;
 
 /** Các claims bắt buộc trong guest session token. */
 export type GuestSessionClaims = {
@@ -31,34 +64,19 @@ export type GuestSessionClaims = {
  * thay vì đợi request đầu tiên mới ném lỗi → dev không thấy cảnh báo rõ ràng.
  */
 export function validateGuestJwtConfig(): void {
-  const secretKey = process.env.GUEST_JWT_SECRET;
-  if (!secretKey) {
-    throw new Error(
-      '[GuestJWT] GUEST_JWT_SECRET chưa được cấu hình trong .env. ' +
-      'Vui lòng thêm GUEST_JWT_SECRET=your_strong_guest_jwt_secret_min_32_chars vào .env'
-    );
-  }
-  if (secretKey.length < 32) {
-    throw new Error(
-      `[GuestJWT] GUEST_JWT_SECRET phải có ít nhất 32 ký tự (hiện tại: ${secretKey.length}). ` +
-      'Vui lòng cập nhật giá trị GUEST_JWT_SECRET trong .env'
-    );
-  }
+  cachedSecret = validateAndGetSecret();
 }
 
 /**
  * Hàm lấy khóa bí mật ký guest session token.
  * Mục đích: tách biệt hoàn toàn với JWT_SECRET của user thường.
+ * Secret được cache sau lần đầu để tránh re-validate mỗi request.
  */
 export function getGuestJwtSecret(): string {
-  const secretKey = process.env.GUEST_JWT_SECRET;
-  if (!secretKey) {
-    throw new Error('GUEST_JWT_SECRET is not configured.');
+  if (!cachedSecret) {
+    cachedSecret = validateAndGetSecret();
   }
-  if (secretKey.length < 32) {
-    throw new Error('GUEST_JWT_SECRET phải có ít nhất 32 ký tự.');
-  }
-  return secretKey;
+  return cachedSecret;
 }
 
 /**
@@ -89,6 +107,13 @@ export function verifyGuestSessionToken(token: string): GuestSessionClaims {
     issuer: guestJwtConfig.issuer,
     audience: guestJwtConfig.audience,
     algorithms: ['HS256']
-  });
+  }) as Record<string, unknown>;
+
+  // Sau khi verify signature thành công, kiểm tra các trường bắt buộc có tồn tại không.
+  // Nếu payload bị thiếu trường (ví dụ token cũ đã sign với schema cũ), ném lỗi thay vì trả về undefined.
+  if (typeof decoded.sessionId !== 'string' || typeof decoded.walletAddress !== 'string') {
+    throw new Error('Guest token payload không hợp lệ: thiếu sessionId hoặc walletAddress.');
+  }
+
   return decoded as GuestSessionClaims;
 }

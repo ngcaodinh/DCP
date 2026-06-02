@@ -241,10 +241,14 @@ async function checkGuestDonationRedisLimit(sessionId: string): Promise<boolean>
   const redisKey = `guest:rate:donation:${sessionId}`;
 
   try {
-    const currentCount = await redisClient.incr(redisKey);
-    if (currentCount === 1) {
-      await redisClient.expire(redisKey, 3600);
-    }
+    // Dùng pipeline để INCR và EXPIRE atomic trong cùng 1 round-trip.
+    // Tránh race condition: nếu server crash giữa INCR và EXPIRE,
+    // key sẽ không bao giờ expire → session bị block vĩnh viễn.
+    const pipeline = redisClient.multi();
+    pipeline.incr(redisKey);
+    pipeline.expire(redisKey, 3600);
+    const results = await pipeline.exec();
+    const currentCount = (results as unknown[])[0] as number;
 
     return currentCount <= 3;
   } catch (error) {

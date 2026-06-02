@@ -10,7 +10,7 @@
  */
 import { NextFunction, Request, Response } from 'express';
 import { verifyGuestSessionToken, type GuestSessionClaims } from '../config/guestJsonWebToken';
-import { findGuestWalletSessionById } from '../repositories/guestWalletSessionRepository';
+import { findGuestWalletSessionById, updateGuestWalletSession } from '../repositories/guestWalletSessionRepository';
 import { sendErrorResponse } from '../utils/apiResponse';
 import { extractBearerToken } from '../utils/tokenExtractor';
 import { getLogger } from '../config/logger';
@@ -58,7 +58,7 @@ export function createGuestAuthMiddleware() {
       return;
     }
 
-    let session;
+    let session: Awaited<ReturnType<typeof findGuestWalletSessionById>>;
     try {
       session = await findGuestWalletSessionById(claims.sessionId);
     } catch (error) {
@@ -86,6 +86,11 @@ export function createGuestAuthMiddleware() {
 
     const now = new Date();
     if (session.expiresAt < now) {
+      // Fire-and-forget: update DB không block response.
+      // Đảm bảo data consistency — admin dashboard sẽ thấy session EXPIRED thay vì ACTIVE.
+      updateGuestWalletSession(session.sessionId, { status: 'EXPIRED' }).catch(err =>
+        logger.warn('[guestAuthMiddleware] Không thể auto-expire session.', { errorMessage: err.message })
+      );
       sendErrorResponse(
         response,
         401,

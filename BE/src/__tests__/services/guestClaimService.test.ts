@@ -43,7 +43,7 @@ vi.mock('ethers', async (importOriginal) => {
     ...actual,
     Wallet: {
       createRandom: vi.fn(() => ({
-        privateKey: '0xabc123def456',
+        privateKey: '0xabc123def456789012345678901234567890abcd',
         address: '0xABC123DEF456789012345678901234567890ABCD',
       })),
     },
@@ -54,7 +54,7 @@ vi.mock('ethers', async (importOriginal) => {
 // CONFIGURE OTHER MOCKS
 // =============================================================================
 
-vi.mock('../config/logger', () => ({
+vi.mock('../../config/logger', () => ({
   getLogger: () => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -62,7 +62,7 @@ vi.mock('../config/logger', () => ({
   }),
 }));
 
-vi.mock('../utils/applicationError', () => ({
+vi.mock('../../utils/applicationError', () => ({
   ApplicationError: class ApplicationError extends Error {
     public readonly statusCode: number;
     public readonly errorCode: string;
@@ -91,7 +91,11 @@ vi.mock('mongoose', () => {
   };
 });
 
-vi.mock('../models/guestClaimEoaModel', () => ({
+/**
+ * Mock GuestClaimEoaModel — có findOne để test validate logic,
+ * create để test encrypt flow, findOneAndUpdate để test mark-as-used.
+ */
+vi.mock('../../models/guestClaimEoaModel', () => ({
   GuestClaimEoaModel: {
     findOne: vi.fn(() => ({
       lean: vi.fn(() => ({
@@ -103,18 +107,33 @@ vi.mock('../models/guestClaimEoaModel', () => ({
   },
 }));
 
-vi.mock('../models/walletClaimHistoryModel', () => ({
+vi.mock('../../models/walletClaimHistoryModel', () => ({
   WalletClaimHistoryModel: {
     create: vi.fn(),
   },
 }));
 
-vi.mock('../repositories/guestWalletSessionRepository', () => ({
+/**
+ * Mock repository — bao gồm cả mock for GuestWalletSessionModel để tránh undefined.
+ * findGuestWalletSessionById là function được export từ repository.
+ * GuestWalletSessionModel được import bên trong repository và cần được mock.
+ */
+vi.mock('../../models/guestWalletSessionModel', () => ({
+  GuestWalletSessionModel: {
+    findOne: vi.fn(() => ({
+      lean: vi.fn(() => ({
+        exec: vi.fn(),
+      })),
+    })),
+  },
+}));
+
+vi.mock('../../repositories/guestWalletSessionRepository', () => ({
   findGuestWalletSessionById: vi.fn(),
   markGuestSessionAsClaimed: vi.fn(),
 }));
 
-vi.mock('../repositories/anonymousDonationAuditRepository', () => ({
+vi.mock('../../repositories/anonymousDonationAuditRepository', () => ({
   linkAuditsToClaimedUser: vi.fn(),
 }));
 
@@ -128,14 +147,14 @@ import {
   handlePartialClaim,
   encryptClaimEoaPrivateKey,
   reEncryptClaimEoaPrivateKey,
-} from './guestClaimService';
-import { ApplicationError } from '../utils/applicationError';
-import { GuestClaimEoaModel } from '../models/guestClaimEoaModel';
-import { WalletClaimHistoryModel } from '../models/walletClaimHistoryModel';
-import { findGuestWalletSessionById, markGuestSessionAsClaimed } from '../repositories/guestWalletSessionRepository';
-import { linkAuditsToClaimedUser } from '../repositories/anonymousDonationAuditRepository';
+} from '../../services/guestClaimService';
+import { ApplicationError } from '../../utils/applicationError';
+import { GuestClaimEoaModel } from '../../models/guestClaimEoaModel';
+import { WalletClaimHistoryModel } from '../../models/walletClaimHistoryModel';
+import { findGuestWalletSessionById, markGuestSessionAsClaimed } from '../../repositories/guestWalletSessionRepository';
+import { linkAuditsToClaimedUser } from '../../repositories/anonymousDonationAuditRepository';
 import mongoose from 'mongoose';
-import type { GuestWalletSession } from '../models/guestWalletSessionModel';
+import type { GuestWalletSession } from '../../models/guestWalletSessionModel';
 
 // =============================================================================
 // FIXTURES
@@ -191,10 +210,10 @@ function createMockClaimRecord(overrides: Record<string, unknown> = {}) {
 
 function createFindOneMock<T>(result: T | null) {
   return vi.fn(() => ({
-    lean: () => ({
-      exec: () => Promise.resolve(result),
-    }),
-  })) as unknown as typeof GuestClaimEoaModel.findOne;
+    lean: vi.fn(() => ({
+      exec: vi.fn(() => Promise.resolve(result)),
+    })),
+  }));
 }
 
 // =============================================================================
@@ -546,10 +565,17 @@ describe('executeKeylessClaim', () => {
   describe('Bundler submission - HTTP error handling', () => {
     const mockSession = createMockActiveSession();
     const mockClaimRecord = createMockClaimRecord();
+    const originalSetTimeout = global.setTimeout;
 
     beforeEach(() => {
       vi.mocked(findGuestWalletSessionById).mockResolvedValue(mockSession);
       vi.mocked(GuestClaimEoaModel.findOne).mockImplementation(createFindOneMock(mockClaimRecord));
+      // Mock setTimeout để tránh đợi exponential backoff retry trong test (1s+2s+4s)
+      vi.stubGlobal('setTimeout', vi.fn((cb: () => void) => { cb(); return 0; }) as unknown as typeof setTimeout);
+    });
+
+    afterEach(() => {
+      global.setTimeout = originalSetTimeout;
     });
 
     it('should throw BUNDLER_HTTP_CLIENT_ERROR for HTTP 400', async () => {

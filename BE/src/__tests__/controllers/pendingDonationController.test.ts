@@ -79,16 +79,16 @@ describe('handleGetPendingDonationStatus', () => {
   });
 
   it('trả về pending status khi session tồn tại', async () => {
-    (findGuestWalletSessionById as ReturnType<typeof vi.fn>).mockResolvedValue(mockSession);
-
+    // Controller sử dụng guestSession từ middleware trực tiếp (đã được attach bởi guestAuthMiddleware)
+    // Không gọi findGuestWalletSessionById — middleware đã xác thực session
     const req = createMockRequest({
-      guestSession: { sessionId: 'test-session-id', walletAddress: mockSession.walletAddress }
+      guestSession: { sessionId: 'test-session-id', walletAddress: mockSession.walletAddress, hasPendingDonation: true, donationCount: 1, totalDonatedAmount: 5000, status: 'ACTIVE' }
     }) as unknown as Request;
     const res = createMockResponse();
 
     await handleGetPendingDonationStatus(req, res);
 
-    expect(findGuestWalletSessionById).toHaveBeenCalledWith('test-session-id');
+    expect(findGuestWalletSessionById).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(200);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -105,18 +105,22 @@ describe('handleGetPendingDonationStatus', () => {
   });
 
   it('trả về 404 khi session không tìm thấy', async () => {
+    // Test case này không thể xảy ra qua controller vì middleware đã reject 401
+    // khi guestSession không tồn tại. Controller chỉ được gọi khi middleware pass.
+    // Giữ lại test để maintain coverage nhưng nó mô phỏng trường hợp hiếm gặp
+    // khi guestSession bị remove khỏi request giữa middleware và controller.
     (findGuestWalletSessionById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
     const req = createMockRequest({
-      guestSession: { sessionId: 'nonexistent', walletAddress: '0x0000000000000000000000000000000000000001' }
+      guestSession: null
     }) as unknown as Request;
     const res = createMockResponse();
 
     await handleGetPendingDonationStatus(req, res);
 
-    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({ errorCode: 'SESSION_NOT_FOUND' })
+      expect.objectContaining({ errorCode: 'GUEST_SESSION_REQUIRED' })
     );
   });
 });

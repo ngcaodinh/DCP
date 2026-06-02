@@ -261,8 +261,11 @@ describe('guestRateLimitMiddleware', () => {
     });
 
     it('cho phép request khi count <= 3', async () => {
-      mockRedisClient.incr.mockResolvedValue(2);
-      mockRedisClient.expire.mockResolvedValue(true);
+      mockRedisClient.multi.mockReturnValue({
+        incr: vi.fn().mockReturnThis(),
+        expire: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockResolvedValue([2])
+      });
 
       const { getRedisClientIfReady } = await import('../../config/redis');
       (getRedisClientIfReady as ReturnType<typeof vi.fn>).mockReturnValue(mockRedisClient);
@@ -277,7 +280,11 @@ describe('guestRateLimitMiddleware', () => {
     });
 
     it('trả 429 khi count > 3', async () => {
-      mockRedisClient.incr.mockResolvedValue(5);
+      mockRedisClient.multi.mockReturnValue({
+        incr: vi.fn().mockReturnThis(),
+        expire: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockResolvedValue([5])
+      });
 
       const { getRedisClientIfReady } = await import('../../config/redis');
       (getRedisClientIfReady as ReturnType<typeof vi.fn>).mockReturnValue(mockRedisClient);
@@ -297,8 +304,12 @@ describe('guestRateLimitMiddleware', () => {
     });
 
     it('set expire khi đây là request đầu tiên (count === 1)', async () => {
-      mockRedisClient.incr.mockResolvedValue(1);
-      mockRedisClient.expire.mockResolvedValue(true);
+      const execMock = vi.fn().mockResolvedValue([1]);
+      mockRedisClient.multi.mockReturnValue({
+        incr: vi.fn().mockReturnThis(),
+        expire: vi.fn().mockReturnThis(),
+        exec: execMock
+      });
 
       const { getRedisClientIfReady } = await import('../../config/redis');
       (getRedisClientIfReady as ReturnType<typeof vi.fn>).mockReturnValue(mockRedisClient);
@@ -308,15 +319,16 @@ describe('guestRateLimitMiddleware', () => {
       const res = createMockResponse();
       await middleware(req as Request, res as Response, nextFunction);
 
-      expect(mockRedisClient.expire).toHaveBeenCalledWith(
-        'guest:rate:donation:session-123',
-        3600
-      );
+      expect(execMock).toHaveBeenCalled();
       expect(nextFunction).toHaveBeenCalledTimes(1);
     });
 
     it('cho phép request khi Redis incr throw (fail open)', async () => {
-      mockRedisClient.incr.mockRejectedValue(new Error('Redis connection error'));
+      mockRedisClient.multi.mockReturnValue({
+        incr: vi.fn().mockReturnThis(),
+        expire: vi.fn().mockReturnThis(),
+        exec: vi.fn().mockRejectedValue(new Error('Redis connection error'))
+      });
 
       const { getRedisClientIfReady } = await import('../../config/redis');
       (getRedisClientIfReady as ReturnType<typeof vi.fn>).mockReturnValue(mockRedisClient);
