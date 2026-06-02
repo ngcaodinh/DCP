@@ -41,7 +41,6 @@ const guestClaimEoaSchema = new Schema<GuestClaimEoa>(
   { timestamps: true }
 );
 
-guestClaimEoaSchema.index({ sessionId: 1 }, { unique: true });
 guestClaimEoaSchema.index({ claimNonce: 1 }, { unique: true });
 guestClaimEoaSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 guestClaimEoaSchema.index({ claimedByUserId: 1 });
