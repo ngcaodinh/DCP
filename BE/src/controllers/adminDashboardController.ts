@@ -5,8 +5,12 @@ import {
   getAdminDashboardMetrics,
   getAdminDashboardTimelineEvents,
   getAdminSystemErrorLogs,
+  getAdminGuestSessionSummary,
+  listAdminGuestSessions,
+  invalidateAdminGuestSession,
   type SystemErrorLogCategory,
   type SystemErrorLogReadStateFilter,
+  type AdminGuestSessionListFilters,
   updateAdminSystemErrorLogReadState
 } from '../services/adminDashboardService';
 import { sendErrorFromUnknown, sendErrorResponse, sendSuccessResponse } from '../utils/apiResponse';
@@ -52,25 +56,34 @@ function parseSystemErrorLogReadState(rawReadState: unknown): SystemErrorLogRead
 }
 
 /**
+ * Hàm parse giá trị số nguyên từ request param với clamp và default.
+ * Mục đích: tái sử dụng logic parse cho cả limit và page params, tránh trùng lặp code.
+ *
+ * @param raw - Giá trị thô từ request
+ * @param min - Giá trị tối thiểu
+ * @param max - Giá trị tối đa
+ * @param fallback - Giá trị trả về khi invalid
+ */
+function parseIntParam(raw: unknown, min: number, max: number, fallback: number): number {
+  if (typeof raw === 'undefined' || raw === null || raw === '') {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
+
+/**
  * Hàm parse tham số limit cho API log lỗi.
  * Mục đích: giới hạn kích thước dữ liệu trả về, giảm rủi ro lạm dụng tài nguyên.
  */
 function parseSystemErrorLogLimit(rawLimitCount: unknown): number | null {
-  if (typeof rawLimitCount === 'undefined' || rawLimitCount === null || rawLimitCount === '') {
-    return 100;
-  }
-
-  const parsedLimitCount = Number(rawLimitCount);
-  if (!Number.isFinite(parsedLimitCount)) {
-    return null;
-  }
-
-  const normalizedLimitCount = Math.floor(parsedLimitCount);
-  if (normalizedLimitCount < 1 || normalizedLimitCount > 200) {
-    return null;
-  }
-
-  return normalizedLimitCount;
+  const result = parseIntParam(rawLimitCount, 1, 200, 0);
+  return result === 0 ? null : result;
 }
 
 /**
@@ -87,6 +100,33 @@ function parseSystemErrorLogReadFlag(rawIsRead: unknown): boolean | null {
   }
 
   return rawIsRead;
+}
+
+/**
+ * Hàm parse tham số limit cho guest session list.
+ * Mục đích: giới hạn kích thước trang trong khoảng 1-100, default = 20.
+ */
+function parseLimitParam(rawLimit: unknown): number {
+  return parseIntParam(rawLimit, 1, 100, 20);
+}
+
+/**
+ * Hàm parse tham số phân trang page cho guest session list.
+ * Mục đích: đảm bảo page luôn là số nguyên dương, default = 1.
+ */
+function parsePageParam(rawPage: unknown): number {
+  return parseIntParam(rawPage, 1, 999999, 1);
+}
+
+/**
+ * Hàm parse và validate sessionId thành UUID hợp lệ.
+ * Mục đích: ngăn IDOR bằng cách chỉ chấp nhận UUID chuẩn cho invalidate endpoint.
+ */
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseAndValidateSessionId(rawSessionId: unknown): string | null {
+  const value = String(rawSessionId || '').trim();
+  return value && UUID_V4_REGEX.test(value) ? value : null;
 }
 
 /**
@@ -216,5 +256,107 @@ export async function handleUpdateAdminSystemErrorLogReadState(request: Authenti
     sendSuccessResponse(response, 200, 'Cập nhật trạng thái đọc log lỗi thành công.', updatedReadState);
   } catch (error) {
     sendErrorFromUnknown(response, error, 'Không thể cập nhật trạng thái đọc log lỗi.');
+  }
+}
+
+/**
+ * Hàm xây dựng bộ lọc từ query params cho guest session list API.
+ * Mục đích: parse và validate các tham số lọc từ request, loại bỏ tham số rỗng/invalid.
+ */
+const VALID_GUEST_SESSION_STATUSES = ['ACTIVE', 'EXPIRED', 'CLAIMED', 'PURGED'] as const;
+
+function buildGuestSessionFilters(
+  query: Record<string, unknown>
+): { filters: AdminGuestSessionListFilters; invalidStatus: boolean } {
+  const rawStatus = query.status;
+  const isValidStatus = typeof rawStatus === 'string' && VALID_GUEST_SESSION_STATUSES.includes(rawStatus as (typeof VALID_GUEST_SESSION_STATUSES)[number]);
+
+  return {
+    filters: {
+      status: isValidStatus ? rawStatus as AdminGuestSessionListFilters['status'] : undefined,
+      walletAddress: typeof query.walletAddress === 'string' ? query.walletAddress : undefined,
+      ipAddress: typeof query.ipAddress === 'string' ? query.ipAddress : undefined,
+      startDate: typeof query.startDate === 'string' ? query.startDate : undefined,
+      endDate: typeof query.endDate === 'string' ? query.endDate : undefined
+    },
+    invalidStatus: typeof rawStatus === 'string' && !isValidStatus
+  };
+}
+
+/**
+ * Hàm xử lý request lấy thống kê tổng quan guest sessions cho Admin.
+ * Mục đích: trả KPI cards về sessions, gas sponsored, donation amounts.
+ */
+export async function handleGetAdminGuestSessionSummary(
+  request: AuthenticatedRequest,
+  response: Response
+): Promise<void> {
+  if (!request.authenticatedUser) {
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  try {
+    const summary = await getAdminGuestSessionSummary();
+    sendSuccessResponse(response, 200, 'Lấy thống kê guest sessions thành công.', summary);
+  } catch (error) {
+    sendErrorFromUnknown(response, error, 'Không thể lấy thống kê guest sessions.');
+  }
+}
+
+/**
+ * Hàm xử lý request lấy danh sách guest sessions có phân trang cho Admin.
+ * Mục đích: trả bảng sessions với filter theo status, wallet, IP, ngày tạo.
+ */
+export async function handleListAdminGuestSessions(
+  request: AuthenticatedRequest,
+  response: Response
+): Promise<void> {
+  if (!request.authenticatedUser) {
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  const page = parsePageParam(request.query.page);
+  const limit = parseLimitParam(request.query.limit);
+  const { filters, invalidStatus } = buildGuestSessionFilters(request.query as Record<string, unknown>);
+
+  if (invalidStatus) {
+    sendErrorResponse(response, 400, 'status không hợp lệ. Chỉ chấp nhận: ACTIVE, EXPIRED, CLAIMED, PURGED.', 'INVALID_GUEST_SESSION_STATUS');
+    return;
+  }
+
+  try {
+    const result = await listAdminGuestSessions(page, limit, filters);
+    sendSuccessResponse(response, 200, 'Lấy danh sách guest sessions thành công.', result);
+  } catch (error) {
+    sendErrorFromUnknown(response, error, 'Không thể lấy danh sách guest sessions.');
+  }
+}
+
+/**
+ * Hàm xử lý request vô hiệu hóa một guest session của Admin.
+ * Mục đích: cho phép admin manually expire session khi phát hiện hành vi bất thường.
+ */
+export async function handleInvalidateAdminGuestSession(
+  request: AuthenticatedRequest,
+  response: Response
+): Promise<void> {
+  if (!request.authenticatedUser) {
+    sendErrorResponse(response, 401, 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.', 'UNAUTHENTICATED');
+    return;
+  }
+
+  const sessionId = parseAndValidateSessionId(request.params.sessionId);
+  if (!sessionId) {
+    sendErrorResponse(response, 400, 'sessionId phải là UUID hợp lệ.', 'INVALID_GUEST_SESSION_ID');
+    return;
+  }
+
+  try {
+    const result = await invalidateAdminGuestSession(sessionId);
+    sendSuccessResponse(response, 200, 'Vô hiệu hóa guest session thành công.', result);
+  } catch (error) {
+    sendErrorFromUnknown(response, error, 'Không thể vô hiệu hóa guest session.');
   }
 }

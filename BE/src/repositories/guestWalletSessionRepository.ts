@@ -579,4 +579,224 @@ export async function findOrphanedActiveSessions(): Promise<GuestWalletSession[]
     .lean<GuestWalletSession[]>()
     .exec();
 }
+
+/**
+ * Kết quả thống kê tổng quan guest sessions cho Admin Dashboard.
+ */
+export type GuestSessionSummary = {
+  activeCount: number;
+  expiredCount: number;
+  claimedCount: number;
+  purgedCount: number;
+  totalSponsoredGas: number;
+  totalDonatedAmount: number;
+  totalDonationCount: number;
+};
+
+/**
+ * Hàm lấy thống kê tổng quan guest sessions.
+ * Mục đích: cung cấp KPI cards cho Admin Dashboard - đếm sessions theo status
+ * và sum gas/amount để theo dõi chi phí Paymaster.
+ * 
+ * Thiết kế: Dùng 1 aggregation pipeline duy nhất để scan collection 1 lần,
+ * tránh IO spike khi collection lớn (hàng triệu records).
+ * MongoDB $facet cho phép chạy nhiều aggregation branches trong 1 pass.
+ */
+export async function getGuestSessionSummary(): Promise<GuestSessionSummary> {
+  const result = await GuestWalletSessionModel.aggregate([
+    {
+      $facet: {
+        // Nhánh 1: đếm theo status
+        statusCounts: [
+          { $group: { _id: '$status', count: { $sum: 1 } } }
+        ],
+        // Nhánh 2: sum totals
+        totals: [
+          {
+            $group: {
+              _id: null,
+              totalSponsoredGas: { $sum: '$totalSponsoredGas' },
+              totalDonatedAmount: { $sum: '$totalDonatedAmount' },
+              totalDonationCount: { $sum: '$donationCount' }
+            }
+          }
+        ]
+      }
+    }
+  ]).exec();
+
+  const facetData = result[0];
+  const statusCounts = facetData?.statusCounts as Array<{ _id: string; count: number }> | undefined;
+  const totalsData = facetData?.totals as Array<{
+    totalSponsoredGas?: number;
+    totalDonatedAmount?: number;
+    totalDonationCount?: number;
+  }> | undefined;
+
+  const statusCountMap = new Map<string, number>(
+    (statusCounts || []).map(item => [item._id, item.count] as [string, number])
+  );
+
+  const aggregateData = (totalsData && totalsData[0]) || {
+    totalSponsoredGas: 0,
+    totalDonatedAmount: 0,
+    totalDonationCount: 0
+  };
+
+  return {
+    activeCount: statusCountMap.get('ACTIVE') ?? 0,
+    expiredCount: statusCountMap.get('EXPIRED') ?? 0,
+    claimedCount: statusCountMap.get('CLAIMED') ?? 0,
+    purgedCount: statusCountMap.get('PURGED') ?? 0,
+    totalSponsoredGas: aggregateData.totalSponsoredGas ?? 0,
+    totalDonatedAmount: aggregateData.totalDonatedAmount ?? 0,
+    totalDonationCount: aggregateData.totalDonationCount ?? 0
+  };
+}
+
+/**
+ * Các bộ lọc hỗ trợ cho trang danh sách guest sessions của Admin.
+ */
+export type GuestSessionFilters = {
+  status?: 'ACTIVE' | 'EXPIRED' | 'CLAIMED' | 'PURGED';
+  walletAddress?: string;
+  ipAddress?: string;
+  startDate?: Date;
+  endDate?: Date;
+};
+
+/**
+ * Kết quả phân trang guest sessions cho Admin.
+ */
+export type GuestSessionPaginatedResult = {
+  sessions: GuestWalletSession[];
+  totalCount: number;
+  pageCount: number;
+};
+
+/**
+ * Hàm lấy danh sách guest sessions có phân trang và lọc cho Admin.
+ * Mục đích: hiển thị bảng quản lý guest sessions với filter theo status, wallet, IP, ngày tạo.
+ *
+ * @param page - Trang hiện tại (1-based)
+ * @param limit - Số bản ghi mỗi trang
+ * @param filters - Bộ lọc tùy chọn
+ */
+export async function listGuestSessionsPaginated(
+  page: number,
+  limit: number,
+  filters?: GuestSessionFilters
+): Promise<GuestSessionPaginatedResult> {
+  // Service đã normalize page/limit rồi — repo tin tưởng giá trị từ service
+  const skip = (page - 1) * limit;
+
+  // TODO: Chuyển sang cursor-based pagination (dùng _id hoặc createdAt)
+  // khi collection > 100K records.
+  // Skip-based pagination có độ phức tạp O(n) vì MongoDB phải scan skip+limit documents
+  // trước khi trả kết quả. Cursor-based dùng index scan O(log n) cho mọi page.
+
+  const query: Record<string, unknown> = {};
+
+  if (filters?.status) {
+    query.status = filters.status;
+  }
+
+  if (filters?.walletAddress) {
+    const trimmedWallet = filters.walletAddress.trim();
+    if (trimmedWallet.length > 0 && trimmedWallet.length <= 64) {
+      const escapedPattern = trimmedWallet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.walletAddress = { $regex: `^${escapedPattern}`, $options: 'i' };
+    }
+  }
+
+  if (filters?.ipAddress) {
+    const trimmedIp = filters.ipAddress.trim();
+    // Chỉ cho phép ký tự hợp lệ trong IP (digits, dots, colons) để tránh regex injection
+    const sanitizedIp = trimmedIp.replace(/[^0-9a-fA-F.:]/g, '');
+    if (sanitizedIp.length > 0 && sanitizedIp.length <= 45) {
+      const escapedIp = sanitizedIp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      query.ipAddress = { $regex: `^${escapedIp}`, $options: 'i' };
+    }
+  }
+
+  if (filters?.startDate || filters?.endDate) {
+    query.createdAt = {};
+    if (filters.startDate) {
+      (query.createdAt as Record<string, Date>).$gte = filters.startDate;
+    }
+    if (filters.endDate) {
+      (query.createdAt as Record<string, Date>).$lte = filters.endDate;
+    }
+  }
+
+  const [sessions, countResult] = await Promise.all([
+    GuestWalletSessionModel.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean<GuestWalletSession[]>()
+      .exec(),
+    GuestWalletSessionModel.countDocuments(query).exec()
+  ]);
+
+  return {
+    sessions,
+    totalCount: countResult,
+    pageCount: Math.ceil(countResult / limit)
+  };
+}
+
+/**
+ * Kết quả trả về khi admin thực hiện invalidate.
+ * Phân biệt 2 trường hợp null để service trả lỗi chính xác cho Admin:
+ * - NOT_FOUND: session không tồn tại trong DB
+ * - ALREADY_INACTIVE: session tồn tại nhưng không ở trạng thái ACTIVE
+ */
+export type InvalidateGuestSessionResult = {
+  session: GuestWalletSession | null;
+  alreadyInactive: boolean;
+};
+
+/**
+ * Hàm vô hiệu hóa một guest session cụ thể (admin action).
+ * Mục đích: cho phép admin manually expire một session đang ACTIVE khi phát hiện bất thường.
+ *
+ * Design: Trả về thông tin chi tiết về trạng thái session sau thao tác,
+ * giúp service phân biệt giữa "không tồn tại" và "đã inactive".
+ *
+ * @param sessionId - ID của session cần vô hiệu hóa
+ * @returns Kết quả chứa session đã update HOẶC thông tin session đã inactive
+ */
+export async function invalidateGuestSession(
+  sessionId: string
+): Promise<InvalidateGuestSessionResult> {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    return { session: null, alreadyInactive: false };
+  }
+
+  // Bước 1: Tìm session hiện tại để biết trạng thái
+  const existingSession = await GuestWalletSessionModel.findOne({ sessionId: normalizedSessionId })
+    .lean<GuestWalletSession>()
+    .exec();
+
+  if (!existingSession) {
+    return { session: null, alreadyInactive: false };
+  }
+
+  if (existingSession.status !== 'ACTIVE') {
+    return { session: existingSession, alreadyInactive: true };
+  }
+
+  // Bước 2: Chỉ update khi đang ACTIVE
+  const updatedSession = await GuestWalletSessionModel.findOneAndUpdate(
+    { sessionId: normalizedSessionId, status: 'ACTIVE' },
+    { $set: { status: 'EXPIRED', updatedAt: new Date() } },
+    { returnDocument: 'after' }
+  )
+    .lean<GuestWalletSession>()
+    .exec();
+
+  return { session: updatedSession, alreadyInactive: false };
+}
   

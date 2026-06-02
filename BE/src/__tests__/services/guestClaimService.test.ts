@@ -3,7 +3,7 @@
  * Bao gồm: prepareClaimEOA, executeKeylessClaim, handlePartialClaim,
  * và các utility functions (encryption, calldata decoding).
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 
 // =============================================================================
@@ -101,7 +101,7 @@ vi.mock('../../models/guestClaimEoaModel', () => ({
       lean: vi.fn(() => ({
         exec: vi.fn(),
       })),
-    })),
+    })) as any,
     create: vi.fn(),
     findOneAndUpdate: vi.fn(),
   },
@@ -124,7 +124,7 @@ vi.mock('../../models/guestWalletSessionModel', () => ({
       lean: vi.fn(() => ({
         exec: vi.fn(),
       })),
-    })),
+    })) as any,
   },
 }));
 
@@ -209,9 +209,9 @@ function createMockClaimRecord(overrides: Record<string, unknown> = {}) {
 }
 
 function createFindOneMock<T>(result: T | null) {
-  return vi.fn(() => ({
-    lean: vi.fn(() => ({
-      exec: vi.fn(() => Promise.resolve(result)),
+  return vi.fn((): any => ({
+    lean: vi.fn((): any => ({
+      exec: vi.fn((): any => Promise.resolve(result)),
     })),
   }));
 }

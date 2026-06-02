@@ -4,7 +4,10 @@ import {
   handleGetAdminDashboardMetrics,
   handleGetAdminDashboardTimeline,
   handleGetAdminSystemErrorLogs,
-  handleUpdateAdminSystemErrorLogReadState
+  handleUpdateAdminSystemErrorLogReadState,
+  handleGetAdminGuestSessionSummary,
+  handleListAdminGuestSessions,
+  handleInvalidateAdminGuestSession
 } from '../controllers/adminDashboardController';
 import { createAuthenticationMiddleware } from '../middleware/authenticationMiddleware';
 import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
@@ -21,6 +24,10 @@ export function createAdminDashboardRoutes(): Router {
   const adminAuthorizationMiddleware = createRoleAuthorizationMiddleware(['admin']);
   const dashboardRateLimitMiddleware = createRateLimitMiddleware(60, 60 * 1000, {
     bucketName: 'admin:dashboard'
+  });
+  const adminActionRateLimitMiddleware = createRateLimitMiddleware(30, 60 * 1000, {
+    // Bucket riêng cho admin action (invalidate) — tránh poll frontend consume hết quota dashboard
+    bucketName: 'admin:action'
   });
 
   router.get(
@@ -66,6 +73,33 @@ export function createAdminDashboardRoutes(): Router {
     adminAuthorizationMiddleware,
     dashboardRateLimitMiddleware,
     handleUpdateAdminSystemErrorLogReadState
+  );
+
+  router.get(
+    '/guest-sessions/summary',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    adminAuthorizationMiddleware,
+    dashboardRateLimitMiddleware,
+    handleGetAdminGuestSessionSummary
+  );
+
+  router.get(
+    '/guest-sessions',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    adminAuthorizationMiddleware,
+    dashboardRateLimitMiddleware,
+    handleListAdminGuestSessions
+  );
+
+  router.post(
+    '/guest-sessions/:sessionId/invalidate',
+    attachRequestMetadata(),
+    authenticationMiddleware,
+    adminAuthorizationMiddleware,
+    adminActionRateLimitMiddleware,
+    handleInvalidateAdminGuestSession
   );
 
   return router;

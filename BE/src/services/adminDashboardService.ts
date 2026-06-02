@@ -20,6 +20,14 @@ import {
   upsertSystemErrorReadState
 } from '../models/systemErrorLogReadModel';
 import { findProjectById } from '../repositories/projectRepository';
+import {
+  getGuestSessionSummary as getGuestSessionSummaryRepo,
+  listGuestSessionsPaginated,
+  invalidateGuestSession as invalidateGuestSessionRepo,
+  type GuestSessionFilters,
+  type GuestSessionSummary
+} from '../repositories/guestWalletSessionRepository';
+import { GuestWalletSession } from '../models/guestWalletSessionModel';
 import { ApplicationError } from '../utils/applicationError';
 
 export type AdminDashboardMetrics = {
@@ -1079,5 +1087,188 @@ export async function updateAdminSystemErrorLogReadState(
     logId: normalizedLogId,
     isRead: updatedReadState.isRead,
     readAt: updatedReadState.readAt ? updatedReadState.readAt.toISOString() : null
+  };
+}
+
+/**
+ * Kiểu dữ liệu trả về cho guest session summary trên Admin Dashboard.
+ */
+export type AdminGuestSessionSummary = GuestSessionSummary;
+
+/**
+ * Kiểu dữ liệu một dòng guest session trong bảng admin.
+ */
+export type AdminGuestSessionRow = {
+  sessionId: string;
+  walletAddress: string;
+  status: 'ACTIVE' | 'EXPIRED' | 'CLAIMED' | 'PURGED';
+  donationCount: number;
+  totalDonatedAmount: number;
+  totalSponsoredGas: number;
+  renewalCount: number;
+  deviceFingerprintHash: string;
+  ipAddress: string;
+  hasPendingDonation: boolean;
+  claimedByUserId: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * Kiểu dữ liệu trả về cho danh sách guest sessions có phân trang trên Admin.
+ */
+export type AdminGuestSessionListResult = {
+  sessions: AdminGuestSessionRow[];
+  totalCount: number;
+  pageCount: number;
+  page: number;
+  limit: number;
+};
+
+/**
+ * Kiểu dữ liệu filter cho guest session list API.
+ */
+export type AdminGuestSessionListFilters = {
+  status?: 'ACTIVE' | 'EXPIRED' | 'CLAIMED' | 'PURGED';
+  walletAddress?: string;
+  ipAddress?: string;
+  startDate?: string;
+  endDate?: string;
+};
+
+/**
+ * Hàm format một guest session record thành row cho bảng admin.
+ * Mục đích: chuẩn hóa dữ liệu trả về, đảm bảo các trường datetime thành ISO string
+ * và rút gọn fingerprint để hiển thị dễ đọc.
+ *
+ * Dùng type chính thức GuestWalletSession thay vì inline anonymous type —
+ * giúp TypeScript bắt lỗi khi model thêm/đổi field.
+ */
+function formatGuestSessionRow(session: GuestWalletSession): AdminGuestSessionRow {
+  // Rút gọn fingerprint về 16 ký tự hex để hiển thị grouping (cùng thiết bị)
+  // mà không lộ hash đầy đủ. Admin chỉ cần xác nhận 2 sessions cùng prefix
+  // — không cần hash nguyên (64 ký tự).
+  const fingerprintDisplay = (session.deviceFingerprintHash ?? '').substring(0, 16) + '...';
+
+  return {
+    sessionId: session.sessionId,
+    walletAddress: session.walletAddress,
+    status: session.status,
+    donationCount: session.donationCount,
+    totalDonatedAmount: session.totalDonatedAmount,
+    totalSponsoredGas: session.totalSponsoredGas,
+    renewalCount: session.renewalCount,
+    deviceFingerprintHash: fingerprintDisplay,
+    ipAddress: session.ipAddress,
+    hasPendingDonation: session.hasPendingDonation,
+    claimedByUserId: session.claimedByUserId,
+    expiresAt: session.expiresAt ? session.expiresAt.toISOString() : null,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString()
+  };
+}
+
+/**
+ * Hàm lấy thống kê tổng quan guest sessions cho Admin Dashboard.
+ * Mục đích: cung cấp KPI cards - đếm sessions theo status, sum gas sponsored và donation amounts.
+ *
+ * Design: Dùng passthrough wrapper thay vì controller gọi repo trực tiếp để:
+ * 1. Giữ layer boundary rõ ràng — controller chỉ gọi service, không biết repository
+ * 2. Tạo hook point cho future business logic (e.g., enrich với risk data)
+ * 3. Service layer là nơi duy nhất biết cả guest session và risk data
+ */
+export async function getAdminGuestSessionSummary(): Promise<AdminGuestSessionSummary> {
+  return getGuestSessionSummaryRepo();
+}
+
+/**
+ * Hàm lấy danh sách guest sessions có phân trang cho Admin.
+ * Mục đích: hiển thị bảng quản lý với filter theo status, wallet address, IP, ngày tạo.
+ * Chuẩn hóa pagination tại đây — repository tin tưởng giá trị từ service.
+ *
+ * @param page - Trang hiện tại (1-based, default: 1)
+ * @param limit - Số bản ghi mỗi trang (default: 20, max: 100)
+ * @param filters - Bộ lọc tùy chọn
+ */
+export async function listAdminGuestSessions(
+  page: number,
+  limit: number,
+  filters?: AdminGuestSessionListFilters
+): Promise<AdminGuestSessionListResult> {
+  const normalizedPage = Math.max(1, page);
+  const normalizedLimit = Math.max(1, Math.min(100, limit));
+
+  const repoFilters: GuestSessionFilters = {};
+
+  if (filters?.status) {
+    repoFilters.status = filters.status;
+  }
+
+  if (filters?.walletAddress && filters.walletAddress.trim()) {
+    repoFilters.walletAddress = filters.walletAddress.trim();
+  }
+
+  if (filters?.ipAddress && filters.ipAddress.trim()) {
+    repoFilters.ipAddress = filters.ipAddress.trim();
+  }
+
+  if (filters?.startDate) {
+    const parsedStartDate = new Date(filters.startDate);
+    if (!Number.isNaN(parsedStartDate.getTime())) {
+      repoFilters.startDate = parsedStartDate;
+    }
+  }
+
+  if (filters?.endDate) {
+    const parsedEndDate = new Date(filters.endDate);
+    if (!Number.isNaN(parsedEndDate.getTime())) {
+      repoFilters.endDate = parsedEndDate;
+    }
+  }
+
+  const result = await listGuestSessionsPaginated(normalizedPage, normalizedLimit, repoFilters);
+
+  return {
+    sessions: result.sessions.map(formatGuestSessionRow),
+    totalCount: result.totalCount,
+    pageCount: result.pageCount,
+    page: normalizedPage,
+    limit: normalizedLimit
+  };
+}
+
+/**
+ * Hàm vô hiệu hóa một guest session theo yêu cầu của Admin.
+ * Mục đích: cho phép admin manually expire session đang ACTIVE khi phát hiện hành vi bất thường.
+ *
+ * @param sessionId - ID của session cần vô hiệu hóa
+ */
+export async function invalidateAdminGuestSession(sessionId: string): Promise<{
+  sessionId: string;
+  status: string;
+}> {
+  const normalizedSessionId = String(sessionId || '').trim();
+  if (!normalizedSessionId) {
+    throw new ApplicationError('sessionId không hợp lệ.', 400, 'VALIDATION_ERROR');
+  }
+
+  const { session, alreadyInactive } = await invalidateGuestSessionRepo(normalizedSessionId);
+
+  if (!session) {
+    throw new ApplicationError('Không tìm thấy guest session.', 404, 'NOT_FOUND');
+  }
+
+  if (alreadyInactive) {
+    throw new ApplicationError(
+      `Session đang ở trạng thái '${session.status}', không cần vô hiệu hóa.`,
+      409,
+      'GUEST_SESSION_ALREADY_INACTIVE'
+    );
+  }
+
+  return {
+    sessionId: session.sessionId,
+    status: session.status
   };
 }
