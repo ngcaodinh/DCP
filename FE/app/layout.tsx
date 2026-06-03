@@ -3,6 +3,8 @@ import Script from 'next/script';
 import { Be_Vietnam_Pro, Lexend } from 'next/font/google';
 import type { Metadata, Viewport } from 'next';
 import AuthSessionManager from './components/AuthSessionManager';
+import { GuestWalletProvider } from './components/GuestWalletProvider';
+import { QueryClientProviderWrapper } from './providers';
 
 const beVietnamProFont = Be_Vietnam_Pro({
   subsets: ['latin', 'vietnamese'],
@@ -146,7 +148,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: JSON.stringify(buildWebsiteStructuredData())
           }}
         />
-        {children}
+        <QueryClientProviderWrapper>
+          <GuestWalletProvider>
+            {children}
+          </GuestWalletProvider>
+        </QueryClientProviderWrapper>
         <AuthSessionManager />
       </body>
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" />
