@@ -280,6 +280,9 @@ function unwrap<T>(promise: Promise<ApiSuccessResponse<T>>): Promise<T> {
 export async function createGuestSession(
   payload: CreateGuestSessionRequest
 ): Promise<CreateGuestSessionResponse> {
+  // #region agent debug log
+  fetch('http://127.0.0.1:7710/ingest/fa15d132-717d-4b5a-8ef1-2fdf5f966e4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'870f73'},body:JSON.stringify({sessionId:'870f73',location:'guestApiClient.ts:createGuestSession',message:'createGuestSession called',data:{walletAddress:payload.walletAddress},timestamp:Date.now(),runId:'debug-run',hypothesisId:'H4'})}).catch(()=>{});
+  // #endregion
   validateWalletAddress(payload.walletAddress);
   validateFingerprintHash(payload.deviceFingerprintHash);
   return unwrap(
@@ -492,6 +495,9 @@ function validateWalletAddress(walletAddress: string): void {
  * @param fingerprintHash - SHA-256 hash cần validate
  */
 function validateFingerprintHash(fingerprintHash: string): void {
+  // #region agent debug log
+  fetch('http://127.0.0.1:7710/ingest/fa15d132-717d-4b5a-8ef1-2fdf5f966e4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'870f73'},body:JSON.stringify({sessionId:'870f73',location:'guestApiClient.ts:validateFingerprintHash',message:'validateFingerprintHash called',data:{hashLength:fingerprintHash.length,hashEmpty:!fingerprintHash},timestamp:Date.now(),runId:'debug-run',hypothesisId:'H5'})}).catch(()=>{});
+  // #endregion
   if (!FINGERPRINT_HASH_REGEX.test(fingerprintHash)) {
     throw new GuestApiError({
       success: false,

@@ -84,6 +84,7 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
     initState,
     updateInitState,
     bootstrapGuestWallet,
+    bootstrapNewWallet,
     restoreGuestSession,
     refreshGuestSession,
     dismissClaimPrompt,
@@ -106,18 +107,6 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
     isReady,
     onPollData: syncPollResults,
   });
-
-  // ============================================================
-  // AUTO-INIT ON MOUNT
-  // ============================================================
-
-  useEffect(() => {
-    if (initInProgressRef.current) return;
-    initInProgressRef.current = true;
-    void restoreGuestSession().finally(() => {
-      initInProgressRef.current = false;
-    });
-  }, [restoreGuestSession]);
 
   // ============================================================
   // CLEANUP ON UNMOUNT
@@ -160,8 +149,8 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
   // CONTEXT VALUE
   // ============================================================
 
-  const contextValue = useMemo<GuestWalletContextValue>(
-    () => ({
+  const contextValue = useMemo<GuestWalletContextValue>(() => {
+    return ({
       initState,
       donationState,
       bootstrapGuestWallet,
@@ -171,19 +160,18 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
       dismissClaimPrompt,
       claimGuestWallet: wrappedClaimGuestWallet,
       clearGuestWalletData: wrappedClearGuestWalletData,
-    }),
-    [
-      initState,
-      donationState,
-      bootstrapGuestWallet,
-      restoreGuestSession,
-      refreshGuestSession,
-      wrappedExecuteDonation,
-      dismissClaimPrompt,
-      wrappedClaimGuestWallet,
-      wrappedClearGuestWalletData,
-    ],
-  );
+    });
+  }, [
+    initState,
+    donationState,
+    bootstrapGuestWallet,
+    restoreGuestSession,
+    refreshGuestSession,
+    wrappedExecuteDonation,
+    dismissClaimPrompt,
+    wrappedClaimGuestWallet,
+    wrappedClearGuestWalletData,
+  ]);
 
   return (
     <GuestWalletContext.Provider value={contextValue}>{children}</GuestWalletContext.Provider>

@@ -40,7 +40,12 @@ async function isBraveStrictMode(): Promise<boolean> {
     }
     const brave = navigator as Navigator & { brave?: { isBrave?: () => Promise<boolean> } };
     if (brave.brave?.isBrave) {
-      return brave.brave.isBrave();
+      // Timeout 3 giây để tránh Promise treo vĩnh viễn khi Brave API không phản hồi.
+      // Promise.race ensure rằng init flow không bị chặn bởi Brave detection.
+      const timeoutPromise = new Promise<boolean>((resolve) => {
+        setTimeout(() => resolve(false), 3000);
+      });
+      return Promise.race([brave.brave.isBrave(), timeoutPromise]);
     }
     return false;
   } catch {

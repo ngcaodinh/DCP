@@ -85,6 +85,8 @@ export interface UseGuestSessionManagerReturn {
     donationQuota: number;
     hasPendingDonation?: boolean;
   }) => void;
+  /** Bootstrap trực tiếp không qua browser check — dùng cho auto-bootstrap khi status là BOOTSTRAPPING_NEW */
+  bootstrapNewWallet: () => Promise<void>;
 }
 
 /* ============================================================
@@ -112,21 +114,26 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
     claimPromptDismissed: false,
   });
 
-  // Ref để track abort signal cho cleanup — tránh stale closure
+  // Ref để track abort signal cho cleanup — reset TRONG useEffect (sau commit)
+  // để tránh race với StrictMode double-render và đảm bảo reset chạy sau cleanup
   const abortRef = useRef<boolean>(false);
 
-  // Đánh dấu abort khi component unmount để updateInitState không gọi setState sau khi unmount
+  // Reset abortRef trong commit phase — đảm bảo luôn chạy SAU useEffect cleanup
+  // Còn cleanup thì set true khi unmount thật để block stale updates
   useEffect(() => {
+    abortRef.current = false;
     return () => {
       abortRef.current = true;
     };
   }, []);
 
   // Hàm tiện ích cập nhật init state immutable — guard against stale updates after unmount
+  // KHÔNG đưa initState.initStatus vào deps vì initState object mới mỗi render
+  // dẫn đến stale closure. Dùng prev form của setInitState để luôn đọc state mới nhất.
   const updateInitState = useCallback((updates: Partial<GuestWalletInitState>) => {
     if (abortRef.current) return;
     setInitState((prev) => ({ ...prev, ...updates }));
-  }, []);
+  }, []); // deps rỗng — dùng prev callback form thay vì đọc initState trực tiếp
 
   // ============================================================
   // INTERNAL HELPERS
@@ -182,12 +189,10 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
       // Lấy token từ sessionStorage trước khi gọi API
       const sessionTokenData = loadGuestSessionToken();
       if (!sessionTokenData?.token) {
-        throw new GuestApiError({
-          success: false,
-          message: 'Session token không tồn tại trong sessionStorage. Vui lòng khởi tạo ví mới.',
-          errorCode: 'GUEST_TOKEN_REQUIRED',
-          statusCode: 401,
-        });
+        // Token không tồn tại (hết hạn hoặc bị mất) — fallback về bootstrap thay vì throw.
+        // localStorage vẫn có wallet data nhưng token đã hết hạn → tạo session mới.
+        updateInitState({ initStatus: 'BOOTSTRAPPING_NEW' });
+        return;
       }
 
       try {
@@ -345,23 +350,31 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
   // PUBLIC METHODS
   // ============================================================
 
-  /** Khởi tạo bootstrap mới — gọi khi chưa có LocalStorage */
+  /** Restore session — gọi khi có LocalStorage và muốn verify với server */
+  const restoreGuestSession = useCallback(async (): Promise<void> => {
+    try {
+      const compat = await checkBrowserCompatibility();
+      if (compat.riskLevel === 'CRITICAL') return;
+
+      const stored = loadStorageData();
+      if (!stored) {
+        await bootstrapNewWallet();
+        return;
+      }
+
+      await restoreSessionFromServer(stored);
+    } catch (error) {
+      // Chỉ log message, không log error object để tránh lộ thông tin internal
+      console.error('[GuestWalletProvider] Lỗi khôi phục phiên khách.');
+    }
+  }, [checkBrowserCompatibility, loadStorageData, restoreSessionFromServer, bootstrapNewWallet]);
+
+  /** Bootstrap ví — khôi phục session cũ hoặc tạo ví mới nếu chưa có */
   const bootstrapGuestWallet = useCallback(async (): Promise<void> => {
     const compat = await checkBrowserCompatibility();
     if (compat.riskLevel === 'CRITICAL') return;
-    await bootstrapNewWallet();
-  }, [checkBrowserCompatibility, bootstrapNewWallet]);
-
-  /** Restore session — gọi khi có LocalStorage và muốn verify với server */
-  const restoreGuestSession = useCallback(async (): Promise<void> => {
-    const compat = await checkBrowserCompatibility();
-    if (compat.riskLevel === 'CRITICAL') return;
-
-    const stored = loadStorageData();
-    if (!stored) return;
-
-    await restoreSessionFromServer(stored);
-  }, [checkBrowserCompatibility, loadStorageData, restoreSessionFromServer]);
+    await restoreGuestSession();
+  }, [checkBrowserCompatibility, restoreGuestSession]);
 
   /** Refresh session token — kéo dài expiry mà không cần tạo lại session */
   const refreshGuestSession = useCallback(async (): Promise<void> => {
@@ -448,5 +461,6 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
     dismissClaimPrompt,
     clearGuestWalletData,
     syncPollResults,
+    bootstrapNewWallet,
   };
 }

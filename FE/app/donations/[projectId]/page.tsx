@@ -5,6 +5,7 @@
  * tiến độ gây quỹ, bằng chứng IPFS, và 2 chế độ quyên góp (công khai / ẩn danh).
  */
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ApiErrorResponse, buildApiUrl, fetchApi } from '../../utils/apiClient';
@@ -195,7 +196,7 @@ function ProjectBanner({ project, coverImageUrl }: { project: ProjectDetail; cov
     <div className="project-detail-banner mb-6 overflow-hidden" style={bannerStyle}>
       <div className="flex h-60 items-end px-6 pb-5">
         <div className="w-full text-center">
-          <span className="mb-2 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+          <span className="mb-2 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
             ● {getPublicProjectStatusLabel(project.status)}
           </span>
           <h1 className="text-2xl font-bold text-white drop-shadow-sm md:text-3xl">{project.name}</h1>
@@ -339,6 +340,7 @@ interface DonationSectionProps {
   isAnonymousSubmitting: boolean;
   anonymousStatus: string;
   anonymousMessage: string;
+  hasInitiatedAnonymous: boolean;
   initState: ReturnType<typeof useGuestWallet>['initState'];
   isLoggedIn: boolean;
   onOpenPublicDonation: () => void;
@@ -366,6 +368,7 @@ function DonationSection(props: DonationSectionProps) {
     isAnonymousSubmitting,
     anonymousStatus,
     anonymousMessage,
+    hasInitiatedAnonymous,
     initState,
     isLoggedIn,
     onOpenPublicDonation,
@@ -509,7 +512,7 @@ function DonationSection(props: DonationSectionProps) {
           </button>
         </div>
 
-        {!isGuestReady ? (
+        {!isGuestReady && hasInitiatedAnonymous ? (
           <div className="rounded-lg border border-[#e0e7ff] bg-[#eef2ff] p-4 text-sm text-[#4338ca]">
             Hệ thống đang khởi tạo ví ẩn danh. Vui lòng đợi trong giây lát...
           </div>
@@ -626,7 +629,9 @@ export default function DonationCampaignDetailPage() {
   const routeParams = useParams<{ projectId: string }>();
   const router = useRouter();
   const projectId = String(routeParams?.projectId || '');
-  const { initState, executeDonation } = useGuestWallet();
+  const { initState, executeDonation, bootstrapGuestWallet } = useGuestWallet();
+  /** Flag đánh dấu user đã bấm nút "Quyên góp ẩn danh" hay chưa */
+  const [hasInitiatedAnonymous, setHasInitiatedAnonymous] = useState(false);
 
   // Project data
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
@@ -882,12 +887,17 @@ export default function DonationCampaignDetailPage() {
   };
 
   // Anonymous donation handlers
-  /** Hàm mở quyên góp ẩn danh. */
+  /** Hàm mở quyên góp ẩn danh — bắt đầu bootstrap ví. */
   const handleOpenAnonymousDonation = () => {
-    setDonationMode('anonymous');
-    setDonationAmountInput('');
-    setAnonymousStatus('IDLE');
-    setAnonymousMessage('');
+    // flushSync buộc React commit render NGAY trước khi async init bắt đầu
+    flushSync(() => {
+      setDonationMode('anonymous');
+      setDonationAmountInput('');
+      setAnonymousStatus('IDLE');
+      setAnonymousMessage('');
+      setHasInitiatedAnonymous(true);
+    });
+    void bootstrapGuestWallet();
   };
 
   /** Hàm đóng quyên góp ẩn danh. */
@@ -896,6 +906,7 @@ export default function DonationCampaignDetailPage() {
     setDonationAmountInput('');
     setAnonymousStatus('IDLE');
     setAnonymousMessage('');
+    setHasInitiatedAnonymous(false);
   };
 
   /** Hàm gửi quyên góp ẩn danh qua guest wallet. */
@@ -1155,6 +1166,7 @@ export default function DonationCampaignDetailPage() {
             isAnonymousSubmitting={isAnonymousSubmitting}
             anonymousStatus={anonymousStatus}
             anonymousMessage={anonymousMessage}
+            hasInitiatedAnonymous={hasInitiatedAnonymous}
             initState={initState}
             isLoggedIn={isLoggedIn}
             onOpenPublicDonation={handleOpenPublicDonation}
