@@ -629,6 +629,7 @@ export default function DonationCampaignDetailPage() {
   const routeParams = useParams<{ projectId: string }>();
   const router = useRouter();
   const projectId = String(routeParams?.projectId || '');
+  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
   const { initState, executeDonation, bootstrapGuestWallet } = useGuestWallet();
   /** Flag đánh dấu user đã bấm nút "Quyên góp ẩn danh" hay chưa */
   const [hasInitiatedAnonymous, setHasInitiatedAnonymous] = useState(false);
@@ -691,26 +692,37 @@ export default function DonationCampaignDetailPage() {
 
   /**
    * Hàm tải số dư token on-chain của người dùng đã đăng nhập.
-   * Mục đích: hiển thị số dư trên trang chi tiết dự án.
+   * Mục đích: sử dụng cùng endpoint và logic với trang /deposit để đảm bảo số dư on-chain đồng nhất.
    */
   const loadTokenBalance = useCallback(async () => {
     const session = readAuthSession();
     if (!session.accessToken?.trim()) {
       return;
     }
+
     try {
-      const response = await fetchApi<{ tokenBalance: number }>(buildApiUrl('/deposit/balance'), {
+      const response = await fetch(`${backendBaseUrl}/api/deposit/sidebar`, {
         method: 'GET',
-        headers: { Authorization: `Bearer ${session.accessToken}` },
-        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${session.accessToken}`
+        }
       });
-      if (response.data) {
-        setTokenBalance(response.data.tokenBalance);
+
+      if (response.status === 401) {
+        return;
       }
+
+      if (!response.ok) {
+        return;
+      }
+
+      const responsePayload = await response.json() as { tokenBalanceOnChain?: number; tokenBalance?: number };
+      const tokenBalanceOnChain = Number(responsePayload.tokenBalanceOnChain ?? responsePayload.tokenBalance ?? 0);
+      setTokenBalance(tokenBalanceOnChain);
     } catch {
       // Không hiển thị lỗi cho user — balance có thể không critical
     }
-  }, []);
+  }, [backendBaseUrl]);
 
   /**
    * Effect sync token balance khi sessionData thay đổi (sau khi đăng nhập thành công).
