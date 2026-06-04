@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import Link from 'next/link';
 import { buildApiUrl, fetchApi } from './utils/apiClient';
 import { authenticationSessionUpdatedEventName, clearAuthSession, readAuthSession } from './utils/authSession';
 import IpfsEvidencePreviewCard from '@/app/components/common/IpfsEvidencePreviewCard';
@@ -1688,7 +1689,8 @@ export default function HomePage() {
                 ? { backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${projectCoverImageUrl})` }
                 : { background: projectVisual.background };
               return (
-                <div
+                <Link
+                  href={`/donations/${project.projectId}`}
                   className="pcard visible"
                   key={project.projectId}
                   style={{ transitionDelay: `${projectIndex * 0.1}s` }}
@@ -1712,30 +1714,21 @@ export default function HomePage() {
                     <div className="pcard-desc">{project.description}</div>
                     <div className="progress-wrap">
                       <div className="progress-label">
-                        <span className="progress-value">Mục tiêu {formatCurrencyVnd(project.goalAmount)}VND</span>
+                        <span className="progress-value font-bold">Mục tiêu {formatCurrencyVnd(project.goalAmount)}VND</span>
                         <span>Cập nhật {formatUpdatedTime(project.updatedAt)}</span>
+                      </div>
+                      <div className="progress-bar mt-1">
+                        <div
+                          className="progress-fill"
+                          style={{ width: `${Math.min((donatedAmount / project.goalAmount) * 100, 100)}%` }}
+                        />
                       </div>
                     </div>
                     <div className="pcard-meta justify-between">
-                      <span className="font-medium text-[#334155]">Đã quyên góp: {formatCurrencyVnd(donatedAmount)} VND</span>
-                      <span>Trạng thái: {getPublicProjectStatusLabel(project.status)}</span>
-                    </div>
-                    <div className="pcard-actions">
-                      {isDonationAvailable ? (
-                        <button className="btn-donate" type="button" onClick={() => void handleOpenDonationModal(project.projectId, project)}>
-                          💛 Quyên góp ngay
-                        </button>
-                      ) : (
-                        <span className="inline-flex h-11 items-center justify-center rounded-xl bg-[#e5e7eb] px-5 text-sm font-semibold text-[#6b7280]">
-                          Đã quá hạn quyên góp
-                        </span>
-                      )}
-                      <button className="btn-detail" type="button" onClick={() => void handleOpenProjectDetailModal(project.projectId)}>
-                        Chi tiết
-                      </button>
+                      <span className="text-[#334155]">Đã quyên góp: {formatCurrencyVnd(donatedAmount)} VND</span>
                     </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
         </div>

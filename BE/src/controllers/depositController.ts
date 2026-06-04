@@ -236,3 +236,31 @@ export async function handleGetDepositSidebar(request: Request, response: Respon
   }
 }
 
+/**
+ * Hàm xử lý lấy số dư token on-chain của người dùng hiện tại.
+ * Mục đích: trả về balance để hiển thị trên trang chi tiết dự án.
+ */
+export async function handleGetTokenBalance(request: Request, response: Response): Promise<void> {
+  const authenticatedRequest = request as Request & { authenticatedUser?: { userId: string; role: string } };
+
+  if (!authenticatedRequest.authenticatedUser) {
+    response.status(401).json({ message: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ.' });
+    return;
+  }
+
+  try {
+    const user = await findUserById(authenticatedRequest.authenticatedUser.userId);
+    if (!user) {
+      response.status(404).json({ message: 'Không tìm thấy thông tin người dùng.' });
+      return;
+    }
+
+    const tokenBalanceOnChain = await getOnChainTokenBalance(user.walletAddress);
+
+    response.status(200).json({ tokenBalance: tokenBalanceOnChain });
+  } catch (error) {
+    logger.error('Lấy số dư token thất bại.', { errorMessage: (error as Error).message });
+    response.status(500).json({ message: 'Không thể lấy số dư token.' });
+  }
+}
+

@@ -4,7 +4,8 @@ import {
   handleDepositWebhook,
   handleDepositWebhookHealth,
   handleGetDepositSidebar,
-  handleGetDepositStatus
+  handleGetDepositStatus,
+  handleGetTokenBalance,
 } from '../controllers/depositController';
 import { attachRequestMetadata } from '../middleware/ipMetadataMiddleware';
 import { createRateLimitMiddleware } from '../middleware/rateLimitMiddleware';
@@ -23,6 +24,7 @@ export function createDepositRoutes(): Router {
   router.get('/webhook', attachRequestMetadata(), depositRateLimit, handleDepositWebhookHealth);
   router.post('/webhook', attachRequestMetadata(), depositRateLimit, handleDepositWebhook);
   router.get('/sidebar', attachRequestMetadata(), authenticationMiddleware, depositRateLimit, handleGetDepositSidebar);
+  router.get('/balance', attachRequestMetadata(), authenticationMiddleware, depositRateLimit, handleGetTokenBalance);
   router.get('/:orderCode', attachRequestMetadata(), authenticationMiddleware, depositRateLimit, handleGetDepositStatus);
 
   return router;
