@@ -1,32 +1,28 @@
 'use client';
 
-/**
- * Trang chi tiết dự án quyên góp — hiển thị thông tin đầy đủ,
- * tiến độ gây quỹ, bằng chứng IPFS, và 2 chế độ quyên góp (công khai / ẩn danh).
- */
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
-import { flushSync } from 'react-dom';
-import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState, useCallback } from 'react';
+import { useParams, useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { ApiErrorResponse, buildApiUrl, fetchApi } from '../../utils/apiClient';
-import { clearAuthSession, readAuthSession } from '../../utils/authSession';
+import { readAuthSession } from '../../utils/authSession';
 import { useGuestWallet } from '../../components/GuestWalletProvider';
 import { executeOneClickDonationRequest } from '../components/DonationModal.services';
 import {
   formatWalletAddress,
-  formatTransactionHash,
   mapDonationErrorMessage,
   isCampaignBeforeDeadline,
-  resolveGuestDisplayStatusRaw,
 } from '../components/DonationModal.helpers';
 import IpfsEvidencePreviewCard from '../../components/common/IpfsEvidencePreviewCard';
 import { buildIpfsGatewayUrl, getIpfsContentType, resolveIpfsPreviewKind } from '../../utils/ipfs';
-import LoginModal from '../../components/LoginModal';
-import { useAuthCheck } from '../../utils/useAuthCheck';
 import {
   MIN_AMOUNT_PER_DONATION,
   MAX_AMOUNT_PER_DONATION,
 } from '../../constants/guestDonationLimits';
+import {
+  initPayosDonation,
+  getPayosDonationStatus,
+  type PayosDonationStatus,
+} from '../../utils/guestPayosClient';
 
 /** Chi tiết cơ bản của dự án — từ /projects/public-support/{projectId}. */
 interface ProjectBasicInfo {
@@ -247,81 +243,50 @@ function ProjectInfoSection({ project }: { project: ProjectDetail }) {
   );
 }
 
-/** Component tiến độ quyên góp — thanh progress và số liệu. */
+/** Component tiến độ dự án. */
 function ProjectProgressSection({ project }: { project: ProjectDetail }) {
-  const percent = calculateDonationPercent(project.donatedAmount, project.goalAmount);
-  const isEligible = isProjectEligibleForDonation(project);
+  const donationPercent = calculateDonationPercent(project.donatedAmount, project.goalAmount);
 
   return (
     <section className="project-detail-section mb-6">
-      <div className="mb-2 flex items-center justify-between text-sm">
-        <span className="font-semibold text-[#111827]">Tiến độ quyên góp</span>
-        <span className="text-[#0e7c6b]">{percent}%</span>
+      <h2 className="project-detail-section-title">Tiến độ gây quỹ</h2>
+      <div className="mb-3 mt-4 flex items-center justify-between text-sm text-[#4b5563]">
+        <span>Đã quyên góp: {formatCurrencyVnd(project.donatedAmount)} token</span>
+        <span>Mục tiêu: {formatCurrencyVnd(project.goalAmount)} token</span>
       </div>
-      <div className="project-detail-progress-bar">
-        <div
-          className="project-detail-progress-fill"
-          style={{ width: `${percent}%` }}
-        />
+      <div className="h-3 overflow-hidden rounded-full bg-[#d1fae5]">
+        <div className="h-full rounded-full bg-[#10b981]" style={{ width: `${donationPercent}%` }} />
       </div>
-      <div className="mt-3 flex items-center justify-between text-sm">
-        <span className="font-semibold text-[#334155]">Đã quyên góp: {formatCurrencyVnd(project.donatedAmount)} VND</span>
-        <span className="text-[#6b7280]">Mục tiêu: {formatCurrencyVnd(project.goalAmount)} VND</span>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-3">
-        <a
-          href={`/donors?projectId=${encodeURIComponent(project.projectId)}`}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-medium text-[#374151] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0e7c6b" strokeWidth="2.5">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          Danh sách người quyên góp
-        </a>
-        <a
-          href={`/disbursements?projectId=${encodeURIComponent(project.projectId)}`}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-[#e5e7eb] bg-white px-3 py-1.5 text-xs font-medium text-[#374151] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5">
-            <line x1="12" y1="1" x2="12" y2="23" />
-            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-          </svg>
-          Xem toàn bộ quá trình giải ngân
-        </a>
-      </div>
-      {!isEligible && (
-        <p className="mt-3 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
-          Dự án đã hết hạn nhận quyên góp hoặc không còn hoạt động.
-        </p>
-      )}
+      <div className="mt-3 text-right text-sm font-medium text-[#0e7c6b]">{donationPercent}% hoàn thành</div>
     </section>
   );
 }
 
-/** Component bằng chứng minh bạch — hiển thị các CID IPFS. */
+/** Component danh sách bằng chứng IPFS. */
 function EvidenceSection({ project }: { project: ProjectDetail }) {
-  if (!project.evidenceCids || project.evidenceCids.length === 0) return null;
+  const hasEvidence = project.evidenceCids.length > 0;
 
   return (
     <section className="project-detail-section mb-6">
       <h2 className="project-detail-section-title">Bằng chứng minh bạch</h2>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {project.evidenceCids.slice(0, 6).map((cid, index) => {
-          const evidenceFile = project.evidenceFiles?.find(f => f.cid === cid);
-          return (
-            <IpfsEvidencePreviewCard
-              key={`${project.projectId}-${cid}-${index}`}
-              cid={cid}
-              fileName={evidenceFile?.fileName || `Bằng chứng #${index + 1}`}
-              mimeType={evidenceFile?.mimeType}
-              compact
-            />
-          );
-        })}
-      </div>
+      {!hasEvidence ? (
+        <p className="mt-3 text-sm text-[#6b7280]">Dự án chưa có tệp bằng chứng.</p>
+      ) : (
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {project.evidenceCids.map((evidenceCid, index) => {
+            const evidenceFile = project.evidenceFiles?.find(file => file.cid === evidenceCid);
+            return (
+              <IpfsEvidencePreviewCard
+                key={evidenceCid}
+                cid={evidenceCid}
+                fileName={evidenceFile?.fileName || `Bằng chứng #${index + 1}`}
+                mimeType={evidenceFile?.mimeType}
+                compact
+              />
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -341,8 +306,14 @@ interface DonationSectionProps {
   anonymousStatus: string;
   anonymousMessage: string;
   hasInitiatedAnonymous: boolean;
-  initState: ReturnType<typeof useGuestWallet>['initState'];
+  anonymousWalletAddress: string | null;
+  anonymousRemainingDonations: number;
+  anonymousDonationCount: number;
+  anonymousHasPendingDonation: boolean;
   isLoggedIn: boolean;
+  payosPaymentUrl: string | null;
+  payosStatus: PayosDonationStatus | null;
+  isAwaitingAnonymousPayment: boolean;
   onOpenPublicDonation: () => void;
   onClosePublicDonation: () => void;
   onOpenPublicConfirm: () => void;
@@ -369,8 +340,14 @@ function DonationSection(props: DonationSectionProps) {
     anonymousStatus,
     anonymousMessage,
     hasInitiatedAnonymous,
-    initState,
+    anonymousWalletAddress,
+    anonymousRemainingDonations,
+    anonymousDonationCount,
+    anonymousHasPendingDonation,
     isLoggedIn,
+    payosPaymentUrl,
+    payosStatus,
+    isAwaitingAnonymousPayment,
     onOpenPublicDonation,
     onClosePublicDonation,
     onOpenPublicConfirm,
@@ -383,7 +360,6 @@ function DonationSection(props: DonationSectionProps) {
 
   const isEligible = isProjectEligibleForDonation(project);
 
-  // TRẠNG THÁI 1: Chưa chọn chế độ → hiển thị 2 nút lớn
   if (!donationMode) {
     return (
       <section className="project-detail-section mb-6">
@@ -394,7 +370,6 @@ function DonationSection(props: DonationSectionProps) {
           </p>
         ) : (
           <div className="project-detail-donation-grid">
-            {/* Nút quyên góp công khai */}
             <button
               type="button"
               onClick={onOpenPublicDonation}
@@ -404,7 +379,6 @@ function DonationSection(props: DonationSectionProps) {
               <span className="font-semibold">Quyên góp công khai</span>
               <span className="text-xs opacity-70">Cần đăng nhập tài khoản đã xác minh</span>
             </button>
-            {/* Nút quyên góp ẩn danh — chỉ hiển thị khi chưa đăng nhập */}
             {!isLoggedIn && (
               <button
                 type="button"
@@ -422,7 +396,6 @@ function DonationSection(props: DonationSectionProps) {
     );
   }
 
-  // TRẠNG THÁI 2: Quyên góp công khai
   if (donationMode === 'public') {
     return (
       <section className="project-detail-form-section public mb-6">
@@ -466,7 +439,6 @@ function DonationSection(props: DonationSectionProps) {
           {isPublicSubmitting ? 'Đang xử lý...' : 'Quyên góp'}
         </button>
 
-        {/* Confirm modal */}
         {isPublicConfirmOpen && pendingPublicAmount !== null && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4">
             <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl">
@@ -499,269 +471,202 @@ function DonationSection(props: DonationSectionProps) {
     );
   }
 
-  // TRẠNG THÁI 3: Quyên góp ẩn danh
-  if (donationMode === 'anonymous') {
-    const isGuestReady = initState.initStatus === 'READY';
+  const payosStatusText =
+    payosStatus === 'PENDING_PAYMENT'
+      ? 'Đang chờ thanh toán PayOS'
+      : payosStatus === 'PAYMENT_CONFIRMED'
+        ? 'Đã nhận thanh toán, hệ thống đang chuẩn bị quyên góp'
+        : payosStatus === 'MINTING'
+          ? 'Hệ thống đang mint token để thực hiện quyên góp'
+          : payosStatus === 'RELAYING'
+            ? 'Hệ thống đang gửi giao dịch quyên góp lên blockchain'
+            : payosStatus === 'COMPLETED'
+              ? 'Quyên góp thành công'
+              : payosStatus === 'FAILED'
+                ? 'Thanh toán thất bại'
+                : '';
 
-    return (
-      <section className="project-detail-form-section anonymous mb-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-[#4338ca]">🔐 Quyên góp ẩn danh</h2>
-          <button type="button" onClick={onCloseAnonymousDonation} className="text-sm text-[#6b7280] hover:text-[#374151]">
-            ✕ Đóng
-          </button>
-        </div>
-
-        {!isGuestReady && hasInitiatedAnonymous ? (
-          <div className="rounded-lg border border-[#e0e7ff] bg-[#eef2ff] p-4 text-sm text-[#4338ca]">
-            Hệ thống đang khởi tạo ví ẩn danh. Vui lòng đợi trong giây lát...
-          </div>
-        ) : (
-          <>
-            <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-[#e5e7eb] bg-gray-50 px-3 py-2 text-xs text-[#374151]">
-              <span>
-                Ví: <span className="font-mono font-medium">{formatWalletAddress(initState.walletAddress ?? '')}</span>
-              </span>
-              <span className="text-[#9ca3af]">|</span>
-              <span>
-                Còn lại: <span className="font-semibold text-[#4338ca]">{initState.remainingDonations}</span>/3 lần
-              </span>
-              <span className="text-[#9ca3af]">|</span>
-              <span>
-                Đã dùng: <span className="font-medium">{initState.donationCount}</span> lần
-              </span>
-            </div>
-
-            {initState.hasPendingDonation && (
-              <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Hệ thống phát hiện giao dịch đang chờ xử lý. Vui lòng đợi hoặc thử lại sau vài phút.
-              </div>
-            )}
-
-            <input
-              type="number"
-              min={MIN_AMOUNT_PER_DONATION}
-              max={MAX_AMOUNT_PER_DONATION}
-              value={donationAmountInput}
-              onChange={e => setDonationAmountInput(e.target.value)}
-              disabled={isAnonymousSubmitting}
-              placeholder={`Từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()} token`}
-              className="project-detail-input"
-            />
-            <p className="mt-1 text-xs text-[#9ca3af]">
-              Giới hạn: tối thiểu {MIN_AMOUNT_PER_DONATION} token, tối đa {MAX_AMOUNT_PER_DONATION.toLocaleString()} token/lần
-            </p>
-
-            {anonymousMessage && (
-              <p
-                className={`mt-2 rounded-md px-3 py-2 text-sm ${
-                  anonymousStatus === 'FAILED'
-                    ? 'border border-[#fecaca] bg-[#fff1f2] text-[#b91c1c]'
-                    : anonymousStatus === 'SUCCESS'
-                      ? 'border border-[#bbf7d0] bg-[#f0fdf4] text-[#166534]'
-                      : 'border border-[#fde68a] bg-[#fffbeb] text-[#92400e]'
-                }`}
-              >
-                {anonymousMessage}
-              </p>
-            )}
-
-            <button
-              type="button"
-              disabled={isAnonymousSubmitting || initState.remainingDonations <= 0}
-              onClick={onSubmitAnonymousDonation}
-              className="project-detail-submit-btn anonymous mt-3"
-            >
-              {isAnonymousSubmitting
-                ? 'Đang xử lý...'
-                : anonymousStatus === 'SUCCESS'
-                  ? 'Quyên góp thành công!'
-                  : 'Quyên góp ẩn danh'}
-            </button>
-          </>
-        )}
-      </section>
-    );
-  }
-
-  return null;
-}
-
-/** Component lịch sử quyên góp — danh sách các giao dịch. */
-function DonationHistorySection({ historyList }: { historyList: DonationHistoryItem[] }) {
   return (
-    <section className="project-detail-section">
-      <h2 className="project-detail-section-title">Lịch sử quyên góp</h2>
-      {historyList.length === 0 ? (
-        <p className="text-sm text-[#9ca3af]">Chưa có lượt quyên góp nào cho dự án này.</p>
-      ) : (
-        <div className="space-y-3">
-          {historyList.map(historyItem => (
-            <div key={historyItem.transactionHash} className="project-detail-history-card">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-sm font-medium text-[#111827]">
-                    {historyItem.isAnonymous ? '🔐 Ẩn danh' : formatWalletAddress(historyItem.donorAddress)}
-                  </div>
-                  <div className="mt-0.5 text-xs text-[#9ca3af]">
-                    {new Date(historyItem.timestamp).toLocaleString('vi-VN')}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-[#0e7c6b]">
-                    +{historyItem.amount.toLocaleString('vi-VN')} token
-                  </div>
-                  <div className="mt-0.5 font-mono text-xs text-[#9ca3af]">
-                    Tx: {formatTransactionHash(historyItem.transactionHash)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
+    <section className="project-detail-form-section anonymous mb-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-base font-semibold text-[#4338ca]">🔐 Quyên góp ẩn danh</h2>
+        <button type="button" onClick={onCloseAnonymousDonation} className="text-sm text-[#6b7280] hover:text-[#374151]">
+          ✕ Đóng
+        </button>
+      </div>
+
+      {!hasInitiatedAnonymous ? (
+        <div className="rounded-lg border border-[#e0e7ff] bg-[#eef2ff] p-4 text-sm text-[#4338ca]">
+          Hệ thống đang chuẩn bị ví ẩn danh. Vui lòng đợi trong giây lát...
         </div>
+      ) : (
+        <>
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-[#e5e7eb] bg-gray-50 px-3 py-2 text-xs text-[#374151]">
+            <span>
+              Ví: <span className="font-mono font-medium">{formatWalletAddress(anonymousWalletAddress ?? '')}</span>
+            </span>
+            <span className="text-[#9ca3af]">|</span>
+            <span>
+              Còn lại: <span className="font-semibold text-[#4338ca]">{anonymousRemainingDonations}</span>/3 lần
+            </span>
+            <span className="text-[#9ca3af]">|</span>
+            <span>
+              Đã dùng: <span className="font-medium">{anonymousDonationCount}</span> lần
+            </span>
+          </div>
+
+          {anonymousHasPendingDonation && (
+            <div className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Hệ thống phát hiện giao dịch đang chờ xử lý. Vui lòng đợi hoặc thử lại sau vài phút.
+            </div>
+          )}
+
+          <input
+            type="number"
+            min={MIN_AMOUNT_PER_DONATION}
+            max={MAX_AMOUNT_PER_DONATION}
+            value={donationAmountInput}
+            onChange={e => setDonationAmountInput(e.target.value)}
+            disabled={isAnonymousSubmitting || isAwaitingAnonymousPayment}
+            placeholder={`Từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()} token`}
+            className="project-detail-input"
+          />
+          <p className="mt-1 text-xs text-[#9ca3af]">
+            Giới hạn: tối thiểu {MIN_AMOUNT_PER_DONATION} token, tối đa {MAX_AMOUNT_PER_DONATION.toLocaleString()} token/lần
+          </p>
+
+          {anonymousMessage && (
+            <p
+              className={`mt-2 rounded-md px-3 py-2 text-sm ${
+                anonymousStatus === 'FAILED'
+                  ? 'border border-[#fecaca] bg-[#fff1f2] text-[#b91c1c]'
+                  : anonymousStatus === 'SUCCESS'
+                    ? 'border border-[#bbf7d0] bg-[#f0fdf4] text-[#166534]'
+                    : 'border border-[#c7d2fe] bg-[#eef2ff] text-[#3730a3]'
+              }`}
+            >
+              {anonymousMessage}
+            </p>
+          )}
+
+          {isAwaitingAnonymousPayment && payosPaymentUrl && (
+            <div className="mt-4 rounded-xl border border-[#c7d2fe] bg-[#eef2ff] p-4">
+              <p className="text-sm font-semibold text-[#3730a3]">Tiếp tục thanh toán PayOS để hoàn tất quyên góp</p>
+              {payosStatusText && <p className="mt-1 text-xs text-[#4338ca]">Trạng thái: {payosStatusText}</p>}
+              <a
+                href={payosPaymentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-3 inline-flex rounded-md bg-[#4338ca] px-4 py-2 text-sm font-semibold text-white"
+              >
+                Mở trang thanh toán PayOS
+              </a>
+            </div>
+          )}
+
+          <button
+            type="button"
+            disabled={isAnonymousSubmitting || anonymousRemainingDonations <= 0 || isAwaitingAnonymousPayment}
+            onClick={onSubmitAnonymousDonation}
+            className="project-detail-submit-btn anonymous mt-3"
+          >
+            {isAnonymousSubmitting
+              ? 'Đang xử lý...'
+              : isAwaitingAnonymousPayment
+                ? 'Đang chờ thanh toán...'
+                : 'Quyên góp ẩn danh'}
+          </button>
+        </>
       )}
     </section>
   );
 }
 
-/** Component chính — trang chi tiết dự án quyên góp. */
-export default function DonationCampaignDetailPage() {
-  const routeParams = useParams<{ projectId: string }>();
-  const router = useRouter();
-  const projectId = String(routeParams?.projectId || '');
-  const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
-  const { initState, executeDonation, bootstrapGuestWallet } = useGuestWallet();
-  /** Flag đánh dấu user đã bấm nút "Quyên góp ẩn danh" hay chưa */
-  const [hasInitiatedAnonymous, setHasInitiatedAnonymous] = useState(false);
+/** Component lịch sử quyên góp. */
+function DonationHistorySection({ historyList }: { historyList: DonationHistoryItem[] }) {
+  return (
+    <section className="project-detail-section mb-6">
+      <h2 className="project-detail-section-title">Lịch sử quyên góp gần đây</h2>
+      <div className="space-y-3">
+        {historyList.length === 0 ? (
+          <p className="text-sm text-[#6b7280]">Chưa có lượt quyên góp nào.</p>
+        ) : (
+          historyList.map((historyItem, index) => (
+            <div key={`${historyItem.transactionHash}-${index}`} className="rounded-lg border border-[#e5e7eb] bg-white p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-[#111827]">
+                    {historyItem.isAnonymous ? 'Người quyên góp ẩn danh' : formatWalletAddress(historyItem.donorAddress)}
+                  </p>
+                  <p className="text-xs text-[#6b7280]">{new Date(historyItem.timestamp).toLocaleString('vi-VN')}</p>
+                </div>
+                <span className="rounded-full bg-[#ecfdf5] px-3 py-1 text-sm font-semibold text-[#0e7c6b]">
+                  {formatCurrencyVnd(historyItem.amount)} token
+                </span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
 
-  // Project data
+/**
+ * Hàm dựng đường dẫn returnTo an toàn từ route hiện tại.
+ * Mục đích: giữ người dùng quay lại đúng trang quyên góp sau khi đăng nhập.
+ * @param pathnameValue - Đường dẫn hiện tại không gồm query string
+ * @param searchParamsValue - Tập query string hiện tại trên URL
+ * @returns Đường dẫn đầy đủ gồm pathname và query string hiện tại
+ */
+function buildCurrentReturnToPath(
+  pathnameValue: string,
+  searchParamsValue: ReturnType<typeof useSearchParams>
+): string {
+  const currentSearchParams = searchParamsValue.toString();
+  return `${pathnameValue}${currentSearchParams ? `?${currentSearchParams}` : ''}`;
+}
+
+/** Trang chi tiết dự án quyên góp. */
+export default function DonationProjectDetailPage() {
+  const params = useParams<{ projectId: string }>();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const projectId = params?.projectId;
+  const { accessToken } = readAuthSession();
+  const isLoggedIn = Boolean(accessToken);
+  const { initState, bootstrapGuestWallet } = useGuestWallet();
+
   const [projectDetail, setProjectDetail] = useState<ProjectDetail | null>(null);
-  const [bannerCoverUrl, setBannerCoverUrl] = useState<string>('');
+  const [historyList, setHistoryList] = useState<DonationHistoryItem[]>([]);
+  const [bannerCoverUrl, setBannerCoverUrl] = useState('');
   const [isProjectLoading, setIsProjectLoading] = useState(true);
   const [projectError, setProjectError] = useState('');
 
-  // Auth check
-  const { isLoggedIn, sessionData, syncSessionFromStorage } = useAuthCheck();
-  const [isLoginModalVisible, setIsLoginModalVisible] = useState(false);
-
-  // History
-  const [historyList, setHistoryList] = useState<DonationHistoryItem[]>([]);
-
-  // Token balance on-chain
-  const [tokenBalance, setTokenBalance] = useState<number>(0);
-
-  // Header user menu
-  const [isNavbarScrolled, setIsNavbarScrolled] = useState(false);
-  const [isUserMenuVisible, setIsUserMenuVisible] = useState(false);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const userMenuContainerRef = useRef<HTMLDivElement | null>(null);
-  const userMenuButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  /** Hàm toggle menu người dùng trên header. */
-  const handleToggleUserMenu = () => {
-    setIsUserMenuVisible(currentState => !currentState);
-  };
-
-  /** Hàm đóng menu người dùng khi click ra ngoài. */
-  const handleHeaderUserLogout = () => {
-    clearAuthSession();
-    setIsUserMenuVisible(false);
-    // Fire event để các component khác (useAuthCheck, LoginModal) nhận biết logout
-    window.dispatchEvent(new Event('dcpAuthSessionUpdated'));
-  };
-
-  /** Hàm đóng login modal — ở trang này chỉ đóng modal, không redirect. */
-  const handleCloseLoginModal = useCallback(() => {
-    setIsLoginModalVisible(false);
-  }, []);
-
-  /** Hàm mở login modal khi click nút Đăng nhập trên header. */
-  const handleOpenLoginModal = () => {
-    setIsLoginModalVisible(true);
-  };
-
-  /** Hàm effect scroll cho navbar. */
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsNavbarScrolled(window.scrollY > 10);
-    };
-    handleScroll();
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
-
-  /**
-   * Hàm tải số dư token on-chain của người dùng đã đăng nhập.
-   * Mục đích: sử dụng cùng endpoint và logic với trang /deposit để đảm bảo số dư on-chain đồng nhất.
-   */
-  const loadTokenBalance = useCallback(async () => {
-    const session = readAuthSession();
-    if (!session.accessToken?.trim()) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${backendBaseUrl}/api/deposit/sidebar`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${session.accessToken}`
-        }
-      });
-
-      if (response.status === 401) {
-        return;
-      }
-
-      if (!response.ok) {
-        return;
-      }
-
-      const responsePayload = await response.json() as { tokenBalanceOnChain?: number; tokenBalance?: number };
-      const tokenBalanceOnChain = Number(responsePayload.tokenBalanceOnChain ?? responsePayload.tokenBalance ?? 0);
-      setTokenBalance(tokenBalanceOnChain);
-    } catch {
-      // Không hiển thị lỗi cho user — balance có thể không critical
-    }
-  }, [backendBaseUrl]);
-
-  /**
-   * Effect sync token balance khi sessionData thay đổi (sau khi đăng nhập thành công).
-   * Mục đích: loadTokenBalance được gọi tự động khi sessionData có accessToken mới
-   * nhờ useAuthCheck đã sync sessionData ngay khi event "dcpAuthSessionUpdated" được fire.
-   */
-  const syncTokenBalanceOnLogin = useCallback(() => {
-    if (sessionData.accessToken?.trim()) {
-      void loadTokenBalance();
-    } else {
-      setTokenBalance(0);
-    }
-  }, [sessionData.accessToken, loadTokenBalance]);
-
-  useEffect(() => {
-    syncTokenBalanceOnLogin();
-  }, [syncTokenBalanceOnLogin]);
-
-  // Donation mode
   const [donationMode, setDonationMode] = useState<DonationMode>(null);
   const [donationAmountInput, setDonationAmountInput] = useState('');
 
-  // Public donation state
   const [isPublicSubmitting, setIsPublicSubmitting] = useState(false);
   const [publicStatus, setPublicStatus] = useState<TransactionStatus>('idle');
   const [publicMessage, setPublicMessage] = useState('');
   const [isPublicConfirmOpen, setIsPublicConfirmOpen] = useState(false);
   const [pendingPublicAmount, setPendingPublicAmount] = useState<number | null>(null);
 
-  // Anonymous donation state
   const [isAnonymousSubmitting, setIsAnonymousSubmitting] = useState(false);
   const [anonymousStatus, setAnonymousStatus] = useState<string>('IDLE');
   const [anonymousMessage, setAnonymousMessage] = useState('');
+  const [hasInitiatedAnonymous, setHasInitiatedAnonymous] = useState(false);
+  const [payosPaymentUrl, setPayosPaymentUrl] = useState<string | null>(null);
+  const [payosOrderCode, setPayosOrderCode] = useState<string | null>(null);
+  const [payosStatus, setPayosStatus] = useState<PayosDonationStatus | null>(null);
+  const [isAwaitingAnonymousPayment, setIsAwaitingAnonymousPayment] = useState(false);
 
   /**
    * Hàm tải dữ liệu dự án và lịch sử donation.
    * Mục đích: dùng cho tải trang ban đầu và refresh sau khi donate thành công.
    */
-  const loadProjectData = async () => {
+  const loadProjectData = useCallback(async () => {
     if (!projectId) {
       setProjectError('Không tìm thấy mã dự án hợp lệ.');
       setIsProjectLoading(false);
@@ -793,7 +698,6 @@ export default function DonationCampaignDetailPage() {
         return;
       }
 
-      // Ghép dữ liệu từ 2 endpoint: project info + donation stats
       const stats = statsResponse.data;
       const basic = basicResponse.data;
       setProjectDetail({
@@ -815,78 +719,165 @@ export default function DonationCampaignDetailPage() {
       });
       setHistoryList(historyResponse.data);
 
-      // Resolve cover image URL từ evidenceFiles giống trang chủ
       const firstImageCid = await resolveFirstProjectImageCidForDetail(basic);
       const coverUrl = firstImageCid ? buildIpfsGatewayUrl(firstImageCid) : '';
       setBannerCoverUrl(coverUrl);
-
-      await loadTokenBalance();
     } catch (error) {
       const apiError = error as ApiErrorResponse;
       setProjectError(apiError.message || 'Không thể tải dữ liệu dự án. Vui lòng thử lại.');
     } finally {
       setIsProjectLoading(false);
     }
-  };
+  }, [projectId]);
 
   useEffect(() => {
     void loadProjectData();
-  }, [projectId]);
+  }, [loadProjectData]);
 
-  // Public donation handlers
-  /** Hàm mở quyên góp công khai — kiểm tra đăng nhập trước. */
+  /**
+   * Effect poll trạng thái donation PayOS cho guest.
+   * Mục đích: cập nhật UI anonymous mà không thay đổi UI public.
+   */
+  useEffect(() => {
+    if (!isAwaitingAnonymousPayment || !payosOrderCode || !initState.guestSessionToken) return;
+
+    const pollIntervalId = window.setInterval(async () => {
+      try {
+        const statusResponse = await getPayosDonationStatus(payosOrderCode, initState.guestSessionToken!);
+        setPayosStatus(statusResponse.status);
+
+        if (statusResponse.status === 'COMPLETED') {
+          window.clearInterval(pollIntervalId);
+          setIsAwaitingAnonymousPayment(false);
+          setIsAnonymousSubmitting(false);
+          setAnonymousStatus('SUCCESS');
+          setAnonymousMessage('Quyên góp ẩn danh thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
+          setDonationAmountInput('');
+          await loadProjectData();
+        } else if (statusResponse.status === 'FAILED') {
+          window.clearInterval(pollIntervalId);
+          setIsAwaitingAnonymousPayment(false);
+          setIsAnonymousSubmitting(false);
+          setAnonymousStatus('FAILED');
+          setAnonymousMessage(statusResponse.errorMessage || 'Thanh toán thất bại. Vui lòng thử lại.');
+        } else if (statusResponse.status === 'PAYMENT_CONFIRMED' || statusResponse.status === 'MINTING' || statusResponse.status === 'RELAYING') {
+          setAnonymousStatus('PROCESSING');
+          setAnonymousMessage('Đã nhận thanh toán, hệ thống đang xử lý quyên góp của bạn...');
+        }
+      } catch {
+        // Bỏ qua lỗi poll tạm thời để tránh làm gián đoạn trải nghiệm người dùng.
+      }
+    }, 3000);
+
+    return () => window.clearInterval(pollIntervalId);
+  }, [isAwaitingAnonymousPayment, payosOrderCode, initState.guestSessionToken, loadProjectData]);
+
+  /**
+   * Hàm mở form quyên góp công khai.
+   * Mục đích: giữ nguyên UI phân tách 2 luồng donate như trước.
+   */
   const handleOpenPublicDonation = () => {
-    const authSession = readAuthSession();
-    if (!authSession.accessToken?.trim()) {
-      router.push(`/login?redirect=/donations/${projectId}`);
+    if (!accessToken) {
+      setPublicStatus('failed');
+      setPublicMessage('Vui lòng đăng nhập để sử dụng quyên góp công khai.');
+      const returnToPath = buildCurrentReturnToPath(pathname, searchParams);
+      router.push(`/login?returnTo=${encodeURIComponent(returnToPath)}`);
       return;
     }
+
     setDonationMode('public');
     setDonationAmountInput('');
     setPublicStatus('idle');
     setPublicMessage('');
   };
 
-  /** Hàm đóng quyên góp công khai. */
+  /**
+   * Hàm đóng form quyên góp công khai.
+   * Mục đích: reset trạng thái confirm và input public.
+   */
   const handleClosePublicDonation = () => {
     setDonationMode(null);
     setDonationAmountInput('');
-    setPublicStatus('idle');
-    setPublicMessage('');
     setIsPublicConfirmOpen(false);
     setPendingPublicAmount(null);
   };
 
-  /** Hàm mở modal xác nhận quyên góp công khai. */
+  /**
+   * Hàm mở form quyên góp ẩn danh.
+   * Mục đích: giữ nguyên UI cũ nhưng bootstrap ví guest cho flow PayOS mới.
+   */
+  const handleOpenAnonymousDonation = async () => {
+    setDonationMode('anonymous');
+    setDonationAmountInput('');
+    setAnonymousStatus('INITIALIZING');
+    setAnonymousMessage('Đang khởi tạo ví ẩn danh...');
+    setHasInitiatedAnonymous(false);
+
+    try {
+      await bootstrapGuestWallet();
+      setHasInitiatedAnonymous(true);
+      setAnonymousStatus('IDLE');
+      setAnonymousMessage('Ví ẩn danh đã sẵn sàng. Bạn có thể nhập số token muốn quyên góp.');
+    } catch (error) {
+      setHasInitiatedAnonymous(true);
+      setAnonymousStatus('FAILED');
+      setAnonymousMessage(mapDonationErrorMessage(error));
+    }
+  };
+
+  /**
+   * Hàm đóng form quyên góp ẩn danh.
+   * Mục đích: reset trạng thái thanh toán PayOS đang chờ.
+   */
+  const handleCloseAnonymousDonation = () => {
+    setDonationMode(null);
+    setDonationAmountInput('');
+    setAnonymousStatus('IDLE');
+    setAnonymousMessage('');
+    setPayosPaymentUrl(null);
+    setPayosOrderCode(null);
+    setPayosStatus(null);
+    setIsAwaitingAnonymousPayment(false);
+  };
+
+  /**
+   * Hàm mở confirm cho public donation.
+   * Mục đích: giữ nguyên xác nhận trước khi submit công khai.
+   */
   const handleOpenPublicConfirm = () => {
     const parsedAmount = Number(donationAmountInput);
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      setPublicMessage('Vui lòng nhập số token lớn hơn 0.');
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isInteger(parsedAmount)) {
+      setPublicStatus('failed');
+      setPublicMessage('Số token quyên góp phải là số nguyên lớn hơn 0.');
       return;
     }
-    if (!projectDetail || !isProjectEligibleForDonation(projectDetail)) {
-      setPublicMessage('Dự án hiện không đủ điều kiện nhận quyên góp.');
-      return;
-    }
+
     setPendingPublicAmount(parsedAmount);
     setIsPublicConfirmOpen(true);
   };
 
-  /** Hàm xác nhận và gửi quyên góp công khai. */
+  /**
+   * Hàm xác nhận và submit public donation.
+   * Mục đích: giữ nguyên luồng công khai cũ.
+   */
   const handleConfirmPublicDonation = async () => {
-    if (isPublicSubmitting || !projectDetail || pendingPublicAmount === null) return;
+    if (!projectDetail || pendingPublicAmount === null) return;
+    if (!accessToken) {
+      setPublicStatus('failed');
+      setPublicMessage('Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại để quyên góp.');
+      return;
+    }
 
     try {
       setIsPublicSubmitting(true);
-      setPublicStatus('processing');
-      setPublicMessage('Đang gửi giao dịch quyên góp qua hệ thống...');
       setIsPublicConfirmOpen(false);
+      setPublicStatus('processing');
+      setPublicMessage('Hệ thống đang gửi giao dịch quyên góp, vui lòng chờ trong giây lát...');
 
-      const { accessToken } = readAuthSession();
-      const txHash = await executeOneClickDonationRequest(accessToken ?? '', projectDetail.projectId, pendingPublicAmount, false);
+      await executeOneClickDonationRequest(accessToken, projectDetail.projectId, pendingPublicAmount, false);
 
       setPublicStatus('success');
-      setPublicMessage(`Quyên góp thành công! TxHash: ${formatTransactionHash(String(txHash))}`);
+      setPublicMessage('Giao dịch quyên góp đã được xác nhận thành công trên blockchain.');
       setDonationAmountInput('');
       setPendingPublicAmount(null);
       await loadProjectData();
@@ -898,307 +889,133 @@ export default function DonationCampaignDetailPage() {
     }
   };
 
-  // Anonymous donation handlers
-  /** Hàm mở quyên góp ẩn danh — bắt đầu bootstrap ví. */
-  const handleOpenAnonymousDonation = () => {
-    // flushSync buộc React commit render NGAY trước khi async init bắt đầu
-    flushSync(() => {
-      setDonationMode('anonymous');
-      setDonationAmountInput('');
-      setAnonymousStatus('IDLE');
-      setAnonymousMessage('');
-      setHasInitiatedAnonymous(true);
-    });
-    void bootstrapGuestWallet();
-  };
-
-  /** Hàm đóng quyên góp ẩn danh. */
-  const handleCloseAnonymousDonation = () => {
-    setDonationMode(null);
-    setDonationAmountInput('');
-    setAnonymousStatus('IDLE');
-    setAnonymousMessage('');
-    setHasInitiatedAnonymous(false);
-  };
-
-  /** Hàm gửi quyên góp ẩn danh qua guest wallet. */
+  /**
+   * Hàm submit anonymous donation qua PayOS.
+   * Mục đích: chỉ thay logic ẩn danh, không thay đổi UI hiển thị.
+   */
   const handleSubmitAnonymousDonation = async () => {
-    if (isAnonymousSubmitting || !projectDetail) return;
+    if (!projectDetail) return;
 
     const parsedAmount = Number(donationAmountInput);
-    if (!Number.isFinite(parsedAmount) || parsedAmount < MIN_AMOUNT_PER_DONATION || parsedAmount > MAX_AMOUNT_PER_DONATION) {
-      setAnonymousMessage(`Vui lòng nhập số token từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()}.`);
+    if (!Number.isFinite(parsedAmount) || !Number.isInteger(parsedAmount) || parsedAmount < MIN_AMOUNT_PER_DONATION || parsedAmount > MAX_AMOUNT_PER_DONATION) {
+      setAnonymousStatus('FAILED');
+      setAnonymousMessage(
+        `Số token quyên góp phải là số nguyên từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()}.`
+      );
+      return;
+    }
+
+    if (!initState.guestSessionToken) {
+      setAnonymousStatus('FAILED');
+      setAnonymousMessage('Không tìm thấy phiên ví ẩn danh hợp lệ. Vui lòng mở lại form và thử lại.');
       return;
     }
 
     try {
       setIsAnonymousSubmitting(true);
-      setAnonymousStatus('BUILDING_USER_OP');
-      setAnonymousMessage('Đang xây dựng giao dịch...');
+      setAnonymousStatus('PROCESSING');
+      setAnonymousMessage('Đang khởi tạo thanh toán PayOS cho quyên góp ẩn danh...');
 
-      const result = await executeDonation(projectDetail.projectId, parsedAmount);
+      const response = await initPayosDonation(
+        {
+          projectId: projectDetail.projectId,
+          amount: parsedAmount,
+        },
+        initState.guestSessionToken,
+      );
 
-      if (result) {
-        setAnonymousStatus('SUCCESS');
-        setAnonymousMessage('Quyên góp ẩn danh thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
-        setDonationAmountInput('');
-        await loadProjectData();
-      } else {
-        setAnonymousStatus('FAILED');
-        setAnonymousMessage('Giao dịch không thành công. Vui lòng thử lại.');
-      }
+      setPayosOrderCode(response.orderCode);
+      setPayosPaymentUrl(response.paymentUrl);
+      setPayosStatus('PENDING_PAYMENT');
+      setIsAwaitingAnonymousPayment(true);
+      setAnonymousStatus('PENDING');
+      setAnonymousMessage('Vui lòng hoàn tất thanh toán trên PayOS để hệ thống thực hiện quyên góp ẩn danh.');
     } catch (error) {
+      setIsAnonymousSubmitting(false);
       setAnonymousStatus('FAILED');
       setAnonymousMessage(mapDonationErrorMessage(error));
-    } finally {
-      setIsAnonymousSubmitting(false);
     }
   };
 
-  // Render
   return (
-    <>
-      {isLoginModalVisible && (
-        <LoginModal onClose={handleCloseLoginModal} />
-      )}
-      <main className="project-detail-page">
-      <nav id="navbar" className={isNavbarScrolled ? 'scrolled' : ''}>
-        <a href="/" className="logo">
-          <div className="logo-icon">
-            <svg viewBox="0 0 24 24">
-              <path d="M12 21.7C5.8 17.5 2 13.2 2 9a6 6 0 0112 0 6 6 0 0112 0c0 4.2-3.8 8.5-10 12.7z" />
-            </svg>
-          </div>
-          <div>
-            <span className="logo-text">DCP</span>
-            <span className="logo-tag">Minh bạch tuyệt đối</span>
-          </div>
-        </a>
-        <ul className="nav-links">
-          <li><a href="/#projects">Dự án</a></li>
-          <li><a href="/#transparency">Minh bạch</a></li>
-        </ul>
-        <div className="nav-actions">
-          {sessionData.userFullName ? (
-            <div className="relative" ref={userMenuContainerRef}>
-              <button
-                ref={userMenuButtonRef}
-                type="button"
-                className="btn-ghost focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0e7c6b] focus-visible:ring-offset-2"
-                aria-label="Mở menu người dùng"
-                aria-haspopup="menu"
-                aria-expanded={isUserMenuVisible}
-                onClick={handleToggleUserMenu}
-              >
-                <span aria-hidden="true">👤</span> {sessionData.userFullName}
-              </button>
-              <div
-                className={`absolute right-0 top-[calc(100%+10px)] z-20 min-w-[170px] rounded-xl border border-[#e5e7eb] bg-white p-1.5 shadow-[0_12px_32px_rgba(13,17,23,0.14)] transition-all duration-150 ${isUserMenuVisible ? 'pointer-events-auto translate-y-0 opacity-100' : 'pointer-events-none -translate-y-1 opacity-0'
-                  }`}
-              >
-                <button
-                  type="button"
-                  className="flex min-h-[44px] w-full items-center justify-start rounded-lg px-3.5 py-2.5 text-sm font-semibold text-[#0d1117] transition-colors duration-150 hover:bg-[#f3f4f6] active:bg-[#e5e7eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0e7c6b]"
-                  onClick={handleHeaderUserLogout}
-                >
-                  Đăng xuất
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="btn-ghost" onClick={handleOpenLoginModal}>
-              Đăng nhập
-            </button>
-          )}
-          {sessionData.accessToken && (
-            <span className="rounded-full border border-[#0e7c6b]/40 bg-[#0e7c6b]/15 px-3 py-1 text-xs font-semibold text-[#0e7c6b]">
-              💎 {tokenBalance.toLocaleString('vi-VN')} Token
-            </span>
-          )}
-          <a href="/deposit" className="btn-amber">
-            💰 Nạp tiền
-          </a>
-          <button
-            type="button"
-            className={`mobile-hamburger${isMobileMenuOpen ? ' is-open' : ''}`}
-            aria-label={isMobileMenuOpen ? 'Đóng menu' : 'Mở menu'}
-            aria-expanded={isMobileMenuOpen}
-            aria-controls="mobile-menu"
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          >
-            <svg className="mobile-hamburger-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <g className="hamburger-bars">
-                <path d="M4 7H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-                <path d="M4 12H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-                <path d="M4 17H20" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-              </g>
-              <g className="hamburger-close">
-                <path d="M5 5L19 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-                <path d="M19 5L5 19" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
-              </g>
-            </svg>
-          </button>
-        </div>
-      </nav>
-
-      {isMobileMenuOpen && (
-        <>
-          <div className="mobile-menu-overlay" onClick={() => setIsMobileMenuOpen(false)} aria-hidden="true" />
-          <div id="mobile-menu" className="mobile-menu-drawer" role="dialog" aria-modal="true" aria-label="Menu điều hướng">
-            <div className="mobile-menu-header">
-              <span className="logo-text">DCP</span>
-              <button type="button" className="mobile-menu-close" aria-label="Đóng menu" onClick={() => setIsMobileMenuOpen(false)}>
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                  <path d="M2 2L16 16M16 2L2 16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-            <ul className="mobile-menu-links">
-              <li>
-                <a href="/#projects" onClick={() => setIsMobileMenuOpen(false)}>
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                    <path d="M2 6C2 4.9 2.9 4 4 4H7L9 6H16C17.1 6 18 6.9 18 8V14C18 15.1 17.1 16 16 16H4C2.9 16 2 15.1 2 14V6Z" fill="#F59E0B" />
-                    <path d="M2 8H18V14C18 15.1 17.1 16 16 16H4C2.9 16 2 15.1 2 14V8Z" fill="#FBBF24" />
-                    <path d="M10 9V12M8.5 10.5H11.5" stroke="#FEFCE8" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                  Dự án
-                </a>
-              </li>
-              <li>
-                <a href="/#transparency" onClick={() => setIsMobileMenuOpen(false)}>
-                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                    <path d="M10 2L17 5V10C17 13.5 14 16.5 10 18C6 16.5 3 13.5 3 10V5L10 2Z" fill="#0E7C6B" />
-                    <path d="M10 2L17 5V10C17 13.5 14 16.5 10 18C6 16.5 3 13.5 3 10V5L10 2Z" stroke="#0D9488" strokeWidth="1.5" />
-                    <path d="M7 10L9 12L13 8" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Minh bạch
-                </a>
-              </li>
-            </ul>
-            <div className="mobile-menu-actions">
-              {sessionData.userFullName ? (
-                <>
-                  <div className="mobile-menu-user">
-                    <div className="mobile-menu-avatar">
-                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                        <circle cx="10" cy="7" r="4" fill="#0E7C6B" />
-                        <path d="M2 18C2 14.5 5.5 12 10 12C14.5 12 18 14.5 18 18" stroke="#0E7C6B" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </div>
-                    <div className="mobile-menu-user-info">
-                      <span className="mobile-menu-user-name">{(sessionData.userFullName || 'Người dùng').length > 14 ? (sessionData.userFullName || 'Người dùng').slice(0, 14) + '…' : (sessionData.userFullName || 'Người dùng')}</span>
-                      <span className="mobile-menu-user-badge">Đã đăng nhập</span>
-                    </div>
-                  </div>
-                  <a href="/deposit" className="btn-amber" onClick={() => setIsMobileMenuOpen(false)}>
-                    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-                      <path d="M2 5H16C16.55 5 17 5.45 17 6V14C17 14.55 16.55 15 16 15H2C1.45 15 1 14.55 1 14V6C1 5.45 1.45 5 2 5Z" fill="#059669" />
-                      <path d="M2 5H16C16.55 5 17 5.45 17 6V9H1V6C1 5.45 1.45 5 2 5Z" fill="#10B981" />
-                      <rect x="1" y="6" width="16" height="3" fill="#10B981" />
-                      <circle cx="9" cy="12.5" r="3" fill="#34D399" />
-                      <path d="M9 11V14M7.5 12.5H10.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                    Nạp tiền
-                  </a>
-                  <button
-                    type="button"
-                    className="mobile-menu-logout"
-                    onClick={() => {
-                      setIsMobileMenuOpen(false);
-                      handleHeaderUserLogout();
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                      <path d="M6 3H3C2.45 3 2 3.45 2 4V12C2 12.55 2.45 13 3 13H6" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" />
-                      <path d="M10 11L13 8L10 5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M13 8H5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                    Đăng xuất
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button type="button" className="btn-ghost w-full" onClick={() => { setIsMobileMenuOpen(false); handleOpenLoginModal(); }}>Đăng nhập</button>
-                  <a href="/deposit" className="btn-amber" onClick={() => setIsMobileMenuOpen(false)}>💰 Nạp tiền</a>
-                </>
-              )}
-            </div>
-          </div>
-        </>
-      )}
-
+    <main className="min-h-screen bg-[#f6f8fb]">
       <div className="mx-auto max-w-5xl px-4 py-8">
-        {/* Back button */}
         <div className="mb-6">
           <Link href="/" className="project-detail-back">
             ← Quay về trang chủ
           </Link>
         </div>
 
-      {/* Loading */}
-      {isProjectLoading && (
-        <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-8 text-center">
-          <div className="project-detail-modal-spinner mx-auto" />
-          <p className="mt-3 text-sm font-medium text-[#4b5563]">Đang tải chi tiết dự án...</p>
-        </div>
-      )}
+        {isProjectLoading && (
+          <div className="rounded-xl border border-[#e5e7eb] bg-[#f8fafc] p-8 text-center">
+            <div className="project-detail-modal-spinner mx-auto" />
+            <p className="mt-3 text-sm font-medium text-[#4b5563]">Đang tải chi tiết dự án...</p>
+          </div>
+        )}
 
-      {/* Error */}
-      {!isProjectLoading && projectError && (
-        <div className="rounded-xl border border-[#fecaca] bg-[#fff1f2] p-6 text-center">
-          <p className="text-sm font-medium text-[#b91c1c]">{projectError}</p>
-          <button
-            type="button"
-            onClick={() => void loadProjectData()}
-            className="mt-3 rounded-md bg-[#0e7c6b] px-4 py-2 text-sm font-semibold text-white"
-          >
-            Thử lại
-          </button>
-        </div>
-      )}
+        {!isProjectLoading && projectError && (
+          <div className="rounded-xl border border-[#fecaca] bg-[#fff1f2] p-6 text-center">
+            <p className="text-sm font-medium text-[#b91c1c]">{projectError}</p>
+            <button
+              type="button"
+              onClick={() => void loadProjectData()}
+              className="mt-3 rounded-md bg-[#0e7c6b] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Thử lại
+            </button>
+          </div>
+        )}
 
-      {/* Content */}
-      {!isProjectLoading && !projectError && projectDetail && (
-        <>
-          <ProjectBanner project={projectDetail} coverImageUrl={bannerCoverUrl} />
-          <ProjectInfoSection project={projectDetail} />
-          <ProjectProgressSection project={projectDetail} />
-          <EvidenceSection project={projectDetail} />
+        {!isProjectLoading && !projectError && projectDetail && (
+          <>
+            <ProjectBanner project={projectDetail} coverImageUrl={bannerCoverUrl} />
+            <ProjectInfoSection project={projectDetail} />
+            <ProjectProgressSection project={projectDetail} />
+            <EvidenceSection project={projectDetail} />
 
-          <DonationSection
-            project={projectDetail}
-            donationMode={donationMode}
-            donationAmountInput={donationAmountInput}
-            setDonationAmountInput={setDonationAmountInput}
-            isPublicSubmitting={isPublicSubmitting}
-            publicStatus={publicStatus}
-            publicMessage={publicMessage}
-            isPublicConfirmOpen={isPublicConfirmOpen}
-            pendingPublicAmount={pendingPublicAmount}
-            isAnonymousSubmitting={isAnonymousSubmitting}
-            anonymousStatus={anonymousStatus}
-            anonymousMessage={anonymousMessage}
-            hasInitiatedAnonymous={hasInitiatedAnonymous}
-            initState={initState}
-            isLoggedIn={isLoggedIn}
-            onOpenPublicDonation={handleOpenPublicDonation}
-            onClosePublicDonation={handleClosePublicDonation}
-            onOpenPublicConfirm={handleOpenPublicConfirm}
-            onClosePublicConfirm={() => {
-              setIsPublicConfirmOpen(false);
-              setPendingPublicAmount(null);
-            }}
-            onConfirmPublicDonation={handleConfirmPublicDonation}
-            onOpenAnonymousDonation={handleOpenAnonymousDonation}
-            onCloseAnonymousDonation={handleCloseAnonymousDonation}
-            onSubmitAnonymousDonation={handleSubmitAnonymousDonation}
-          />
+            <DonationSection
+              project={projectDetail}
+              donationMode={donationMode}
+              donationAmountInput={donationAmountInput}
+              setDonationAmountInput={setDonationAmountInput}
+              isPublicSubmitting={isPublicSubmitting}
+              publicStatus={publicStatus}
+              publicMessage={publicMessage}
+              isPublicConfirmOpen={isPublicConfirmOpen}
+              pendingPublicAmount={pendingPublicAmount}
+              isAnonymousSubmitting={isAnonymousSubmitting}
+              anonymousStatus={anonymousStatus}
+              anonymousMessage={anonymousMessage}
+              hasInitiatedAnonymous={hasInitiatedAnonymous}
+              anonymousWalletAddress={initState.walletAddress}
+              anonymousRemainingDonations={initState.remainingDonations}
+              anonymousDonationCount={initState.donationCount}
+              anonymousHasPendingDonation={initState.hasPendingDonation}
+              isLoggedIn={isLoggedIn}
+              payosPaymentUrl={payosPaymentUrl}
+              payosStatus={payosStatus}
+              isAwaitingAnonymousPayment={isAwaitingAnonymousPayment}
+              onOpenPublicDonation={handleOpenPublicDonation}
+              onClosePublicDonation={handleClosePublicDonation}
+              onOpenPublicConfirm={handleOpenPublicConfirm}
+              onClosePublicConfirm={() => {
+                setIsPublicConfirmOpen(false);
+                setPendingPublicAmount(null);
+              }}
+              onConfirmPublicDonation={handleConfirmPublicDonation}
+              onOpenAnonymousDonation={() => {
+                void handleOpenAnonymousDonation();
+              }}
+              onCloseAnonymousDonation={handleCloseAnonymousDonation}
+              onSubmitAnonymousDonation={() => {
+                void handleSubmitAnonymousDonation();
+              }}
+            />
 
-          <DonationHistorySection historyList={historyList} />
-        </>
-      )}
+            <DonationHistorySection historyList={historyList} />
+          </>
+        )}
       </div>
     </main>
-  </>
   );
 }

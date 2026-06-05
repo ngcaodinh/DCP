@@ -2,8 +2,7 @@
 
 import { Suspense, type ChangeEvent, type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { readAuthSession } from '../utils/authSession';
 import { useAuthCheck } from '../utils/useAuthCheck';
 import LoginModal from '../components/LoginModal';
@@ -194,6 +193,27 @@ const noteItems: NoteItem[] = [
 
 const trustedBanks = ['VCB', 'BIDV', 'TCB', 'VPB', 'MBB', 'ACB', '+40'];
 
+/**
+ * Hàm tạo đường dẫn returnTo an toàn cho trang deposit.
+ * Mục đích: giữ nguyên route hiện tại cùng query string để đăng nhập xong quay lại đúng ngữ cảnh.
+ * @param currentPathname - Đường dẫn hiện tại của trang
+ * @param currentSearchParams - Tập query params hiện tại
+ * @returns Đường dẫn nội bộ đầy đủ gồm pathname và query string nếu có
+ */
+const buildDepositReturnToPath = (
+  currentPathname: string,
+  currentSearchParams: ReadonlyURLSearchParams | URLSearchParams
+): string => {
+  const normalizedPathname = currentPathname.startsWith('/') ? currentPathname : `/${currentPathname}`;
+  const searchParamsString = currentSearchParams.toString();
+
+  if (!searchParamsString) {
+    return normalizedPathname;
+  }
+
+  return `${normalizedPathname}?${searchParamsString}`;
+};
+
 
 /**
  * Hàm định dạng số tiền theo chuẩn VNĐ.
@@ -214,6 +234,7 @@ const formatToken = (value: number) => `${value.toLocaleString('vi-VN')} Token`;
 function DepositHomePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const returnToPath = buildDepositReturnToPath('/deposit', searchParams);
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
   // Ghi chú: Kiểm tra auth state tại thời điểm render (đồng bộ) — không gây flash nội dung.
@@ -232,12 +253,27 @@ function DepositHomePageContent() {
   // Ghi chú: Hook useAuthCheck đọc localStorage tại thời điểm render (không phải useEffect).
   // Khi modal đăng nhập được hiển thị và người dùng đăng nhập thành công:
   // persistAuthSession fire event "dcpAuthSessionUpdated" → useAuthCheck cập nhật isLoggedIn →
-  // → component re-render với isLoggedIn = true → useEffect trên chạy → đóng modal.
-  // Khi người dùng đóng modal mà chưa đăng nhập → redirect về trang chủ.
+  // → component re-render với isLoggedIn = true → effect bên dưới đóng modal mà không đổi route.
+  // Khi người dùng chủ động đóng modal mà chưa đăng nhập → redirect về trang login kèm returnTo.
   const handleCloseLoginModal = useCallback(() => {
+    if (isLoggedIn) {
+      setIsLoginModalVisible(false);
+      return;
+    }
+
     setIsLoginModalVisible(false);
-    router.push('/');
-  }, [router]);
+    router.push(`/login?returnTo=${encodeURIComponent(returnToPath)}`);
+  }, [isLoggedIn, returnToPath, router]);
+
+  /**
+   * Hàm đóng modal đăng nhập ngay khi phiên xác thực đã sẵn sàng.
+   * Mục đích: tránh LoginModal gọi onClose sau khi đăng nhập thành công rồi làm lệch hướng về trang khác.
+   */
+  useEffect(() => {
+    if (isLoggedIn) {
+      setIsLoginModalVisible(false);
+    }
+  }, [isLoggedIn]);
 
   // Ghi chú: Sync lại session data nếu có thay đổi từ bên ngoài (ví dụ: tab khác thay đổi auth).
   useEffect(() => {
