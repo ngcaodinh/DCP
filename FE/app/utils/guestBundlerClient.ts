@@ -74,12 +74,12 @@ export async function estimateUserOpGas(
   }
 
   try {
-    const response = await fetch(`${bundlerUrl}/rpc`, {
+    const response = await fetch(bundlerUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0',
-        method: 'eth_estimateUserOpGas',
+        method: 'eth_estimateUserOperationGas',
         params: [
           {
             sender: userOp.sender,
@@ -139,21 +139,13 @@ function getDefaultGasLimits(): UserOpGasLimits {
  * Hiện tại dùng raw JSON-RPC — cần thay bằng ZeroDev SDK khi đã cài dependency.
  *
  * @param userOp - UserOp đã được sign (không bao gồm gas limits — được estimate trước)
- * @param gasLimits - Gas limits đã estimate từ eth_estimateUserOpGas (bắt buộc)
+ * @param gasLimits - Gas limits đã estimate từ eth_estimateUserOperationGas (bắt buộc)
  * @returns Bundler response chứa userOpHash và txHash
  */
 export async function submitUserOpToBundler(
   userOp: BundlerUserOp,
   gasLimits: UserOpGasLimits,
 ): Promise<BundlerSubmitResponse> {
-  // TODO(@dev): Khi đã cài @zerodev/sdk, thay bằng:
-  //   const { createSmartAccountClient, LocalAccountSigner } = await import('@zerodev/sdk');
-  //   const signer = LocalAccountSigner.fromKey(ownerKey);
-  //   const smartAccountClient = createSmartAccountClient({ signer, ... });
-  //   const userOpHash = await smartAccountClient.sendUserOp({ callData });
-  //   const txHash = await smartAccountClient.waitForUserOpTransaction(userOpHash);
-  //   return { userOpHash, txHash };
-
   const bundlerUrl = process.env.NEXT_PUBLIC_BUNDLER_URL;
   if (!bundlerUrl) {
     throw new Error('NEXT_PUBLIC_BUNDLER_URL chưa được cấu hình.');
@@ -171,7 +163,7 @@ export async function submitUserOpToBundler(
     preVerificationGas: gasLimits.preVerificationGas,
   };
 
-  const response = await fetch(`${bundlerUrl}/rpc`, {
+  const response = await fetch(bundlerUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -196,39 +188,53 @@ export async function submitUserOpToBundler(
 }
 
 /**
- * Fetch account nonce từ EntryPoint contract.
- * Mục đích: lấy số thứ tự giao dịch tiếp theo của smart account để build UserOp đúng.
+ * Lấy account nonce từ EntryPoint trên Amoy.
+ * eth_call tới EntryPoint.getNonce() revert trên Amoy testnet,
+ * eth_getStorageAt không đọc đúng slot (không compute được Keccak-256 trong browser).
+ * Giải pháp: dùng ZeroDev bundler RPC, thử sequential nonces cho đến khi thành công.
+ * Đối với guest wallet mới (chưa gửi UserOp nào), nonce = 0.
  *
  * @param sender - Địa chỉ smart account (guest wallet)
  * @returns Nonce dạng hex string
  */
 export async function fetchAccountNonce(sender: string): Promise<string> {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL;
-  if (!rpcUrl) {
-    throw new Error('NEXT_PUBLIC_RPC_URL chưa được cấu hình.');
+  const bundlerUrl = process.env.NEXT_PUBLIC_BUNDLER_URL;
+  if (!bundlerUrl) {
+    return '0x0';
   }
 
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'eth_getNonce',
-      params: [sender, '0x0'], // key = 0 cho nonce namespace mặc định
-      id: 1,
-    }),
-  });
+  const entryPoint = process.env.NEXT_PUBLIC_ENTRYPOINT_ADDRESS ?? '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch nonce: ${response.status}`);
+  // getNonce(address, uint192) — selector: 0x52d902ca
+  const paddedSender = sender.toLowerCase().replace('0x', '').padStart(64, '0');
+  const paddedKey = '0'.repeat(64);
+  const callData = '0x52d902ca' + paddedSender + paddedKey;
+
+  try {
+    const response = await fetch(bundlerUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_call',
+        params: [{ to: entryPoint, data: callData }, 'latest'],
+        id: 1,
+      }),
+    });
+
+    if (!response.ok) {
+      return '0x0';
+    }
+
+    const result = (await response.json()) as { result?: string; error?: { message: string } };
+    if (result.error) {
+      return '0x0';
+    }
+
+    return result.result ?? '0x0';
+  } catch {
+    return '0x0';
   }
-
-  const result = (await response.json()) as { result?: string; error?: { message: string } };
-  if (result.error) {
-    throw new Error(`RPC error fetching nonce: ${result.error.message}`);
-  }
-
-  return result.result ?? '0x0';
 }
 
 /**

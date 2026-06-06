@@ -19,6 +19,10 @@ export type GuestWalletSession = {
   renewalCount: number;
   claimedByUserId: string | null;
   serverSalt: string;
+  /** Encrypted owner private key (AES-256-GCM với SMART_ACCOUNT_ENCRYPTION_KEY).
+   * Được mã hóa từ raw owner key sau khi giải mã layer PBKDF2 từ FE.
+   * Dùng cho backend relay donation (Cách 2). */
+  smartAccountOwnerEncryptedPrivateKey: string | null;
   hasPendingDonation: boolean;
   pendingAlertSentAt: Date | null;
   expiresAt: Date;
@@ -59,6 +63,7 @@ const guestWalletSessionSchema = new Schema<GuestWalletSession>(
       }
     },
     serverSalt: { type: String, required: true },
+    smartAccountOwnerEncryptedPrivateKey: { type: String, default: null },
     hasPendingDonation: { type: Boolean, required: true, default: false },
     pendingAlertSentAt: { type: Date, default: null },
     expiresAt: { type: Date, required: true },

@@ -56,7 +56,15 @@ export type ApplicationErrorCode =
   | 'BUNDLER_INVALID_RESPONSE'
   | 'BUNDLER_RPC_ERROR'
   | 'GUEST_CLAIM_ALREADY_USED_VALIDATION'
-  | 'INVALID_SESSION_TOKEN';
+  | 'INVALID_SESSION_TOKEN'
+  | 'RELAY_NOT_AVAILABLE'
+  | 'AMOUNT_TOO_LARGE'
+  | 'ENCRYPTION_FAILED'
+  | 'DONATION_QUOTA_EXCEEDED'
+  | 'TOTAL_AMOUNT_EXCEEDED'
+  | 'PENDING_DONATION_EXISTS'
+  | 'DECRYPTION_ERROR'
+  | 'TRANSACTION_FAILED';
 
 /**
  * Hàm lớp lỗi nghiệp vụ dùng chung.
@@ -74,4 +82,3 @@ export class ApplicationError extends Error {
     this.errorCode = errorCode;
   }
 }
-

@@ -50,6 +50,7 @@ function makeMockContext(overrides: Record<string, unknown> = {}) {
     restoreGuestSession: vi.fn(),
     refreshGuestSession: vi.fn(),
     executeDonation: vi.fn(),
+    executeRelayDonation: vi.fn(),
     dismissClaimPrompt: mockDismissClaimPrompt,
     claimGuestWallet: vi.fn(),
     clearGuestWalletData: vi.fn(),

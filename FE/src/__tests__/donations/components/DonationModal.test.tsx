@@ -122,6 +122,7 @@ function mockGuestWallet(initOverrides = {}, donationOverrides = {}) {
     initState: makeInitState(initOverrides),
     donationState: makeDonationState(donationOverrides),
     executeDonation: vi.fn().mockResolvedValue(true),
+    executeRelayDonation: vi.fn().mockResolvedValue(true),
     bootstrapGuestWallet: vi.fn(),
     restoreGuestSession: vi.fn(),
     refreshGuestSession: vi.fn(),

@@ -22,6 +22,7 @@ import {
   createGuestSession,
   getGuestSessionStatus,
   refreshGuestSession as refreshGuestSessionApi,
+  getGuestServerSalt,
 } from '../utils/guestApiClient';
 import { getDonationErrorMessage } from '../constants/guestErrorUtils';
 import {
@@ -189,9 +190,10 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
       // Lấy token từ sessionStorage trước khi gọi API
       const sessionTokenData = loadGuestSessionToken();
       if (!sessionTokenData?.token) {
-        // Token không tồn tại (hết hạn hoặc bị mất) — fallback về bootstrap thay vì throw.
-        // localStorage vẫn có wallet data nhưng token đã hết hạn → tạo session mới.
-        updateInitState({ initStatus: 'BOOTSTRAPPING_NEW' });
+        // Token không tồn tại (hết hạn hoặc bị mất) — tạo session mới với ví đang có.
+        // BE sẽ tạo session mới và encrypt owner key mới (dùng cùng wallet address).
+        // LocalStorage dữ liệu ví cũ sẽ được ghi đè bởi bootstrapNewWallet.
+        await bootstrapNewWallet();
         return;
       }
 
@@ -208,7 +210,8 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
         if (status.status === 'EXPIRED') {
           clearGuestWallet();
           clearGuestSessionToken();
-          updateInitState({ initStatus: 'BOOTSTRAPPING_NEW' });
+          // Session hết hạn trên BE — tạo ví mới để user có thể donate tiếp.
+          await bootstrapNewWallet();
           return;
         }
 
@@ -279,19 +282,24 @@ export function useGuestSessionManager(): UseGuestSessionManagerReturn {
       const { generateDeviceFingerprint } = await import('../utils/deviceFingerprint');
       const fingerprintHash = await generateDeviceFingerprint();
 
-      // Tạo session trên server
-      const sessionResponse = await createGuestSession({
-        walletAddress,
-        deviceFingerprintHash: fingerprintHash,
-      });
+      // Bước 1: Lấy serverSalt từ BE để encrypt owner key
+      // Chia 2 bước để BE không bao giờ thấy raw private key
+      const { serverSalt } = await getGuestServerSalt(walletAddress, fingerprintHash);
 
-      // Mã hóa owner key (dynamic import để giảm bundle size ban đầu)
+      // Bước 2: Encrypt owner key bằng PBKDF2 với serverSalt
       const { encryptOwnerKey } = await import('../utils/guestWalletCrypto');
       const { encryptedOwnerKey, clientSalt, iv } = await encryptOwnerKey(
         ownerKey,
         fingerprintHash,
-        sessionResponse.serverSalt,
+        serverSalt
       );
+
+      // Bước 3: Tạo session với encrypted owner key
+      const sessionResponse = await createGuestSession({
+        walletAddress,
+        deviceFingerprintHash: fingerprintHash,
+        encryptedOwnerKey: { encryptedOwnerKey, clientSalt, iv }
+      });
 
       // Lưu encrypted key và metadata vào localStorage, token vào sessionStorage
       const storageData = {

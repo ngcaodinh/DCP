@@ -117,6 +117,10 @@ type LogMetadata = {
   attempt?: number;
   maxAttempts?: number;
   delayMs?: number;
+  mintTxHash?: string;
+  userOpHash?: string;
+  sender?: string;
+  donationTxHash?: string;
 };
 
 /**

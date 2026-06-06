@@ -196,13 +196,12 @@ function normalizeUserOpForApi(
 }
 
 /**
- * Hàm build base URL cho Paymaster API endpoint.
- * Chuyển từ /rpc suffix sang /paymaster hoặc /token-paymaster.
+ * Hàm build Paymaster API URL cho ZeroDev v3.
+ * ZeroDev v3 dùng cùng RPC URL pattern: https://rpc.zerodev.app/api/v3/{projectId}/chain/{chainId}
+ * Paymaster endpoint: https://rpc.zerodev.app/api/v3/{projectId}/paymaster
  */
-function buildPaymasterBaseUrl(config: ReturnType<typeof getZeroDevConfig>): string {
-  return config.paymasterUrl.includes('/rpc')
-    ? config.paymasterUrl.replace('/rpc', '/paymaster')
-    : config.paymasterUrl;
+function buildPaymasterEndpoint(config: ReturnType<typeof getZeroDevConfig>, suffix: string): string {
+  return `https://rpc.zerodev.app/api/v3/${config.projectId}${suffix}`;
 }
 
 /**
@@ -213,8 +212,7 @@ async function callFreePaymaster(
   userOp: SponsorPaymasterRequest['unsignedUserOp']
 ): Promise<{ paymasterAndData: string; userOpHash: string }> {
   const config = getZeroDevConfig();
-  const baseUrl = buildPaymasterBaseUrl(config);
-  const endpoint = `${baseUrl}/v3/${config.projectId}/paymaster`;
+  const endpoint = buildPaymasterEndpoint(config, '/paymaster');
 
   const normalizedUserOp = normalizeUserOpForApi(userOp);
 
@@ -280,8 +278,7 @@ async function callTokenPaymaster(
   userOp: SponsorPaymasterRequest['unsignedUserOp']
 ): Promise<{ paymasterAndData: string; userOpHash: string }> {
   const config = getZeroDevConfig();
-  const baseUrl = buildPaymasterBaseUrl(config);
-  const endpoint = `${baseUrl}/v3/${config.projectId}/token-paymaster`;
+  const endpoint = buildPaymasterEndpoint(config, '/token-paymaster');
 
   const normalizedUserOp = normalizeUserOpForApi(userOp);
   const tokenAmount = String(TOKEN_PAYMASTER_GAS_FEE_TOKEN * 1e18);
@@ -503,8 +500,7 @@ export async function sponsorGuestDonation(
       const reservedSession = await reserveDonationSlot(
         sessionId,
         unsignedUserOp.sender.toLowerCase(),
-        maxAllowedCurrentTotal,
-        mongoSession
+        maxAllowedCurrentTotal
       );
       if (!reservedSession) {
         throw new ApplicationError(

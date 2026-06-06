@@ -184,6 +184,7 @@ function createMockActiveSession(overrides: Partial<GuestWalletSession> = {}): G
     renewalCount: 0,
     claimedByUserId: null,
     serverSalt: 'test-salt',
+    smartAccountOwnerEncryptedPrivateKey: null,
     hasPendingDonation: false,
     pendingAlertSentAt: null,
     expiresAt: new Date(now + 3600 * 1000),

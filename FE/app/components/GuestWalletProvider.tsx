@@ -44,7 +44,10 @@ export interface GuestWalletContextValue {
   restoreGuestSession: () => Promise<void>;
   /** Refresh session token — kéo dài expiry mà không cần tạo lại session */
   refreshGuestSession: () => Promise<void>;
+  /** Luồng EIP-4337: FE decrypt key → sign → Bundler (giữ lại fallback) */
   executeDonation: (projectId: string, amount: number) => Promise<boolean>;
+  /** Luồng Backend Relay: BE tự build tx và gửi — user chỉ click */
+  executeRelayDonation: (projectId: string, amount: number) => Promise<boolean>;
   dismissClaimPrompt: () => void;
   claimGuestWallet: (authToken: string) => Promise<boolean>;
   clearGuestWalletData: () => void;
@@ -95,6 +98,7 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
   const {
     donationState,
     executeDonation: opsExecuteDonation,
+    executeRelayDonation: opsExecuteRelayDonation,
     claimGuestWallet: opsClaimGuestWallet,
     clearDonationState,
     clearOwnerKeyCache,
@@ -129,6 +133,13 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
     [opsExecuteDonation, initState],
   );
 
+  const wrappedExecuteRelayDonation = useCallback(
+    async (projectId: string, amount: number): Promise<boolean> => {
+      return await opsExecuteRelayDonation(projectId, amount, initState);
+    },
+    [opsExecuteRelayDonation, initState],
+  );
+
   const wrappedClaimGuestWallet = useCallback(
     async (authToken: string): Promise<boolean> => {
       const result = await opsClaimGuestWallet(authToken, initState);
@@ -157,6 +168,7 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
       restoreGuestSession,
       refreshGuestSession,
       executeDonation: wrappedExecuteDonation,
+      executeRelayDonation: wrappedExecuteRelayDonation,
       dismissClaimPrompt,
       claimGuestWallet: wrappedClaimGuestWallet,
       clearGuestWalletData: wrappedClearGuestWalletData,
@@ -168,6 +180,7 @@ export function GuestWalletProvider({ children }: GuestWalletProviderProps) {
     restoreGuestSession,
     refreshGuestSession,
     wrappedExecuteDonation,
+    wrappedExecuteRelayDonation,
     dismissClaimPrompt,
     wrappedClaimGuestWallet,
     wrappedClearGuestWalletData,

@@ -12,7 +12,9 @@ import {
   prepareGuestClaim,
   executeGuestClaim,
   requestPaymasterSponsorship,
+  bindGuestEncryptedKey,
 } from '../utils/guestApiClient';
+import { relayGuestDonation, RelayApiError } from '../utils/guestRelayApiClient';
 import { getDonationErrorMessage } from '../constants/guestErrorUtils';
 import { GUEST_DONATION_ERROR_MESSAGES } from '../constants/guestDonationErrors';
 import {
@@ -78,6 +80,9 @@ export interface GuestDonationState {
 export interface UseGuestWalletOpsReturn {
   donationState: GuestDonationState;
   executeDonation: (projectId: string, amount: number, initState: GuestWalletInitState) => Promise<boolean>;
+  /** Thực hiện donation qua backend relay — user chỉ click, không cần sign.
+   * Backend tự build transaction và gửi lên chain. */
+  executeRelayDonation: (projectId: string, amount: number, initState: GuestWalletInitState) => Promise<boolean>;
   claimGuestWallet: (authToken: string, initState: GuestWalletInitState) => Promise<boolean>;
   getCachedOwnerKey: () => string | null;
   setOwnerKeyCache: (key: string) => void;
@@ -214,6 +219,101 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
   // ============================================================
   // EXECUTE DONATION
   // ============================================================
+
+  /**
+   * Thực hiện donation qua backend relay.
+   * Backend tự build transaction (approve + donate) và gửi lên chain.
+   * User chỉ click — không cần sign, không cần popup.
+   *
+   * Luồng Backend Relay:
+   * 1. Gửi request lên BE với projectId, amount, sessionId
+   * 2. BE đọc encrypted owner key từ DB
+   * 3. BE giải mã → tạo kernel client → build tx → send
+   * 4. BE trả về transactionHash
+   */
+  const executeRelayDonation = useCallback(
+    async (projectId: string, amount: number, initState: GuestWalletInitState): Promise<boolean> => {
+      if (!initState.walletAddress || !initState.sessionId) {
+        updateDonationState({
+          donationStatus: 'FAILED',
+          donationError: 'Guest wallet chưa được khởi tạo.',
+        });
+        return false;
+      }
+
+      if (!isValidWalletAddress(initState.walletAddress)) {
+        updateDonationState({
+          donationStatus: 'FAILED',
+          donationError: 'Địa chỉ ví không hợp lệ. Vui lòng khởi tạo ví mới.',
+        });
+        return false;
+      }
+
+      if (initState.remainingDonations <= 0) {
+        updateDonationState({
+          donationStatus: 'FAILED',
+          donationError: GUEST_DONATION_ERROR_MESSAGES.GUEST_DONATION_QUOTA_EXCEEDED!,
+        });
+        return false;
+      }
+
+      if (amount < MIN_AMOUNT_PER_DONATION || amount > MAX_AMOUNT_PER_DONATION) {
+        updateDonationState({
+          donationStatus: 'FAILED',
+          donationError: `Số token quyên góp phải từ ${MIN_AMOUNT_PER_DONATION} đến ${MAX_AMOUNT_PER_DONATION.toLocaleString()}.`,
+        });
+        return false;
+      }
+
+      if (donationInProgressRef.current) {
+        return false;
+      }
+      donationInProgressRef.current = true;
+
+      updateDonationState({ donationStatus: 'SUBMITTING_BUNDLER', donationError: null });
+
+      try {
+        const sessionToken = getSessionToken(initState);
+
+        const result = await relayGuestDonation(
+          {
+            projectId,
+            amount,
+            sessionId: initState.sessionId,
+            sender: initState.walletAddress,
+          },
+          sessionToken
+        );
+
+        updateDonationState({
+          donationStatus: 'SUCCESS',
+          donationError: null,
+          lastUserOpHash: null,
+          lastTxHash: result.transactionHash,
+        });
+        return true;
+      } catch (error) {
+        console.error('[GuestWalletProvider] Lỗi executeRelayDonation.');
+
+        let errorMessage = 'Lỗi kết nối không xác định.';
+        if (error instanceof RelayApiError) {
+          errorMessage = error.message;
+        } else if (error instanceof Error) {
+          errorMessage = error.message;
+        }
+
+        updateDonationState({
+          donationStatus: 'FAILED',
+          donationError: errorMessage,
+        });
+        return false;
+      } finally {
+        donationInProgressRef.current = false;
+        await queryClient.invalidateQueries({ queryKey: ['guest-session-status', initState.sessionId] });
+      }
+    },
+    [updateDonationState, queryClient]
+  );
 
   /**
    * Thực hiện donation guest.
@@ -481,6 +581,7 @@ export function useGuestWalletOps(): UseGuestWalletOpsReturn {
   return {
     donationState,
     executeDonation,
+    executeRelayDonation,
     claimGuestWallet,
     getCachedOwnerKey,
     setOwnerKeyCache,

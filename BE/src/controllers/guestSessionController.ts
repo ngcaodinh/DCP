@@ -8,7 +8,8 @@ import { ethers } from 'ethers';
 import {
   createNewGuestSession,
   refreshExistingSession,
-  getSessionStatus
+  getSessionStatus,
+  bindGuestEncryptedOwnerKey
 } from '../services/guestSessionService';
 import { sponsorGuestDonation } from '../services/guestPaymasterService';
 import {
@@ -23,6 +24,8 @@ import { getLogger } from '../config/logger';
 import { verifyGuestSessionToken } from '../config/guestJsonWebToken';
 import { findGuestWalletSessionById } from '../repositories/guestWalletSessionRepository';
 import { ApplicationError } from '../utils/applicationError';
+import { generateServerSaltForGuest } from '../services/guestSessionService';
+import crypto from 'crypto';
 
 const logger = getLogger();
 
@@ -93,6 +96,16 @@ function isValidFingerprintHash(hash: string): boolean {
 }
 
 /**
+ * Dữ liệu encrypted owner key từ FE (layer PBKDF2).
+ * Khớp với output của encryptOwnerKey() trong guestWalletCrypto.ts (FE).
+ */
+interface FeEncryptedOwnerKey {
+  encryptedOwnerKey: string;
+  clientSalt: string;
+  iv: string;
+}
+
+/**
  * Hàm xử lý tạo guest session mới.
  * Endpoint: POST /api/guest/session
  */
@@ -100,10 +113,13 @@ export async function handleCreateGuestSession(
   request: Request,
   response: Response
 ): Promise<void> {
-  const { walletAddress, deviceFingerprintHash } = request.body as {
+  const body = request.body as {
     walletAddress?: string;
     deviceFingerprintHash?: string;
+    encryptedOwnerKey?: FeEncryptedOwnerKey;
   };
+
+  const { walletAddress, deviceFingerprintHash, encryptedOwnerKey } = body;
 
   if (!walletAddress || !isValidEthereumAddress(walletAddress)) {
     sendErrorResponse(
@@ -132,7 +148,8 @@ export async function handleCreateGuestSession(
       walletAddress,
       deviceFingerprintHash,
       ipAddress,
-      userAgent
+      userAgent,
+      encryptedOwnerKey
     );
 
     logger.info('Guest session created via API.', {
@@ -604,5 +621,128 @@ export async function handlePartialGuestClaim(
     });
 
     handleApplicationError(response, error, 'Không thể thực hiện partial claim. Vui lòng thử lại.');
+  }
+}
+
+/**
+ * Hàm xử lý lấy server salt cho việc mã hóa owner key trước.
+ * Endpoint: GET /api/guest/salt
+ * Chain: metadata → layer1 → session-rate-limit → handler
+ *
+ * Quy trình:
+ * 1. Validate walletAddress và fingerprint hash
+ * 2. Check fingerprint limit và IP burst
+ * 3. Generate server salt
+ * 4. Return server salt để FE encrypt owner key
+ *
+ * Lưu ý: Không tạo session — FE gọi POST /session/bind-key sau khi encrypt.
+ *         Chia 2 bước để BE không bao giờ biết raw private key.
+ */
+export async function handleGetGuestServerSalt(
+  request: Request,
+  response: Response
+): Promise<void> {
+  const query = request.query as {
+    walletAddress?: string;
+    deviceFingerprintHash?: string;
+  };
+
+  const { walletAddress, deviceFingerprintHash } = query;
+
+  if (!walletAddress || !isValidEthereumAddress(walletAddress)) {
+    sendErrorResponse(
+      response,
+      400,
+      'Địa chỉ ví không hợp lệ. Vui lòng cung cấp địa chỉ Ethereum hợp lệ.',
+      'INVALID_WALLET_ADDRESS'
+    );
+    return;
+  }
+
+  if (!deviceFingerprintHash || !isValidFingerprintHash(deviceFingerprintHash)) {
+    sendErrorResponse(
+      response,
+      400,
+      'Device fingerprint không hợp lệ. Vui lòng kiểm tra trình duyệt của bạn.',
+      'INVALID_FINGERPRINT'
+    );
+    return;
+  }
+
+  const { ipAddress, userAgent } = extractRequestMetadata(request);
+
+  try {
+    const serverSalt = await generateServerSaltForGuest(
+      walletAddress,
+      deviceFingerprintHash,
+      ipAddress,
+      userAgent
+    );
+
+    sendSuccessResponse(response, 200, 'Lấy server salt thành công.', { serverSalt });
+  } catch (error: unknown) {
+    handleApplicationError(response, error, 'Không thể lấy server salt. Vui lòng thử lại.');
+  }
+}
+
+/**
+ * Hàm xử lý bind encrypted owner key vào session sau khi đã encrypt.
+ * Endpoint: POST /api/guest/session/bind-key
+ * Chain: metadata → layer1 → auth → handler
+ *
+ * Quy trình:
+ * 1. Validate session (từ middleware)
+ * 2. Nhận encryptedOwnerKey từ body
+ * 3. Giải mã PBKDF2 layer → mã hóa BE layer → lưu DB
+ */
+export async function handleBindGuestEncryptedKey(
+  request: GuestSessionRequest,
+  response: Response
+): Promise<void> {
+  const guestSession = request.guestSession;
+  if (!guestSession) {
+    sendErrorResponse(response, 401, 'Vui lòng cung cấp guest session token hợp lệ.', 'GUEST_SESSION_REQUIRED');
+    return;
+  }
+
+  const body = request.body as {
+    encryptedOwnerKey?: FeEncryptedOwnerKey;
+  };
+
+  if (!body.encryptedOwnerKey) {
+    sendErrorResponse(response, 400, 'encryptedOwnerKey là bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  const { encryptedOwnerKey } = body;
+
+  if (
+    !encryptedOwnerKey.encryptedOwnerKey ||
+    !encryptedOwnerKey.clientSalt ||
+    !encryptedOwnerKey.iv
+  ) {
+    sendErrorResponse(response, 400, 'encryptedOwnerKey thiếu các trường bắt buộc.', 'INVALID_REQUEST');
+    return;
+  }
+
+  try {
+    await bindGuestEncryptedOwnerKey(
+      guestSession.sessionId,
+      encryptedOwnerKey,
+      guestSession.deviceFingerprintHash,
+      guestSession.walletAddress
+    );
+
+    logger.info('Guest encrypted owner key bound to session.', {
+      sessionId: guestSession.sessionId
+    });
+
+    sendSuccessResponse(response, 200, 'Bind encrypted key thành công.', { success: true });
+  } catch (error: unknown) {
+    logger.warn('Guest encrypted key bind failed.', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      sessionId: guestSession.sessionId
+    });
+    handleApplicationError(response, error, 'Không thể bind encrypted key. Vui lòng thử lại.');
   }
 }

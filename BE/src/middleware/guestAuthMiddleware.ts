@@ -30,6 +30,8 @@ export type GuestSessionRequest = Request & {
     totalDonatedAmount: number;
     status: string;
     expiresAt: Date;
+    /** Dùng để giải mã owner key trong bind-key endpoint */
+    deviceFingerprintHash: string;
   };
 };
 
@@ -107,7 +109,8 @@ export function createGuestAuthMiddleware() {
       donationCount: session.donationCount,
       totalDonatedAmount: session.totalDonatedAmount,
       status: session.status,
-      expiresAt: session.expiresAt
+      expiresAt: session.expiresAt,
+      deviceFingerprintHash: session.deviceFingerprintHash
     };
 
     next();

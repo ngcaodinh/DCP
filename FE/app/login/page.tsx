@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { persistAuthSession } from '../utils/authSession';
 
 declare global {
@@ -98,6 +98,35 @@ function resolvePostLoginRedirectPath(userRoleValue: string | undefined | null):
   return '/';
 }
 
+/**
+ * Hàm lấy đường dẫn điều hướng sau đăng nhập từ query param.
+ * Mục đích: chỉ thay đổi đích redirect mà không can thiệp logic đăng nhập hiện có.
+ * @param returnToValue - Giá trị returnTo đọc từ URL hiện tại
+ * @returns Đường dẫn nội bộ hợp lệ hoặc null nếu không an toàn
+ */
+function resolveSafeReturnToPath(returnToValue: string | null): string | null {
+  if (!returnToValue) {
+    return null;
+  }
+
+  if (!returnToValue.startsWith('/') || returnToValue.startsWith('//')) {
+    return null;
+  }
+
+  if (returnToValue.includes('://')) {
+    return null;
+  }
+
+  const normalizedReturnToPath = returnToValue.split('?')[0]?.toLowerCase() || '/';
+
+  // Ghi chú logic phức tạp: chặn quay lại auth page để tránh vòng lặp điều hướng sau đăng nhập thành công.
+  if (normalizedReturnToPath === '/login' || normalizedReturnToPath === '/register') {
+    return null;
+  }
+
+  return returnToValue;
+}
+
 export default function LoginPage() {
   const [isInfoCollapsed, setIsInfoCollapsed] = useState(false);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
@@ -109,6 +138,7 @@ export default function LoginPage() {
 
   const backendBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   /**
    * Hàm lấy đối tượng Google Accounts ID từ GSI script.
@@ -244,7 +274,8 @@ export default function LoginPage() {
         setIsSuccessVisible(true);
 
         // Ghi chú logic phức tạp: điều hướng theo role để mỗi nhóm người dùng vào đúng màn hình nghiệp vụ ngay sau đăng nhập.
-        const redirectPath = resolvePostLoginRedirectPath(userData?.role);
+        const safeReturnToPath = resolveSafeReturnToPath(searchParams.get('returnTo'));
+        const redirectPath = safeReturnToPath || resolvePostLoginRedirectPath(userData?.role);
         router.push(redirectPath);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Không thể đăng nhập, vui lòng thử lại.';
@@ -253,7 +284,7 @@ export default function LoginPage() {
         // Ghi chú logic phức tạp: giữ khối finally để đảm bảo luồng xử lý luôn khép kín sau request.
       }
     },
-    [backendBaseUrl, router]
+    [backendBaseUrl, router, searchParams]
   );
 
   /**

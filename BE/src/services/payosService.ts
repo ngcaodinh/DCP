@@ -772,7 +772,7 @@ function toStableChecksumValue(value: unknown): string {
  */
 function buildWebhookSignTextCandidates(data: Record<string, unknown>): string[] {
   const sortedEntries = Object.entries(data)
-    .filter(([key, value]) => key !== 'signature' && key !== 'checksum' && value !== undefined)
+    .filter(([key, value]) => key !== 'signature' && value !== undefined)
     .sort(([firstKey], [secondKey]) => {
       if (firstKey < secondKey) {
         return -1;

@@ -23,6 +23,7 @@ export type UpdateableGuestWalletSession = Partial<
     | 'pendingAlertSentAt'
     | 'expiresAt'
     | 'serverSalt'
+    | 'smartAccountOwnerEncryptedPrivateKey'
   >
 > & { updatedAt?: Date };
 
@@ -238,8 +239,7 @@ export async function incrementSessionDonationCounters(
 export async function reserveDonationSlot(
   sessionId: string,
   walletAddress: string,
-  maxStoredAmount: number,
-  mongoSession: mongoose.ClientSession
+  maxStoredAmount: number
 ): Promise<GuestWalletSession | null> {
   return GuestWalletSessionModel.findOneAndUpdate(
     {
@@ -257,7 +257,7 @@ export async function reserveDonationSlot(
         updatedAt: new Date()
       }
     },
-    { returnDocument: 'after', session: mongoSession }
+    { returnDocument: 'after' }
   )
     .lean<GuestWalletSession>()
     .exec();

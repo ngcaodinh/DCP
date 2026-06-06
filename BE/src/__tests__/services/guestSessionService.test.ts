@@ -69,6 +69,7 @@ const mockSessionData = {
   renewalCount: 0,
   claimedByUserId: null,
   serverSalt: '11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff',
+  smartAccountOwnerEncryptedPrivateKey: null as string | null,
   hasPendingDonation: false,
   pendingAlertSentAt: null,
   expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),

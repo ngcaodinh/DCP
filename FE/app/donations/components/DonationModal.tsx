@@ -1,10 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ApiErrorResponse, buildApiUrl, fetchApi } from '../../utils/apiClient';
 import { readAuthSession } from '../../utils/authSession';
 import { useGuestWallet } from '../../components/GuestWalletProvider';
+import {
+  initPayosDonation,
+  getPayosDonationStatus,
+  type PayosDonationStatus,
+} from '../../utils/guestPayosClient';
 import {
   executeOneClickDonationRequest,
   recordDonationByTransactionHash,
@@ -14,15 +19,12 @@ import {
   formatTransactionHash,
   mapDonationErrorMessage,
   mapTransactionStatusToVietnamese,
-  mapGuestTransactionStatusToVietnamese,
   isCampaignBeforeDeadline,
-  resolveGuestDisplayStatusRaw,
 } from './DonationModal.helpers';
 import type {
   DonationCampaignItem,
   DonationHistoryItem,
   TransactionStatus,
-  GuestTransactionStatus,
   DonationModalProps,
 } from './DonationModal.types';
 import {
@@ -49,6 +51,12 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   const [isSuccessNoticeVisible, setIsSuccessNoticeVisible] = useState(false);
   const [historyList, setHistoryList] = useState<DonationHistoryItem[]>([]);
 
+  // PayOS donation state
+  const [payosOrderCode, setPayosOrderCode] = useState<string | null>(null);
+  const [payosPaymentUrl, setPayosPaymentUrl] = useState<string | null>(null);
+  const [payosStatus, setPayosStatus] = useState<PayosDonationStatus | null>(null);
+  const [isAwaitingPayment, setIsAwaitingPayment] = useState(false);
+
   // ============================================================
   // AUTH USER
   // ============================================================
@@ -60,22 +68,10 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   // ============================================================
   const {
     initState,
-    donationState,
-    executeDonation,
     bootstrapGuestWallet,
   } = useGuestWallet();
 
   const isGuestReady = initState.initStatus === 'READY';
-  const isGuestDonationInProgress =
-    donationState.donationStatus !== 'IDLE' &&
-    donationState.donationStatus !== 'SUCCESS' &&
-    donationState.donationStatus !== 'FAILED';
-  const guestDonationSuccess = donationState.donationStatus === 'SUCCESS';
-
-  // Map internal status → UI display status — dùng useMemo vì đây là derived value từ state
-  const guestDisplayStatusValue = useMemo<GuestTransactionStatus>(() => {
-    return resolveGuestDisplayStatusRaw(donationState.donationStatus);
-  }, [donationState.donationStatus]);
 
   // ============================================================
   // LOAD HISTORY
@@ -97,28 +93,6 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   useEffect(() => {
     void loadDonationHistory();
   }, [loadDonationHistory]);
-
-  // ============================================================
-  // [BLOCKER FIX] Guest donation success → trigger parent callback + reload history
-  // ============================================================
-  const handleGuestDonationSuccess = useCallback(async () => {
-    // Chạy song song: reload history + notify parent
-    // Dùng Promise.allSettled để cả hai đều chạy độc lập, không block lẫn nhau
-    await Promise.allSettled([
-      loadDonationHistory(),
-      onDonationSuccess(campaignItem.projectId).catch(err => {
-        console.warn('[DonationModal] onDonationSuccess thất bại:', err);
-      }),
-    ]);
-  }, [loadDonationHistory, onDonationSuccess, campaignItem.projectId]);
-
-  // Lắng nghe guestDonationSuccess thay đổi → trigger hậu xử lý
-  useEffect(() => {
-    if (guestDonationSuccess) {
-      void handleGuestDonationSuccess();
-    }
-  }, [guestDonationSuccess, handleGuestDonationSuccess]);
-
   // ============================================================
   // AUTO-HIDE SUCCESS NOTICE
   // ============================================================
@@ -132,6 +106,45 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
 
     return () => window.clearTimeout(timerId);
   }, [isSuccessNoticeVisible, successNoticeMessage]);
+
+  // ============================================================
+  // PAYOS POLLING — theo dõi trạng thái thanh toán PayOS
+  // ============================================================
+  useEffect(() => {
+    if (!isAwaitingPayment || !payosOrderCode || !initState.guestSessionToken) return;
+
+    const pollIntervalId = window.setInterval(async () => {
+      try {
+        const status = await getPayosDonationStatus(payosOrderCode, initState.guestSessionToken!);
+        setPayosStatus(status.status);
+
+        if (status.status === 'COMPLETED') {
+          window.clearInterval(pollIntervalId);
+          setIsAwaitingPayment(false);
+          setStatusMessage('Quyên góp thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
+          setIsSuccessNoticeVisible(true);
+          setSuccessNoticeMessage(
+            `Quyên góp thành công! Tx: ${status.relayTxHash ? formatTransactionHash(status.relayTxHash) : 'đang xử lý'}`
+          );
+          setDonationAmountInput('');
+          setPayosOrderCode(null);
+          setPayosPaymentUrl(null);
+          void loadDonationHistory();
+          void onDonationSuccess(campaignItem.projectId);
+        } else if (status.status === 'FAILED') {
+          window.clearInterval(pollIntervalId);
+          setIsAwaitingPayment(false);
+          setStatusMessage(status.errorMessage || 'Thanh toán thất bại. Vui lòng thử lại.');
+          setPayosOrderCode(null);
+          setPayosPaymentUrl(null);
+        }
+      } catch {
+        // Poll lỗi → bỏ qua, tiếp tục poll
+      }
+    }, 3000);
+
+    return () => window.clearInterval(pollIntervalId);
+  }, [isAwaitingPayment, payosOrderCode, initState.guestSessionToken, campaignItem.projectId, onDonationSuccess, loadDonationHistory]);
 
   // ============================================================
   // VALIDATION
@@ -249,10 +262,10 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   };
 
   // ============================================================
-  // GUEST FLOW — SUBMIT
+  // GUEST FLOW — SUBMIT (PayOS flow)
   // ============================================================
   const handleGuestDonationSubmit = async () => {
-    if (isGuestDonationInProgress) return;
+    if (isSubmitting) return;
 
     if (!campaignItem.projectId) {
       setStatusMessage('projectId không hợp lệ.');
@@ -266,25 +279,31 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
     if (pendingDonationAmount === null) return;
     const amount = pendingDonationAmount;
 
-    if (initState.remainingDonations <= 0) {
-      setStatusMessage('Bạn đã đạt giới hạn 3 lần quyên góp cho phiên này.');
+    if (!initState.guestSessionToken) {
+      setStatusMessage('Guest session chưa sẵn sàng. Vui lòng thử lại.');
       return;
     }
 
-    // Đóng confirm modal ngay để hiển thị loading state phía sau
     setIsConfirmModalOpen(false);
     setIsSubmitting(true);
+    setStatusMessage('Đang tạo mã thanh toán QR...');
+
     try {
-      const success = await executeDonation(campaignItem.projectId, amount);
-      // Chỉ xóa input khi donation thực sự thành công — tránh mất dữ liệu khi user bị lỗi
-      if (success) {
-        setDonationAmountInput('');
-      }
+      const payosResult = await initPayosDonation(
+        { projectId: campaignItem.projectId, amount },
+        initState.guestSessionToken
+      );
+      setPayosOrderCode(payosResult.orderCode);
+      setPayosPaymentUrl(payosResult.paymentUrl);
+      setPayosStatus('PENDING_PAYMENT');
+      setIsAwaitingPayment(true);
+      setStatusMessage('Đang chờ thanh toán...');
     } catch (error) {
-      // Error đã được handle bên trong executeDonation (update donationState).
-      // Catch ở đây chỉ để ngăn unhandled rejection.
-      // eslint-disable-next-line no-console
-      console.warn('[DonationModal] executeDonation threw unhandled error:', error);
+      setStatusMessage(
+        error instanceof Error
+          ? error.message
+          : 'Không thể tạo mã thanh toán. Vui lòng thử lại.'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -357,23 +376,25 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   }
 
   return (
-    <GuestReadyView
+      <GuestReadyView
       campaignItem={campaignItem}
       initState={initState}
-      donationState={donationState}
       donationAmountInput={donationAmountInput}
       setDonationAmountInput={setDonationAmountInput}
       isSubmitting={isSubmitting}
       isConfirmModalOpen={isConfirmModalOpen}
       pendingDonationAmount={pendingDonationAmount}
-      isGuestDonationInProgress={isGuestDonationInProgress}
-      guestDonationSuccess={guestDonationSuccess}
-      guestDisplayStatusValue={guestDisplayStatusValue}
       statusMessage={statusMessage}
+      successNoticeMessage={successNoticeMessage}
+      isSuccessNoticeVisible={isSuccessNoticeVisible}
       onOpenConfirmModal={() => handleOpenConfirmModal(MIN_AMOUNT_PER_DONATION, MAX_AMOUNT_PER_DONATION)}
       onCloseConfirmModal={handleCloseConfirmModal}
       onGuestSubmit={handleGuestDonationSubmit}
       onClose={handleBackdropClick}
+      payosOrderCode={payosOrderCode}
+      payosPaymentUrl={payosPaymentUrl}
+      payosStatus={payosStatus}
+      isAwaitingPayment={isAwaitingPayment}
     />
   );
 }
@@ -483,7 +504,7 @@ function AuthenticatedDonationView({
           {historyList.map(item => (
             <div key={item.transactionHash} className="rounded-md border border-[#e5e7eb] p-2 text-sm">
               <div>Giao dịch: {formatTransactionHash(item.transactionHash)}</div>
-              <div>Người quyên góp: {item.isAnonymous ? 'Ẩn danh' : formatWalletAddress(item.donorAddress)}</div>
+              <div>Người quyên góp: {item.isAnonymous ? 'Nhà hảo tâm ẩn danh' : formatWalletAddress(item.donorAddress)}</div>
               <div>Số token: {item.amount.toLocaleString('vi-VN')}</div>
             </div>
           ))}
@@ -604,6 +625,11 @@ interface GuestReadyViewProps {
   onCloseConfirmModal: () => void;
   onGuestSubmit: () => void;
   onClose: () => void;
+  /** PayOS state */
+  payosOrderCode: string | null;
+  payosPaymentUrl: string | null;
+  payosStatus: PayosDonationStatus | null;
+  isAwaitingPayment: boolean;
 }
 
 function GuestReadyView({
@@ -623,16 +649,26 @@ function GuestReadyView({
   onCloseConfirmModal,
   onGuestSubmit,
   onClose,
+  payosOrderCode,
+  payosPaymentUrl,
+  payosStatus,
+  isAwaitingPayment,
 }: GuestReadyViewProps) {
   const displayError = donationState.donationError;
-  // Gộp isSubmitting vào cờ disable để chặn race-condition khi modal đang xử lý
-  const isDonating = isSubmitting || guestDonationSuccess || isGuestDonationInProgress;
-  const guestStatusColor =
-    guestDisplayStatusValue === 'failed'
-      ? 'font-semibold text-red-600'
-      : guestDisplayStatusValue === 'success'
-        ? 'font-semibold text-emerald-600'
-        : '';
+  const isDonating = isSubmitting || guestDonationSuccess || isGuestDonationInProgress || isAwaitingPayment;
+
+  // PayOS QR overlay — hiển thị khi đang chờ thanh toán
+  const showPayosQR = isAwaitingPayment && payosPaymentUrl;
+
+  // Map PayOS status → display text
+  const payosStatusText =
+    payosStatus === 'PENDING_PAYMENT' ? 'Chờ thanh toán' :
+    payosStatus === 'PAYMENT_CONFIRMED' ? 'Đã nhận thanh toán' :
+    payosStatus === 'MINTING' ? 'Đang mint token...' :
+    payosStatus === 'RELAYING' ? 'Đang quyên góp...' :
+    payosStatus === 'COMPLETED' ? 'Hoàn thành' :
+    payosStatus === 'FAILED' ? 'Thất bại' :
+    '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#111827]/60 p-4" onClick={onClose}>
@@ -705,7 +741,7 @@ function GuestReadyView({
             onClick={onOpenConfirmModal}
             className="rounded-md bg-[#0e7c6b] px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isDonating ? guestDisplayStatusValue : 'Quyên góp ngay'}
+            {isAwaitingPayment ? payosStatusText || 'Đang xử lý...' : isDonating ? guestDisplayStatusValue : 'Quyên góp ngay'}
           </button>
           <button
             type="button"
@@ -717,22 +753,47 @@ function GuestReadyView({
           </button>
         </div>
 
-        {/* Processing indicator */}
-        {isGuestDonationInProgress && (
-          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-            Hệ thống đang xử lý, vui lòng chờ trong giây lát...
+        {/* PayOS QR Panel — hiển thị khi đang chờ thanh toán */}
+        {showPayosQR && payosPaymentUrl && (
+          <div className="mt-4 rounded-lg border-2 border-blue-200 bg-blue-50 p-4">
+            <h4 className="mb-2 text-sm font-semibold text-blue-900">Mã QR thanh toán</h4>
+            {payosStatus === 'PENDING_PAYMENT' && (
+              <p className="mb-2 text-xs text-blue-700">
+                Quét mã QR bên dưới bằng ứng dụng ngân hàng để thanh toán.
+              </p>
+            )}
+            {payosStatus !== 'PENDING_PAYMENT' && payosStatus && (
+              <p className="mb-2 text-xs text-blue-700">
+                Trạng thái: <span className="font-medium">{payosStatusText}</span>
+              </p>
+            )}
+            {payosOrderCode && (
+              <p className="mb-2 text-xs text-blue-600">Mã đơn: {payosOrderCode}</p>
+            )}
+            {/* PayOS checkout URL — chuyển hướng trong cùng tab để polling hoạt động */}
+            <a
+              href={payosPaymentUrl}
+              className="mt-2 inline-block rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              Mở trang thanh toán
+            </a>
+            <p className="mt-2 text-xs text-blue-600">
+              Sau khi thanh toán, hệ thống sẽ tự động quyên góp cho bạn.
+            </p>
           </div>
         )}
 
         {/* Status */}
         <p className="mt-3 text-sm text-[#374151]">
-          Trạng thái: <span className={guestStatusColor}>{mapGuestTransactionStatusToVietnamese(guestDisplayStatusValue as Parameters<typeof mapGuestTransactionStatusToVietnamese>[0])}</span>
+          Trạng thái: <span className={guestDisplayStatusValue === 'failed' ? 'font-semibold text-red-600' : guestDisplayStatusValue === 'success' ? 'font-semibold text-emerald-600' : ''}>
+            {isAwaitingPayment && payosStatusText ? payosStatusText : mapGuestTransactionStatusToVietnamese(guestDisplayStatusValue as Parameters<typeof mapGuestTransactionStatusToVietnamese>[0])}
+          </span>
         </p>
         {displayError && <p className="mt-1 text-sm text-red-600">{displayError}</p>}
-        {statusMessage && !displayError && <p className="mt-1 text-sm text-[#374151]">{statusMessage}</p>}
+        {statusMessage && !displayError && !showPayosQR && <p className="mt-1 text-sm text-[#374151]">{statusMessage}</p>}
 
         {/* Quota exceeded */}
-        {initState.remainingDonations <= 0 && (
+        {initState.remainingDonations <= 0 && !isAwaitingPayment && (
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             Bạn đã đạt giới hạn 3 lần quyên góp. Hãy đăng nhập để tiếp tục quyên góp không giới hạn.
           </div>
@@ -747,7 +808,7 @@ function GuestReadyView({
                 Bạn muốn quyên góp <strong>{pendingDonationAmount.toLocaleString('vi-VN')} token</strong> cho dự án này?
               </p>
               <div className="mt-1 rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                Phí gas được tài trợ miễn phí bởi DCP. Bạn còn <strong>{initState.remainingDonations}</strong> lần quyên góp.
+                Thanh toán qua QR PayOS. Sau khi thanh toán, hệ thống tự động quyên góp.
               </div>
               <div className="mt-5 flex justify-end gap-2">
                 {!isDonating && (

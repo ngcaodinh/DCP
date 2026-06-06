@@ -19,12 +19,24 @@ export type GuestWalletSessionStatus = 'ACTIVE' | 'EXPIRED' | 'CLAIMED' | 'PURGE
  * REQUEST / RESPONSE TYPES
  * ============================================================ */
 
+/** Dữ liệu encrypted owner key từ FE (layer PBKDF2).
+ * Khớp với guestWalletCrypto.ts (FE) output và BE interface.
+ */
+export interface FeEncryptedOwnerKey {
+  encryptedOwnerKey: string;
+  clientSalt: string;
+  iv: string;
+}
+
 /**
  * Payload tạo guest session từ frontend.
  */
 export interface CreateGuestSessionRequest {
   walletAddress: string;
   deviceFingerprintHash: string;
+  /** Encrypted owner key (PBKDF2 layer) — gửi lên BE để lưu 2 lớp mã hóa.
+   * Optional để backward compat với FE cũ không gửi field này. */
+  encryptedOwnerKey?: FeEncryptedOwnerKey;
 }
 
 /**
@@ -273,16 +285,14 @@ function unwrap<T>(promise: Promise<ApiSuccessResponse<T>>): Promise<T> {
  * Tạo guest session mới.
  * Endpoint: POST /api/guest/session
  *
- * @param payload - walletAddress (EIP-55) và deviceFingerprintHash (SHA-256 hex)
+ * @param payload - walletAddress (EIP-55), deviceFingerprintHash (SHA-256 hex),
+ *                  và optional encryptedOwnerKey (PBKDF2 layer để BE lưu 2 lớp mã hóa)
  * @returns Thông tin session, JWT token, serverSalt, và donation quota
  * @throws GuestApiError khi validate thất bại hoặc rate limit
  */
 export async function createGuestSession(
   payload: CreateGuestSessionRequest
 ): Promise<CreateGuestSessionResponse> {
-  // #region agent debug log
-  fetch('http://127.0.0.1:7710/ingest/fa15d132-717d-4b5a-8ef1-2fdf5f966e4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'870f73'},body:JSON.stringify({sessionId:'870f73',location:'guestApiClient.ts:createGuestSession',message:'createGuestSession called',data:{walletAddress:payload.walletAddress},timestamp:Date.now(),runId:'debug-run',hypothesisId:'H4'})}).catch(()=>{});
-  // #endregion
   validateWalletAddress(payload.walletAddress);
   validateFingerprintHash(payload.deviceFingerprintHash);
   return unwrap(
@@ -452,14 +462,6 @@ export async function getPendingDonationStatus(
 /**
  * Xóa flag pending donation sau khi đã resume thành công.
  * Endpoint: POST /api/guest/pending-donation/clear
- *
- * @param token - guestSessionToken (Bearer)
- * @throws GuestApiError khi session không hợp lệ
- *
- * @remarks
- * Backend trả 204 No Content khi thành công (không có response body).
- * Dùng buildApiUrl() để đảm bảo consistency với các method khác trong file.
- * Raw fetch được giữ lại vì cần handle 204 No Content đặc biệt (không có JSON body).
  */
 export async function clearPendingDonation(token: string): Promise<void> {
   await fetchApi<void>(
@@ -471,6 +473,68 @@ export async function clearPendingDonation(token: string): Promise<void> {
       }
     },
     { skipBodyValidation: true }
+  );
+}
+
+/**
+ * Lấy server salt để encrypt owner key trước khi tạo session.
+ * Endpoint: GET /api/guest/salt
+ *
+ * @param walletAddress - Địa chỉ ví (EIP-55 checksum)
+ * @param deviceFingerprintHash - SHA-256 hash của device fingerprint
+ * @returns Server salt hex (64 hex chars)
+ * @throws GuestApiError khi vượt giới hạn tạo session
+ *
+ * @remarks
+ * Dùng 2 bước thay vì gửi encrypted key trong session creation:
+ * 1. FE gọi GET /salt để lấy serverSalt
+ * 2. FE encrypt owner key bằng serverSalt
+ * 3. FE gọi POST /session (với encrypted key)
+ * Đảm bảo BE không bao giờ biết raw private key ở bước tạo session.
+ */
+export async function getGuestServerSalt(
+  walletAddress: string,
+  deviceFingerprintHash: string
+): Promise<{ serverSalt: string }> {
+  validateWalletAddress(walletAddress);
+  validateFingerprintHash(deviceFingerprintHash);
+  const params = new URLSearchParams({
+    walletAddress,
+    deviceFingerprintHash
+  });
+  return unwrap(
+    fetchApi<{ serverSalt: string }>(buildApiUrl(`/api/guest/salt?${params.toString()}`), {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
+    })
+  );
+}
+
+/**
+ * Bind encrypted owner key vào session sau khi đã tạo.
+ * Endpoint: POST /api/guest/session/bind-key
+ *
+ * @param encryptedOwnerKey - Dữ liệu encrypted owner key từ PBKDF2 layer
+ * @param token - guestSessionToken (Bearer)
+ * @throws GuestApiError khi session không hợp lệ
+ *
+ * @remarks
+ * Gọi sau khi session đã được tạo (bước 1).
+ * FE encrypt owner key → gửi encrypted lên BE (bước 2).
+ */
+export async function bindGuestEncryptedKey(
+  encryptedOwnerKey: FeEncryptedOwnerKey,
+  token: string
+): Promise<{ success: boolean }> {
+  return unwrap(
+    fetchApi<{ success: boolean }>(buildApiUrl('/api/guest/session/bind-key'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ encryptedOwnerKey })
+    })
   );
 }
 
@@ -495,9 +559,6 @@ function validateWalletAddress(walletAddress: string): void {
  * @param fingerprintHash - SHA-256 hash cần validate
  */
 function validateFingerprintHash(fingerprintHash: string): void {
-  // #region agent debug log
-  fetch('http://127.0.0.1:7710/ingest/fa15d132-717d-4b5a-8ef1-2fdf5f966e4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'870f73'},body:JSON.stringify({sessionId:'870f73',location:'guestApiClient.ts:validateFingerprintHash',message:'validateFingerprintHash called',data:{hashLength:fingerprintHash.length,hashEmpty:!fingerprintHash},timestamp:Date.now(),runId:'debug-run',hypothesisId:'H5'})}).catch(()=>{});
-  // #endregion
   if (!FINGERPRINT_HASH_REGEX.test(fingerprintHash)) {
     throw new GuestApiError({
       success: false,

@@ -670,6 +670,7 @@ describe('guestCleanupWorker', () => {
         renewalCount: 0,
         claimedByUserId: null,
         serverSalt: 'salt',
+        smartAccountOwnerEncryptedPrivateKey: null,
         hasPendingDonation: false,
         pendingAlertSentAt: null,
         expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),

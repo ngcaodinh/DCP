@@ -159,6 +159,13 @@ async function createKernelClientFromOwnerPrivateKey(ownerPrivateKey: `0x${strin
 }
 
 /**
+ * Lấy đường dẫn paymaster URL — dùng cho logging/debugging.
+ */
+export function getPaymasterUrl(): string {
+  return zeroDevConfig.paymasterUrl;
+}
+
+/**
  * Hàm tạo kernel account client từ owner private key đã mã hóa.
  * Mục đích: tái sử dụng signer đã lưu bảo mật trong DB với paymaster tài trợ gas.
  * @param encryptedOwnerPrivateKey - Chuỗi private key đã mã hóa
@@ -175,10 +182,16 @@ export async function createKernelClientFromEncryptedOwnerKey(encryptedOwnerPriv
  * @param encryptedOwnerPrivateKey - Chuỗi private key đã mã hóa
  * @returns Kernel Account Client không có paymaster
  */
-export async function createKernelClientFromEncryptedOwnerKeyWithoutPaymaster(encryptedOwnerPrivateKey: string) {
+export async function createKernelClientFromEncryptedOwnerKeyWithoutPaymaster(
+  encryptedOwnerPrivateKey: string
+): Promise<ReturnType<typeof createKernelClientFromOwnerPrivateKey>> {
+  // #region agent debug log
+  fetch('http://127.0.0.1:7710/ingest/fa15d132-717d-4b5a-8ef1-2fdf5f966e4c',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e5a964'},body:JSON.stringify({sessionId:'e5a964',location:'zeroDevService.ts:182',message:'ZeroDev: creating kernel client WITHOUT paymaster',data:{usePaymaster:false,bundlerUrl:zeroDevConfig.bundlerUrl,paymasterUrl:zeroDevConfig.paymasterUrl},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const ownerPrivateKey = decryptOwnerPrivateKey(encryptedOwnerPrivateKey);
   return createKernelClientFromOwnerPrivateKey(ownerPrivateKey, false);
 }
+
 
 /**
  * Hàm tạo Smart Account và dữ liệu owner bảo mật.

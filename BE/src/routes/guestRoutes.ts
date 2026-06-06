@@ -10,7 +10,7 @@
  * - createGuestDonationRateLimitMiddleware: Lớp 2 donation sponsor limit (Redis)
  * - createAuthenticationMiddleware: xác thực registered user JWT (cho claim endpoints)
  */
-import { Router } from 'express';
+import { Router, urlencoded } from 'express';
 import {
   handleCreateGuestSession,
   handleRefreshGuestSession,
@@ -18,8 +18,23 @@ import {
   handleSponsorGuestPaymaster,
   handlePrepareGuestClaim,
   handleExecuteGuestClaim,
-  handlePartialGuestClaim
+  handlePartialGuestClaim,
+  handleGetGuestServerSalt,
+  handleBindGuestEncryptedKey
 } from '../controllers/guestSessionController';
+import { handleGuestRelayedDonation } from '../controllers/guestRelayDonationController';
+import {
+  handleInitGuestPayosDonation,
+  handleGetGuestPayosDonationStatus
+} from '../controllers/guestPayosController';
+import { handleGuestPayosWebhook } from '../controllers/guestPayosWebhookController';
+import {
+  handleCreateGuestDeposit,
+  handleGuestDepositWebhook,
+  handleGetGuestDepositStatus,
+  handleSponsorGuestDeposit,
+  handleSubmitGuestDonation
+} from '../controllers/guestDepositController';
 import { API_GUEST_PREFIX } from '../config/apiPrefixes';
 import {
   handleGetPendingDonationStatus,
@@ -56,6 +71,29 @@ export function createGuestRoutes(): Router {
     layer1RateLimit,
     sessionRateLimit,
     handleCreateGuestSession
+  );
+
+  // GET /api/guest/salt — lấy server salt để encrypt owner key (relay flow)
+  // Query params: walletAddress, deviceFingerprintHash
+  // Chain: metadata → layer1 → redis-session-limit → handler
+  // Dùng 2 bước: FE gọi GET /salt → encrypt owner key → POST /session/bind-key
+  router.get(
+    '/salt',
+    metadata,
+    layer1RateLimit,
+    sessionRateLimit,
+    handleGetGuestServerSalt
+  );
+
+  // POST /api/guest/session/bind-key — bind encrypted owner key vào session
+  // Chain: metadata → layer1 → auth → handler
+  // Gọi sau khi FE đã encrypt owner key bằng serverSalt từ GET /salt
+  router.post(
+    '/session/bind-key',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleBindGuestEncryptedKey
   );
 
   // POST /api/guest/session/refresh — làm mới token
@@ -109,6 +147,18 @@ export function createGuestRoutes(): Router {
     handleSponsorGuestPaymaster
   );
 
+  // POST /api/guest/relay/donate — relay donation qua BE (backend tự gửi transaction)
+  // Chain: metadata → layer1 → auth → donation-rate-limit → handler
+  // Dùng cho guest users thay thế luồng EIP-4337 (FE sign → ZeroDev Paymaster → Bundler)
+  router.post(
+    '/relay/donate',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    donationRateLimit,
+    handleGuestRelayedDonation
+  );
+
   // POST /api/guest/claim/prepare — chuẩn bị claim EOA (Keyless Claim)
   // Chain: metadata → layer1 (anti-DDoS) → auth (registered user JWT) → handler
   router.post(
@@ -137,6 +187,88 @@ export function createGuestRoutes(): Router {
     layer1RateLimit,
     authMiddleware,
     handlePartialGuestClaim
+  );
+
+  // POST /api/guest/deposit/sponsor — sponsor UserOp và tạo payment link (ZeroDev flow)
+  // Chain: metadata → layer1 → auth → handler
+  router.post(
+    '/deposit/sponsor',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleSponsorGuestDeposit
+  );
+
+  // POST /api/guest/deposit/submit — submit signed UserOp sau PayOS redirect
+  // Chain: metadata → layer1 → auth → handler
+  router.post(
+    '/deposit/submit',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleSubmitGuestDonation
+  );
+
+  // POST /api/guest/deposit/create — tạo payment link PayOS cho guest deposit (legacy)
+  // Chain: metadata → layer1 → auth → handler
+  router.post(
+    '/deposit/create',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleCreateGuestDeposit
+  );
+
+  // POST /api/guest/deposit/webhook — webhook PayOS cho guest deposit
+  // Chain: metadata → layer1 → bodyParseMiddleware → handler (không auth — PayOS gọi)
+  // PayOS gửi body dạng application/x-www-form-urlencoded, không phải JSON.
+  router.post(
+    '/deposit/webhook',
+    metadata,
+    layer1RateLimit,
+    urlencoded({ extended: false }),
+    handleGuestDepositWebhook
+  );
+
+  // GET /api/guest/deposit/status — lấy trạng thái guest deposit
+  // Chain: metadata → layer1 → auth → handler
+  router.get(
+    '/deposit/status',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleGetGuestDepositStatus
+  );
+
+  // POST /api/guest/payos/init — khởi tạo thanh toán PayOS, trả về QR cho FE
+  // Chain: metadata → layer1 → auth → handler
+  router.post(
+    '/payos/init',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleInitGuestPayosDonation
+  );
+
+  // GET /api/guest/payos/status/:orderCode — lấy trạng thái PayOS donation
+  // Chain: metadata → layer1 → auth → handler
+  router.get(
+    '/payos/status/:orderCode',
+    metadata,
+    layer1RateLimit,
+    guestAuth,
+    handleGetGuestPayosDonationStatus
+  );
+
+  // POST /api/guest/payos/webhook — webhook PayOS gọi khi thanh toán thành công
+  // Chain: metadata → layer1 → bodyParseMiddleware → handler (không auth — PayOS gọi)
+  // PayOS gửi body dạng application/x-www-form-urlencoded, không phải JSON.
+  router.post(
+    '/payos/webhook',
+    metadata,
+    layer1RateLimit,
+    urlencoded({ extended: false }),
+    handleGuestPayosWebhook
   );
 
   return router;

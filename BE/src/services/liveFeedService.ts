@@ -81,7 +81,7 @@ function mapDonationRecordToLiveFeedItem(
   return {
     id: `donation-${donationRecord.transactionHash}`,
     type: 'donation',
-    displayName: donorUser?.fullName || 'Nhà hảo tâm',
+    displayName: donorUser?.fullName || 'Nhà hảo tâm ẩn danh',
     transactionHash: donationRecord.transactionHash,
     projectId: donationRecord.projectId,
     projectName: projectRecord?.name || donationRecord.projectId,
