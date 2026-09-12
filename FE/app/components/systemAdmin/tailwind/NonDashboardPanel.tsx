@@ -38,6 +38,21 @@ interface ApiErrorResponse {
   statusCode?: number;
 }
 
+function resolveApiErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (error && typeof error === "object") {
+    const apiError = error as Partial<ApiErrorResponse>;
+    if (typeof apiError.message === "string" && apiError.message.trim()) {
+      return apiError.message;
+    }
+  }
+
+  return fallbackMessage;
+}
+
 // =============================================================================
 
 // DISBURSEMENT PANEL — dùng real API từ backend
@@ -1016,8 +1031,10 @@ function ProjectReviewPanel() {
         );
 
         await loadPendingProjectList();
-      } catch {
-        setErrorMessage("Cập nhật kết quả duyệt thất bại.");
+      } catch (err) {
+        setErrorMessage(
+          resolveApiErrorMessage(err, "Cập nhật kết quả duyệt thất bại."),
+        );
       } finally {
         setIsSubmittingReview(false);
       }

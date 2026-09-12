@@ -315,11 +315,32 @@ const getPublicProjectStatusLabel = (statusValue: string): string => {
     return 'Đang hoạt động';
   }
 
+  if (statusValue === 'COMPLETED') {
+    return 'Đã hoàn thành';
+  }
+
+  if (statusValue === 'CLOSED') {
+    return 'Đã đóng';
+  }
+
   if (statusValue === 'PENDING_APPROVAL') {
     return 'Chờ duyệt';
   }
 
   return statusValue;
+};
+
+/** Hàm chọn màu badge trạng thái public. Mục đích: phân biệt dự án còn nhận donate với dự án chỉ để tra cứu. */
+const getPublicProjectStatusClass = (statusValue: string): string => {
+  if (statusValue === 'COMPLETED') {
+    return 'status-completed';
+  }
+
+  if (statusValue === 'CLOSED') {
+    return 'status-closed';
+  }
+
+  return 'status-active';
 };
 
 /** Hàm kiểm tra CID IPFS cơ bản. Mục đích: chỉ cho phép render link với CID hợp lệ để tránh URL rác. */
@@ -652,7 +673,7 @@ export default function HomePage() {
     setSupportProjectsErrorMessage('');
 
     try {
-      const supportProjectApiPath = shouldLoadAllProjects ? '/projects/public-support?limit=12' : '/projects/public-support?limit=6';
+      const supportProjectApiPath = shouldLoadAllProjects ? '/projects/public-support' : '/projects/public-support?limit=6';
       const supportProjectsResponse = await fetchApi<HomeSupportProject[]>(buildApiUrl(supportProjectApiPath), {
         method: 'GET',
         cache: 'no-store'
@@ -677,7 +698,7 @@ export default function HomePage() {
   /** Hàm tải tổng số tiền đã quyên góp theo dự án. Mục đích: bổ sung dữ liệu hiển thị cho card homepage mà không thay đổi nguồn dữ liệu chính hiện tại. */
   const loadDonatedAmountMap = useCallback(async () => {
     try {
-      const donationCampaignResponse = await fetchApi<HomeDonationCampaignSummary[]>(buildApiUrl('/donations/campaigns?limit=12'), {
+      const donationCampaignResponse = await fetchApi<HomeDonationCampaignSummary[]>(buildApiUrl('/donations/campaigns'), {
         method: 'GET',
         cache: 'no-store'
       });
@@ -1647,7 +1668,7 @@ export default function HomePage() {
         <div className="projects-header">
           <div>
             <div className="section-label">Dự án</div>
-            <h2 className="section-title">Đang cần hỗ trợ</h2>
+            <h2 className="section-title">Các dự án</h2>
           </div>
         </div>
         <div className="projects-grid">
@@ -1673,7 +1694,7 @@ export default function HomePage() {
             <div className="pcard visible" data-observe data-group="projects">
               <div className="pcard-body">
                 <div className="pcard-title">Chưa có dự án cần hỗ trợ</div>
-                <div className="pcard-desc">Hiện tại chưa có dự án đang hoạt động để hiển thị.</div>
+                <div className="pcard-desc">Hiện tại chưa có dự án công khai để hiển thị.</div>
               </div>
             </div>
           )}
@@ -1701,7 +1722,7 @@ export default function HomePage() {
                     <div className={`pcard-img-bg ${projectCoverImageUrl ? 'pcard-img-bg-cover' : ''}`} style={projectCoverStyle}>
                       {projectCoverImageUrl ? null : projectVisual.icon}
                     </div>
-                    <div className="pcard-status status-active">● {getPublicProjectStatusLabel(project.status)}</div>
+                    <div className={`pcard-status ${getPublicProjectStatusClass(project.status)}`}>● {getPublicProjectStatusLabel(project.status)}</div>
                   </div>
                   <div className="pcard-body">
                     <div className="pcard-org">

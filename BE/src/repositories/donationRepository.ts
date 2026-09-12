@@ -22,7 +22,7 @@ export type DonorPublicPaginationResult = {
 };
 
 /** Hàm lấy danh sách dự án public cần hỗ trợ. Mục đích: cung cấp dữ liệu nền cho màn hình campaign quyên góp công khai. */
-export async function findPublicCampaigns(limitCount: number): Promise<ProjectRecord[]> { return findPublicSupportProjects(limitCount); }
+export async function findPublicCampaigns(limitCount?: number): Promise<ProjectRecord[]> { return findPublicSupportProjects(limitCount); }
 /** Hàm lấy chi tiết dự án public theo projectId. Mục đích: phục vụ màn hình chi tiết campaign trước khi người dùng donate. */
 export async function findPublicCampaignByProjectId(projectId: string): Promise<ProjectRecord | null> { return findPublicSupportProjectByProjectId(projectId); }
 /** Hàm lấy lịch sử donation theo projectId. Mục đích: hiển thị bảng giao dịch quyên góp minh bạch trên UI. */

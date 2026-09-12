@@ -122,6 +122,7 @@ const donationRankingContractAbi = [
   'function grantProjectManagerRole(address account) external',
   'error ProjectNotFound()'
 ];
+const donationRankingContractInterface = new ethers.Interface(donationRankingContractAbi);
 
 /** Hàm lấy TTL cache cho public-support. Mục đích: đọc env và đảm bảo TTL luôn trong khoảng 30-60 giây. */
 function getPublicSupportCacheTimeToLiveSeconds(): number {
@@ -136,8 +137,8 @@ function getPublicSupportCacheTimeToLiveSeconds(): number {
 }
 
 /** Hàm tạo cache key cho danh sách public-support. Mục đích: tránh trả sai dữ liệu khi query param khác nhau. */
-function createPublicSupportCacheKey(limitCount: number): string {
-  return `public-support:limit=${limitCount}`;
+function createPublicSupportCacheKey(limitCount?: number): string {
+  return `public-support:limit=${limitCount === undefined ? 'all' : limitCount}`;
 }
 
 /** Hàm làm sạch chuỗi đầu vào. Mục đích: giảm rủi ro chèn script vào dữ liệu text. */
@@ -207,7 +208,7 @@ function getDonationRankingContractForProjectSync() {
   if (!blockchainRpcUrl || !donationRankingContractAddress || !projectManagerPrivateKey) {
     throw new ApplicationError(
       'Thiếu cấu hình đồng bộ project on-chain. Cần BLOCKCHAIN_RPC_URL, DONATION_RANKING_CONTRACT_ADDRESS (hoặc DONATION_RANKING_ADDRESS), PROJECT_MANAGER_PRIVATE_KEY (hoặc DONATION_RELAYER_PRIVATE_KEY).',
-      500,
+      503,
       'INTERNAL_ERROR'
     );
   }
@@ -246,7 +247,7 @@ async function ensureProjectManagerRolePermission(
   if (!donationRankingAdminContract) {
     throw new ApplicationError(
       `Ví vận hành ${walletAddress} chưa có PROJECT_MANAGER_ROLE và thiếu DONATION_ADMIN_PRIVATE_KEY để tự cấp quyền.`,
-      500,
+      502,
       'INTERNAL_ERROR'
     );
   }
@@ -260,10 +261,65 @@ async function ensureProjectManagerRolePermission(
   if (!hasProjectManagerPermissionAfterGrant) {
     throw new ApplicationError(
       `Tự động cấp PROJECT_MANAGER_ROLE thất bại cho ví vận hành ${walletAddress}.`,
-      500,
+      502,
       'INTERNAL_ERROR'
     );
   }
+}
+
+/** Hàm kiểm tra lỗi ProjectNotFound từ ethers. Mục đích: chỉ tự tạo project on-chain khi contract thực sự báo thiếu project, không nuốt các lỗi quyền/network/revert khác. */
+function isProjectNotFoundContractError(error: unknown): boolean {
+  const errorQueue: unknown[] = [error];
+
+  while (errorQueue.length > 0) {
+    const currentError = errorQueue.shift();
+    if (!currentError || typeof currentError !== 'object') {
+      continue;
+    }
+
+    const errorObject = currentError as {
+      data?: unknown;
+      error?: unknown;
+      info?: { error?: unknown };
+      revert?: { name?: unknown };
+      errorName?: unknown;
+      shortMessage?: unknown;
+      reason?: unknown;
+      message?: unknown;
+    };
+
+    if (errorObject.revert?.name === 'ProjectNotFound' || errorObject.errorName === 'ProjectNotFound') {
+      return true;
+    }
+
+    const errorData = typeof errorObject.data === 'string' ? errorObject.data : '';
+    if (errorData) {
+      try {
+        const parsedError = donationRankingContractInterface.parseError(errorData);
+        if (parsedError?.name === 'ProjectNotFound') {
+          return true;
+        }
+      } catch {
+        // Bỏ qua data không decode được bằng ABI hiện tại.
+      }
+    }
+
+    const searchableMessage = [errorObject.shortMessage, errorObject.reason, errorObject.message]
+      .filter((messageItem): messageItem is string => typeof messageItem === 'string')
+      .join(' ');
+    if (searchableMessage.includes('ProjectNotFound')) {
+      return true;
+    }
+
+    if (errorObject.error) {
+      errorQueue.push(errorObject.error);
+    }
+    if (errorObject.info?.error) {
+      errorQueue.push(errorObject.info.error);
+    }
+  }
+
+  return false;
 }
 
 /** Hàm đồng bộ tạo project lên blockchain. Mục đích: đảm bảo project tồn tại on-chain ngay khi vừa tạo off-chain để tránh donate bị ProjectNotFound. */
@@ -311,12 +367,30 @@ async function activateProjectOnBlockchain(projectId: string): Promise<void> {
     const updateStatusTransaction = await donationRankingContract.setProjectStatus(BigInt(normalizedProjectId), activeProjectStatus);
     await updateStatusTransaction.wait();
     logger.info(`Project status activated on blockchain successfully. projectId=${normalizedProjectId} txHash=${updateStatusTransaction.hash}`);
-  } catch {
+  } catch (error) {
+    if (!isProjectNotFoundContractError(error)) {
+      logger.error(`Activate project on blockchain failed. projectId=${normalizedProjectId} errorMessage=${(error as Error)?.message || 'Unknown error'}`);
+      throw new ApplicationError(
+        'Không thể kích hoạt dự án on-chain. Vui lòng kiểm tra contract, network và PROJECT_MANAGER_ROLE của ví vận hành.',
+        502,
+        'INTERNAL_ERROR'
+      );
+    }
+
     // Ghi chú logic phức tạp: nếu project chưa được tạo on-chain do dữ liệu legacy, tự động tạo trước rồi mới set ACTIVE để tự phục hồi đồng bộ.
     await createProjectOnBlockchain(normalizedProjectId);
-    const retryUpdateStatusTransaction = await donationRankingContract.setProjectStatus(BigInt(normalizedProjectId), activeProjectStatus);
-    await retryUpdateStatusTransaction.wait();
-    logger.info(`Project status activated on blockchain after self-healing sync. projectId=${normalizedProjectId} txHash=${retryUpdateStatusTransaction.hash}`);
+    try {
+      const retryUpdateStatusTransaction = await donationRankingContract.setProjectStatus(BigInt(normalizedProjectId), activeProjectStatus);
+      await retryUpdateStatusTransaction.wait();
+      logger.info(`Project status activated on blockchain after self-healing sync. projectId=${normalizedProjectId} txHash=${retryUpdateStatusTransaction.hash}`);
+    } catch (retryError) {
+      logger.error(`Retry activate project on blockchain failed. projectId=${normalizedProjectId} errorMessage=${(retryError as Error)?.message || 'Unknown error'}`);
+      throw new ApplicationError(
+        'Đã tự đồng bộ project on-chain nhưng chưa thể kích hoạt trạng thái ACTIVE. Vui lòng thử lại hoặc kiểm tra contract.',
+        502,
+        'INTERNAL_ERROR'
+      );
+    }
   }
 }
 
@@ -623,9 +697,11 @@ export async function getProjectsForOrganization(organizationUserId: string): Pr
   return projectRecords.map(mapProjectRecordToResult);
 }
 
-/** Hàm lấy danh sách dự án active public cho trang chủ. Mục đích: cung cấp dữ liệu thật từ MongoDB cho section “Dự án đang cần hỗ trợ”. */
-export async function getPublicSupportProjects(limitCount = 6): Promise<PublicSupportProjectResult[]> {
-  const sanitizedLimitCount = Number.isFinite(limitCount) ? Math.max(1, Math.min(12, Math.floor(limitCount))) : 6;
+/** Hàm lấy danh sách dự án public cho trang chủ. Mục đích: cung cấp dữ liệu thật từ MongoDB, gồm cả dự án đã hoàn tất. */
+export async function getPublicSupportProjects(limitCount?: number): Promise<PublicSupportProjectResult[]> {
+  const sanitizedLimitCount = typeof limitCount === 'number' && Number.isFinite(limitCount)
+    ? Math.max(1, Math.min(12, Math.floor(limitCount)))
+    : undefined;
   const cacheKey = createPublicSupportCacheKey(sanitizedLimitCount);
 
   try {

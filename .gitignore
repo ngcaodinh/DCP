@@ -85,3 +85,6 @@ E2E.Tests
 .agents/
 
 FE/tsconfig.tsbuildinfo
+
+
+dcp_database_backup.gz

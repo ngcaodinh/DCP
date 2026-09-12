@@ -57,11 +57,7 @@ projectSchema.index({ organizationId: 1, name: 1 }, { unique: true });
 
 const ProjectMongoModel = mongoose.model<ProjectRecord>('Project', projectSchema);
 
-/** Hàm tạo filter thời gian cho project public. Mục đích: tránh ẩn toàn bộ dự án chỉ vì deadline vừa quá hạn trong thời gian ngắn. */
-function createPublicProjectDeadlineFilter(): { $gte: Date } {
-  const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
-  return { $gte: sixtyDaysAgo };
-}
+const publicProjectStatusList: ProjectStatus[] = ['ACTIVE', 'COMPLETED', 'CLOSED'];
 
 /** Hàm tìm dự án theo tên trong cùng tổ chức. Mục đích: chặn trùng tên dự án theo nghiệp vụ. */
 export async function findProjectByOrganizationIdAndName(organizationId: string, name: string): Promise<ProjectRecord | null> {
@@ -99,24 +95,24 @@ export async function findProjectsByStatus(status: ProjectStatus): Promise<Proje
   return ProjectMongoModel.find({ status }).sort({ submittedAt: -1, createdAt: -1 }).lean<ProjectRecord[]>().exec();
 }
 
-/** Hàm lấy danh sách dự án active công khai. Mục đích: trả dữ liệu thật cho section “Dự án đang cần hỗ trợ” tại trang chủ. */
-export async function findPublicSupportProjects(limitCount: number): Promise<ProjectRecord[]> {
-  return ProjectMongoModel.find({
-    status: 'ACTIVE',
-    deadline: createPublicProjectDeadlineFilter()
-  })
-    .sort({ updatedAt: -1 })
-    .limit(limitCount)
-    .lean<ProjectRecord[]>()
-    .exec();
+/** Hàm lấy danh sách dự án public công khai. Mục đích: homepage hiển thị cả dự án còn hoạt động và đã hoàn tất. */
+export async function findPublicSupportProjects(limitCount?: number): Promise<ProjectRecord[]> {
+  const publicProjectQuery = ProjectMongoModel.find({
+    status: { $in: publicProjectStatusList }
+  }).sort({ updatedAt: -1 });
+
+  if (limitCount !== undefined) {
+    publicProjectQuery.limit(limitCount);
+  }
+
+  return publicProjectQuery.lean<ProjectRecord[]>().exec();
 }
 
-/** Hàm lấy chi tiết dự án active công khai theo projectId. Mục đích: phục vụ modal chi tiết ở trang chủ. */
+/** Hàm lấy chi tiết dự án public theo projectId. Mục đích: phục vụ tra cứu dự án trên trang chủ. */
 export async function findPublicSupportProjectByProjectId(projectId: string): Promise<ProjectRecord | null> {
   return ProjectMongoModel.findOne({
     projectId,
-    status: 'ACTIVE',
-    deadline: createPublicProjectDeadlineFilter()
+    status: { $in: publicProjectStatusList }
   })
     .lean<ProjectRecord>()
     .exec();

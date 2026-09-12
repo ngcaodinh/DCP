@@ -33,7 +33,7 @@ function triggerAutoRecordDonationInBackground(authenticatedUserId: string, proj
 
 /** Hàm xử lý request lấy danh sách campaign quyên góp công khai. Mục đích: trả dữ liệu cho trang campaign UC3.1. */
 export async function handleGetPublicDonationCampaigns(request: AuthenticatedRequest, response: Response): Promise<void> {
-  const parsedLimitCount = Number(request.query.limit);
+  const parsedLimitCount = request.query.limit === undefined ? undefined : Number(request.query.limit);
 
   try {
     const campaignList = await getPublicDonationCampaigns(parsedLimitCount);

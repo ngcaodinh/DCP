@@ -80,7 +80,7 @@ export async function handleGetCreateProjectEligibility(request: AuthenticatedRe
 
 /** Hàm xử lý request lấy danh sách dự án public cần hỗ trợ. Mục đích: trả dữ liệu thật cho trang Home mà không cần đăng nhập. */
 export async function handleGetPublicSupportProjects(request: AuthenticatedRequest, response: Response): Promise<void> {
-  const parsedLimitCount = Number(request.query.limit);
+  const parsedLimitCount = request.query.limit === undefined ? undefined : Number(request.query.limit);
 
   try {
     const publicProjects = await getPublicSupportProjects(parsedLimitCount);

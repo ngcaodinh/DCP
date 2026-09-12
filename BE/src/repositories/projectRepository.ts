@@ -61,8 +61,8 @@ export async function findProjectsByStatusFromRepository(status: ProjectStatus):
   return findProjectsByStatus(status);
 }
 
-/** Hàm repository lấy danh sách dự án public đang cần hỗ trợ. Mục đích: cung cấp dữ liệu thật cho homepage không cần đăng nhập. */
-export async function findPublicSupportProjectsFromRepository(limitCount: number): Promise<ProjectRecord[]> {
+/** Hàm repository lấy danh sách dự án public. Mục đích: cung cấp dữ liệu thật cho homepage không cần đăng nhập. */
+export async function findPublicSupportProjectsFromRepository(limitCount?: number): Promise<ProjectRecord[]> {
   return findPublicSupportProjects(limitCount);
 }
 

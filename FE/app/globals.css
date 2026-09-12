@@ -949,6 +949,16 @@ section {
   color: #065f46;
 }
 
+.status-completed {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-closed {
+  background: #e5e7eb;
+  color: #374151;
+}
+
 .qf-badge {
   position: absolute;
   top: 12px;
