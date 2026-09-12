@@ -959,6 +959,11 @@ section {
   color: #374151;
 }
 
+.status-expired {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 .qf-badge {
   position: absolute;
   top: 12px;

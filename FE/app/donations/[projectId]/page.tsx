@@ -100,7 +100,11 @@ function formatCurrencyVnd(amountValue: number): string {
  * Hàm lấy nhãn trạng thái dự án công khai.
  * Mục đích: chuẩn hóa label hiển thị status.
  */
-function getPublicProjectStatusLabel(status: string): string {
+function getPublicProjectStatusLabel(status: string, deadlineIso?: string): string {
+  if (status === 'EXPIRED' || (status === 'ACTIVE' && !isCampaignBeforeDeadline(deadlineIso))) {
+    return 'Đã hết hạn';
+  }
+
   switch (status) {
     case 'ACTIVE':
       return 'Đang hoạt động';
@@ -121,6 +125,15 @@ function getPublicProjectStatusLabel(status: string): string {
  */
 function isProjectEligibleForDonation(project: ProjectDetail): boolean {
   return project.status === 'ACTIVE' && isCampaignBeforeDeadline(project.deadline);
+}
+
+/** Hàm lấy thông báo khi dự án không còn nhận donation. Mục đích: phân biệt hết hạn với các trạng thái bị khóa khác. */
+function getProjectDonationUnavailableMessage(project: ProjectDetail): string {
+  if (project.status === 'EXPIRED' || (project.status === 'ACTIVE' && !isCampaignBeforeDeadline(project.deadline))) {
+    return 'Dự án đã hết hạn nhận quyên góp.';
+  }
+
+  return 'Dự án hiện không đủ điều kiện nhận quyên góp.';
 }
 
 /**
@@ -179,6 +192,7 @@ const resolveFirstProjectImageCidForDetail = async (basic: ProjectBasicInfo): Pr
 
 /** Component Banner — hiển thị hình ảnh và tên dự án. */
 function ProjectBanner({ project, coverImageUrl }: { project: ProjectDetail; coverImageUrl: string }) {
+  const isExpired = project.status === 'EXPIRED' || (project.status === 'ACTIVE' && !isCampaignBeforeDeadline(project.deadline));
   const bannerStyle = coverImageUrl
     ? {
         backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${coverImageUrl})`,
@@ -193,8 +207,8 @@ function ProjectBanner({ project, coverImageUrl }: { project: ProjectDetail; cov
     <div className="project-detail-banner mb-6 overflow-hidden" style={bannerStyle}>
       <div className="flex h-60 items-end px-6 pb-5">
         <div className="w-full text-center">
-          <span className="mb-2 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
-            ● {getPublicProjectStatusLabel(project.status)}
+          <span className={`mb-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${isExpired ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
+            ● {getPublicProjectStatusLabel(project.status, project.deadline)}
           </span>
           <h1 className="text-2xl font-bold text-white drop-shadow-sm md:text-3xl">{project.name}</h1>
         </div>
@@ -371,13 +385,33 @@ function DonationSection(props: DonationSectionProps) {
 
   const isEligible = isProjectEligibleForDonation(project);
 
+  if (donationMode && !isEligible) {
+    return (
+      <section className="project-detail-section mb-6">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="project-detail-section-title">Quyên góp cho dự án</h2>
+          <button
+            type="button"
+            onClick={donationMode === 'public' ? onClosePublicDonation : onCloseAnonymousDonation}
+            className="text-sm text-[#6b7280] hover:text-[#374151]"
+          >
+            Đóng
+          </button>
+        </div>
+        <p className="mt-3 rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
+          {getProjectDonationUnavailableMessage(project)}
+        </p>
+      </section>
+    );
+  }
+
   if (!donationMode) {
     return (
       <section className="project-detail-section mb-6">
         <h2 className="project-detail-section-title">Quyên góp cho dự án</h2>
         {!isEligible ? (
           <p className="rounded-lg border border-[#fde68a] bg-[#fffbeb] px-3 py-2 text-sm text-[#92400e]">
-            Dự án hiện không đủ điều kiện nhận quyên góp.
+            {getProjectDonationUnavailableMessage(project)}
           </p>
         ) : (
           <div className="project-detail-donation-grid">
@@ -925,11 +959,27 @@ export default function DonationProjectDetailPage() {
     };
   }, []);
 
+  /** Hàm kiểm tra lại deadline ngay trước thao tác donation. Mục đích: chặn phiên trang đã mở từ trước khi dự án hết hạn. */
+  const ensureDonationIsStillOpen = (): boolean => {
+    if (!projectDetail || isProjectEligibleForDonation(projectDetail)) {
+      return Boolean(projectDetail);
+    }
+
+    setDonationMode(null);
+    setIsPublicConfirmOpen(false);
+    setPendingPublicAmount(null);
+    setShowPayosConfirmModal(false);
+    setPendingAnonymousAmount(null);
+    return false;
+  };
+
   /**
    * Hàm mở form quyên góp công khai.
    * Mục đích: giữ nguyên UI phân tách 2 luồng donate như trước.
    */
   const handleOpenPublicDonation = () => {
+    if (!ensureDonationIsStillOpen()) return;
+
     if (!isLoggedIn) {
       setPublicStatus('failed');
       setPublicMessage('Vui lòng đăng nhập để sử dụng quyên góp công khai.');
@@ -960,6 +1010,8 @@ export default function DonationProjectDetailPage() {
    * Mục đích: giữ nguyên UI cũ nhưng bootstrap ví guest cho flow PayOS mới.
    */
   const handleOpenAnonymousDonation = async () => {
+    if (!ensureDonationIsStillOpen()) return;
+
     setDonationMode('anonymous');
     setDonationAmountInput('');
     setAnonymousStatus('INITIALIZING');
@@ -998,6 +1050,8 @@ export default function DonationProjectDetailPage() {
    * Mục đích: giữ nguyên xác nhận trước khi submit công khai.
    */
   const handleOpenPublicConfirm = () => {
+    if (!ensureDonationIsStillOpen()) return;
+
     const parsedAmount = Number(donationAmountInput);
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !Number.isInteger(parsedAmount)) {
       setPublicStatus('failed');
@@ -1015,6 +1069,8 @@ export default function DonationProjectDetailPage() {
    */
   const handleConfirmPublicDonation = async () => {
     if (!projectDetail || pendingPublicAmount === null) return;
+    if (!ensureDonationIsStillOpen()) return;
+
     const { accessToken } = readAuthSession();
     if (!accessToken) {
       setPublicStatus('failed');
@@ -1049,6 +1105,7 @@ export default function DonationProjectDetailPage() {
    */
   const handleSubmitAnonymousDonation = () => {
     if (!projectDetail) return;
+    if (!ensureDonationIsStillOpen()) return;
 
     const parsedAmount = Number(donationAmountInput);
     if (!Number.isFinite(parsedAmount) || !Number.isInteger(parsedAmount) || parsedAmount < MIN_AMOUNT_PER_DONATION || parsedAmount > MAX_AMOUNT_PER_DONATION) {
@@ -1078,6 +1135,7 @@ export default function DonationProjectDetailPage() {
    */
   const handleConfirmAnonymousDonation = async () => {
     if (!projectDetail || pendingAnonymousAmount === null) return;
+    if (!ensureDonationIsStillOpen()) return;
 
     if (!initState.guestSessionToken) {
       setShowPayosConfirmModal(false);
@@ -1154,6 +1212,25 @@ export default function DonationProjectDetailPage() {
             <ProjectInfoSection project={projectDetail} />
             <ProjectProgressSection project={projectDetail} />
             <EvidenceSection project={projectDetail} />
+
+            <section className="project-detail-section mb-6">
+              <h2 className="project-detail-section-title">Minh bạch giải ngân</h2>
+              <p className="mt-3 text-sm leading-6 text-[#4b5563]">
+                Theo dõi các yêu cầu, chữ ký phê duyệt, minh chứng và giao dịch giải ngân của dự án.
+              </p>
+              <Link
+                href={`/disbursements?projectId=${encodeURIComponent(projectDetail.projectId)}`}
+                className="mt-3 inline-flex items-center rounded-lg bg-[#0e7c6b] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0b6759]"
+              >
+                Xem trang giải ngân →
+              </Link>
+              <Link
+                href={`/donors?projectId=${encodeURIComponent(projectDetail.projectId)}`}
+                className="ml-3 mt-3 inline-flex items-center rounded-lg border border-[#0e7c6b] px-4 py-2 text-sm font-semibold text-[#0e7c6b] transition hover:bg-[#e6f7f4]"
+              >
+                Xem lịch sử nhà hảo tâm →
+              </Link>
+            </section>
 
             <DonationSection
               project={projectDetail}

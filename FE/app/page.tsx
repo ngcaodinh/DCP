@@ -34,6 +34,7 @@ type HomeSupportProjectDetail = {
   description: string;
   goalAmount: number;
   status: string;
+  deadline?: string;
   lastDonationAt: string | null;
   evidenceCids: string[];
   evidenceFiles?: HomeProjectEvidenceFile[];
@@ -300,6 +301,7 @@ const resolveRelayProjectId = (projectId: string): string => {
 const mapDonationErrorMessage = (error: unknown): string => {
   const apiError = error as { statusCode?: number; message?: string; errorCode?: string };
   if (apiError?.statusCode === 401) return 'Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại để quyên góp.';
+  if (apiError?.errorCode === 'PROJECT_EXPIRED') return 'Dự án đã hết hạn nhận quyên góp.';
   if (apiError?.errorCode === 'CHAIN_MISMATCH') return 'Hệ thống relay đang ở sai mạng blockchain. Vui lòng thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_TIMEOUT') return 'Giao dịch đang pending quá lâu. Vui lòng đợi thêm hoặc thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_REVERTED') return 'Giao dịch bị từ chối trên blockchain. Vui lòng kiểm tra lại số dư token.';
@@ -310,7 +312,11 @@ const mapDonationErrorMessage = (error: unknown): string => {
   return apiError?.message || (error as Error)?.message || 'Không thể gửi giao dịch quyên góp lúc này. Vui lòng thử lại sau.';
 };
 /** Hàm hiển thị nhãn trạng thái dự án thân thiện. Mục đích: chuẩn hóa trạng thái kỹ thuật thành tiếng Việt dễ hiểu. */
-const getPublicProjectStatusLabel = (statusValue: string): string => {
+const getPublicProjectStatusLabel = (statusValue: string, deadlineIso?: string): string => {
+  if (statusValue === 'EXPIRED' || (statusValue === 'ACTIVE' && !isCampaignBeforeDeadline(deadlineIso))) {
+    return 'Đã hết hạn';
+  }
+
   if (statusValue === 'ACTIVE') {
     return 'Đang hoạt động';
   }
@@ -331,7 +337,11 @@ const getPublicProjectStatusLabel = (statusValue: string): string => {
 };
 
 /** Hàm chọn màu badge trạng thái public. Mục đích: phân biệt dự án còn nhận donate với dự án chỉ để tra cứu. */
-const getPublicProjectStatusClass = (statusValue: string): string => {
+const getPublicProjectStatusClass = (statusValue: string, deadlineIso?: string): string => {
+  if (statusValue === 'EXPIRED' || (statusValue === 'ACTIVE' && !isCampaignBeforeDeadline(deadlineIso))) {
+    return 'status-expired';
+  }
+
   if (statusValue === 'COMPLETED') {
     return 'status-completed';
   }
@@ -1722,7 +1732,7 @@ export default function HomePage() {
                     <div className={`pcard-img-bg ${projectCoverImageUrl ? 'pcard-img-bg-cover' : ''}`} style={projectCoverStyle}>
                       {projectCoverImageUrl ? null : projectVisual.icon}
                     </div>
-                    <div className={`pcard-status ${getPublicProjectStatusClass(project.status)}`}>● {getPublicProjectStatusLabel(project.status)}</div>
+                    <div className={`pcard-status ${getPublicProjectStatusClass(project.status, project.deadline)}`}>● {getPublicProjectStatusLabel(project.status, project.deadline)}</div>
                   </div>
                   <div className="pcard-body">
                     <div className="pcard-org">
@@ -2027,7 +2037,7 @@ export default function HomePage() {
                       </div>
                       <div className="rounded-lg bg-white p-2.5">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Trạng thái</p>
-                        <p className="mt-1 text-sm font-semibold text-[#111827]">{getPublicProjectStatusLabel(selectedProjectDetail.status)}</p>
+                        <p className="mt-1 text-sm font-semibold text-[#111827]">{getPublicProjectStatusLabel(selectedProjectDetail.status, selectedProjectDetail.deadline)}</p>
                       </div>
                       <div className="rounded-lg bg-white p-2.5">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[#6b7280]">Mục tiêu</p>

@@ -14,6 +14,7 @@ import { findProjectById } from '../repositories/projectRepository';
 import { createGuestPayosDonation, findGuestPayosDonationByOrderCode } from '../repositories/guestPayosDonationRepository';
 import { getLogger } from '../config/logger';
 import { sendErrorResponse } from '../utils/apiResponse';
+import { isProjectDeadlineExpired, isProjectDonationOpen } from '../utils/projectDonationEligibility';
 
 const logger = getLogger();
 
@@ -66,7 +67,12 @@ export async function handleInitGuestPayosDonation(
     sendErrorResponse(response, 404, 'Dự án không tồn tại.', 'PROJECT_NOT_FOUND');
     return;
   }
-  if (project.status !== 'ACTIVE') {
+  if (!isProjectDonationOpen(project)) {
+    if (isProjectDeadlineExpired(project.deadline)) {
+      sendErrorResponse(response, 400, 'Dự án đã hết hạn nhận quyên góp.', 'PROJECT_EXPIRED');
+      return;
+    }
+
     sendErrorResponse(response, 400, 'Dự án không còn nhận quyên góp.', 'PROJECT_INACTIVE');
     return;
   }

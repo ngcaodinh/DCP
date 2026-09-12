@@ -13,6 +13,7 @@ import { findGuestWalletSessionById, reserveDonationSlot } from '../repositories
 import { upsertGuestDonationRisk } from '../repositories/guestDonationRiskRepository';
 import { findAuditByUserOpHash, createAuditRecord } from '../repositories/anonymousDonationAuditRepository';
 import { evaluateGuestRisk } from './guestRiskService';
+import { isProjectDeadlineExpired, isProjectDonationOpen } from '../utils/projectDonationEligibility';
 import { GuestWalletSession } from '../models/guestWalletSessionModel';
 import { findProjectById } from '../repositories/projectRepository';
 import mongoose from 'mongoose';
@@ -431,7 +432,11 @@ export async function sponsorGuestDonation(
   if (!projectRecord) {
     throw new ApplicationError('Dự án không tồn tại.', 404, 'PROJECT_NOT_FOUND');
   }
-  if (projectRecord.status !== 'ACTIVE') {
+  if (!isProjectDonationOpen(projectRecord)) {
+    if (isProjectDeadlineExpired(projectRecord.deadline)) {
+      throw new ApplicationError('Dự án đã hết hạn nhận quyên góp.', 400, 'PROJECT_EXPIRED');
+    }
+
     throw new ApplicationError('Dự án không còn nhận donation.', 400, 'PROJECT_NOT_ACTIVE');
   }
 

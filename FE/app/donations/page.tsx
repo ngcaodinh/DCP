@@ -36,8 +36,24 @@ function isCampaignEligibleForDonation(campaignItem: DonationCampaignItem): bool
   return campaignItem.status === 'ACTIVE' && isCampaignBeforeDeadline(campaignItem.deadline);
 }
 
+/** Hàm hiển thị trạng thái campaign theo thời hạn thực tế. Mục đích: không để campaign quá hạn vẫn mang nhãn đang hoạt động. */
+function getCampaignStatusLabel(campaignItem: DonationCampaignItem): string {
+  if (campaignItem.status === 'EXPIRED' || (campaignItem.status === 'ACTIVE' && !isCampaignBeforeDeadline(campaignItem.deadline))) {
+    return 'Đã hết hạn';
+  }
+
+  if (campaignItem.status === 'ACTIVE') return 'Đang hoạt động';
+  if (campaignItem.status === 'COMPLETED') return 'Đã hoàn thành';
+  if (campaignItem.status === 'CLOSED') return 'Đã đóng';
+  return campaignItem.status;
+}
+
 /** Hàm lấy lý do campaign chưa thể donate. Mục đích: hiển thị phản hồi rõ ràng thay vì im lặng khi người dùng bấm nút. */
 function getCampaignIneligibleReason(campaignItem: DonationCampaignItem): string {
+  if (campaignItem.status === 'EXPIRED' || (campaignItem.status === 'ACTIVE' && !isCampaignBeforeDeadline(campaignItem.deadline))) {
+    return 'Dự án đã hết hạn nhận quyên góp.';
+  }
+
   if (campaignItem.status !== 'ACTIVE') {
     return 'Dự án chưa ở trạng thái ACTIVE.';
   }
@@ -120,12 +136,13 @@ export default function DonationCampaignListPage() {
             <article key={campaignItem.projectId} className="rounded-xl border border-[#e5e7eb] bg-white p-4 shadow-sm">
               <h2 className="text-base font-semibold text-[#111827]">{campaignItem.name}</h2>
               <p className="mt-2 line-clamp-3 text-sm text-[#4b5563]">{campaignItem.description}</p>
-              <div className="mt-2 text-xs text-[#6b7280]">Trạng thái: {campaignItem.status}</div>
+              <div className="mt-2 text-xs text-[#6b7280]">Trạng thái: {getCampaignStatusLabel(campaignItem)}</div>
               <div className="mt-3 text-sm text-[#374151]">{formatCurrency(campaignItem.donatedAmount)} / {formatCurrency(campaignItem.goalAmount)} token ({donationPercent}%)</div>
               <button
                 type="button"
                 onClick={() => openDonationModal(campaignItem)}
-                className={`mt-4 inline-flex rounded-md px-3 py-2 text-sm font-semibold text-white ${isEligibleForDonation ? 'bg-[#0e7c6b]' : 'bg-[#9ca3af]'}`}
+                disabled={!isEligibleForDonation}
+                className={`mt-4 inline-flex rounded-md px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed ${isEligibleForDonation ? 'bg-[#0e7c6b]' : 'bg-[#9ca3af]'}`}
               >
                 Quyên góp ngay
               </button>

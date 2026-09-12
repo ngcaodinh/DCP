@@ -19,6 +19,7 @@ import {
 import { findLatestDonationTimestampByProjectIdFromRepository } from '../repositories/donationRepository';
 import { ApplicationError } from '../utils/applicationError';
 import { createInMemoryCache } from '../utils/inMemoryCache';
+import { PublicProjectStatus, resolvePublicProjectStatus } from '../utils/projectDonationEligibility';
 
 export type CreateProjectPayload = {
   name: string;
@@ -77,7 +78,7 @@ export type PublicSupportProjectResult = {
   description: string;
   goalAmount: number;
   deadline: Date;
-  status: ProjectStatus;
+  status: PublicProjectStatus;
   evidenceCids: string[];
   evidenceFiles: ProjectEvidenceFileRecord[];
   updatedAt: Date;
@@ -89,7 +90,8 @@ export type PublicSupportProjectDetailResult = {
   name: string;
   description: string;
   goalAmount: number;
-  status: ProjectStatus;
+  status: PublicProjectStatus;
+  deadline: Date;
   lastDonationAt: Date | null;
   evidenceCids: string[];
   evidenceFiles: ProjectEvidenceFileRecord[];
@@ -710,7 +712,10 @@ export async function getPublicSupportProjects(limitCount?: number): Promise<Pub
     const cachedProjects = publicSupportProjectsCache.get(cacheKey);
     if (cachedProjects) {
       logger.info(`public-support cache_hit: ${cacheKey}`);
-      return cachedProjects;
+      return cachedProjects.map(projectRecord => ({
+        ...projectRecord,
+        status: resolvePublicProjectStatus(projectRecord)
+      }));
     }
 
     logger.info(`public-support cache_miss: ${cacheKey}`);
@@ -726,7 +731,7 @@ export async function getPublicSupportProjects(limitCount?: number): Promise<Pub
     description: projectRecord.description,
     goalAmount: projectRecord.goalAmount,
     deadline: projectRecord.deadline,
-    status: projectRecord.status,
+    status: resolvePublicProjectStatus(projectRecord),
     evidenceCids: projectRecord.evidenceCids,
     evidenceFiles: projectRecord.evidenceFiles || [],
     updatedAt: projectRecord.updatedAt,
@@ -782,7 +787,8 @@ export async function getPublicSupportProjectDetail(projectId: string): Promise<
     name: projectRecord.name,
     description: projectRecord.description,
     goalAmount: projectRecord.goalAmount,
-    status: projectRecord.status,
+    status: resolvePublicProjectStatus(projectRecord),
+    deadline: projectRecord.deadline,
     lastDonationAt,
     evidenceCids: projectRecord.evidenceCids,
     evidenceFiles: projectRecord.evidenceFiles || [],

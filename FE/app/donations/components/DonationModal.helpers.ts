@@ -93,6 +93,7 @@ export function resolveGuestDisplayStatusRaw(
 export function mapDonationErrorMessage(error: unknown): string {
   const apiError = error as ApiErrorResponse;
   if (apiError?.statusCode === 401) return 'Bạn chưa đăng nhập hoặc phiên đã hết hạn. Vui lòng đăng nhập lại để ghi nhận quyên góp.';
+  if (apiError?.errorCode === 'PROJECT_EXPIRED') return 'Dự án đã hết hạn nhận quyên góp.';
   if (apiError?.errorCode === 'CHAIN_MISMATCH') return 'Hệ thống backend đang ở sai mạng blockchain. Vui lòng thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_TIMEOUT') return 'Giao dịch đang pending quá lâu. Vui lòng đợi thêm hoặc thử lại sau.';
   if (apiError?.errorCode === 'TRANSACTION_REVERTED') return 'Giao dịch bị từ chối trên blockchain. Vui lòng kiểm tra lại số dư token.';

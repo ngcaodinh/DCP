@@ -21,6 +21,7 @@ import { findGuestWalletSessionByWalletAddress } from '../repositories/guestWall
 import { findGuestDonationRiskByWalletAddress } from '../repositories/guestDonationRiskRepository';
 import { updateAuditByTransactionHash } from '../repositories/anonymousDonationAuditRepository';
 import { incrementSessionDonationCounters } from '../repositories/guestWalletSessionRepository';
+import { isProjectDeadlineExpired, isProjectDonationOpen, resolvePublicProjectStatus } from '../utils/projectDonationEligibility';
 
 const logger = getLogger();
 
@@ -167,6 +168,19 @@ export async function executeOneClickDonation(authenticatedUserId: string, proje
     throw new ApplicationError('Số token quyên góp phải lớn hơn 0.', 400, 'VALIDATION_ERROR');
   }
 
+  const normalizedProjectId = projectId.trim();
+  const projectRecord = await findProjectByProjectId(normalizedProjectId);
+  if (!projectRecord) {
+    throw new ApplicationError('Dự án không tồn tại.', 404, 'PROJECT_NOT_FOUND');
+  }
+  if (!isProjectDonationOpen(projectRecord)) {
+    if (isProjectDeadlineExpired(projectRecord.deadline)) {
+      throw new ApplicationError('Dự án đã hết hạn nhận quyên góp.', 400, 'PROJECT_EXPIRED');
+    }
+
+    throw new ApplicationError('Dự án không còn nhận quyên góp.', 400, 'PROJECT_NOT_ACTIVE');
+  }
+
   const authenticatedUser = await findUserById(authenticatedUserId.trim());
   if (!authenticatedUser) {
     throw new ApplicationError('Không tìm thấy người dùng đăng nhập.', 404, 'NOT_FOUND');
@@ -186,7 +200,7 @@ export async function executeOneClickDonation(authenticatedUserId: string, proje
     throw new ApplicationError('Không thể lấy smart account address để gửi giao dịch.', 500, 'INTERNAL_ERROR');
   }
 
-  const projectIdAsBigInt = normalizeProjectIdToBigInt(projectId);
+  const projectIdAsBigInt = normalizeProjectIdToBigInt(normalizedProjectId);
   const donationAmountAsBigInt = BigInt(normalizedAmount);
   const maxApprovalAmount = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
 
@@ -324,7 +338,8 @@ export async function getPublicDonationCampaigns(limitCount?: number) {
         name: campaignRecord.name,
         description: campaignRecord.description,
         goalAmount: campaignRecord.goalAmount,
-        status: campaignRecord.status,
+        status: resolvePublicProjectStatus(campaignRecord),
+        deadline: campaignRecord.deadline,
         donatedAmount: donationSummary.totalAmount,
         donationCount: donationSummary.donationCount,
         updatedAt: campaignRecord.updatedAt
@@ -351,7 +366,8 @@ export async function getPublicDonationCampaignDetail(projectId: string) {
     name: campaignRecord.name,
     description: campaignRecord.description,
     goalAmount: campaignRecord.goalAmount,
-    status: campaignRecord.status,
+    status: resolvePublicProjectStatus(campaignRecord),
+    deadline: campaignRecord.deadline,
     evidenceCids: campaignRecord.evidenceCids,
     donatedAmount: donationSummary.totalAmount,
     donationCount: donationSummary.donationCount,

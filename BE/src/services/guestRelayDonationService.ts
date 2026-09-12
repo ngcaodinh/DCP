@@ -25,6 +25,7 @@ import { getZeroDevConfig } from '../config/zeroDev';
 import { getLogger } from '../config/logger';
 import { ApplicationError } from '../utils/applicationError';
 import { MAX_DONATIONS_PER_SESSION, MAX_AMOUNT_PER_DONATION, MAX_TOTAL_AMOUNT_PER_SESSION } from '../constants/guestDonation';
+import { isProjectDeadlineExpired, isProjectDonationOpen } from '../utils/projectDonationEligibility';
 import { v4 as uuidv4 } from 'uuid';
 
 const logger = getLogger();
@@ -192,7 +193,11 @@ export async function executeGuestRelayedDonation(
     throw new ApplicationError('Dự án không tồn tại.', 404, 'PROJECT_NOT_FOUND');
   }
 
-  if (projectRecord.status !== 'ACTIVE') {
+  if (!isProjectDonationOpen(projectRecord)) {
+    if (isProjectDeadlineExpired(projectRecord.deadline)) {
+      throw new ApplicationError('Dự án đã hết hạn nhận quyên góp.', 400, 'PROJECT_EXPIRED');
+    }
+
     throw new ApplicationError('Dự án không còn nhận quyên góp.', 400, 'PROJECT_NOT_ACTIVE');
   }
 
