@@ -14,6 +14,7 @@ import { createAdminDashboardRoutes } from './routes/adminDashboardRoutes';
 import { createNotificationRoutes } from './routes/notificationRoutes';
 import { createGuestRoutes } from './routes/guestRoutes';
 import { validateGuestJwtConfig } from './config/guestJsonWebToken';
+import { getAllowedCorsOriginsFromEnvironment } from './config/cors';
 import { applySeoAndCacheHeaders } from './middleware/seoCacheMiddleware';
 import { API_GUEST_PREFIX } from './config/apiPrefixes';
 
@@ -26,8 +27,7 @@ validateGuestJwtConfig();
 
 /** Hàm cấu hình middleware chính cho ứng dụng. Mục đích: áp dụng bảo mật, tối ưu hiệu năng và parse request body cho toàn hệ thống. */
 function configureMiddlewares(): void {
-  const allowedOriginsEnv = process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000';
-  const allowedOriginList = allowedOriginsEnv.split(',').map(origin => origin.trim());
+  const allowedOriginList = getAllowedCorsOriginsFromEnvironment();
   const requestBodyLimit = getRequestBodyLimit();
 
   application.disable('x-powered-by');

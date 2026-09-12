@@ -129,7 +129,7 @@ JWT_SECRET=your_strong_jwt_secret_min_32_chars
 JWT_ISSUER=dcp-backend
 JWT_AUDIENCE=dcp-users
 JWT_EXPIRES_IN=24h
-CORS_ALLOWED_ORIGIN=http://localhost:3000
+CORS_ALLOWED_ORIGINS=http://localhost:3000
 REQUEST_BODY_LIMIT=5mb
 RUN_WORKERS=true
 ```
