@@ -325,9 +325,6 @@ function DisbursementsPageContent() {
               <div className="bg-gradient-to-br from-[#0e7c6b] via-[#12a08b] to-[#7dd3c7] px-5 py-7 text-white sm:px-7 sm:py-9">
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#d9fff8]">Minh bạch giải ngân</p>
                 <h1 className="mt-2 text-2xl font-black leading-tight sm:text-4xl">Quá trình giải ngân của {projectName}</h1>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-[#ecfffb] sm:text-base">
-                  Mỗi yêu cầu được trình bày như một luồng nghiệp vụ: tạo yêu cầu, kiểm tra minh chứng IPFS, thu thập chữ ký, chuyển khoản và hoàn tất công khai.
-                </p>
               </div>
 
               <div className="p-4 sm:p-6">

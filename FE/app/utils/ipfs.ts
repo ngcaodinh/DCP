@@ -19,6 +19,14 @@ export function isValidIpfsCid(cidValue: string): boolean {
   return cidVersionZeroRegex.test(normalizedCidValue) || cidVersionOneRegex.test(normalizedCidValue);
 }
 
+/** Tách chuỗi nhiều CID được lưu bằng dấu phẩy hoặc xuống dòng thành từng CID độc lập. */
+export function splitIpfsCidList(cidValue: string): string[] {
+  return cidValue
+    .split(/[\r\n,]+/)
+    .map(cidItem => cidItem.trim())
+    .filter(Boolean);
+}
+
 /** Hàm tạo URL gateway IPFS từ CID hợp lệ. Mục đích: chuẩn hóa duy nhất một nơi build link IPFS cho toàn bộ FE. */
 export function buildIpfsGatewayUrl(cidValue: string): string {
   const normalizedCidValue = cidValue.trim();

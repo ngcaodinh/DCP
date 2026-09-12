@@ -6,7 +6,8 @@ import {
   buildIpfsGatewayUrl,
   getIpfsContentType,
   isValidIpfsCid,
-  resolveIpfsPreviewKind
+  resolveIpfsPreviewKind,
+  splitIpfsCidList
 } from '@/app/utils/ipfs';
 
 type IpfsEvidencePreviewCardProps = {
@@ -31,7 +32,7 @@ function formatCompactCid(cidValue: string): string {
 }
 
 /** Hàm component render card preview IPFS thống nhất. Mục đích: gom logic validate, phân loại file và fallback UI vào một nơi tái sử dụng. */
-export default function IpfsEvidencePreviewCard({
+function IpfsEvidencePreviewCardContent({
   cid,
   fileName,
   mimeType,
@@ -172,6 +173,28 @@ export default function IpfsEvidencePreviewCard({
           Mở tài liệu IPFS
         </a>
       </div>
+    </div>
+  );
+}
+
+/** Render từng CID riêng để chuỗi nhiều CID cũ vẫn tạo được link IPFS hợp lệ. */
+export default function IpfsEvidencePreviewCard(props: IpfsEvidencePreviewCardProps) {
+  const cidList = splitIpfsCidList(props.cid);
+
+  if (cidList.length <= 1) {
+    return <IpfsEvidencePreviewCardContent {...props} cid={cidList[0] || props.cid} />;
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {cidList.map((cidItem, cidIndex) => (
+        <IpfsEvidencePreviewCardContent
+          key={`${cidItem}-${cidIndex}`}
+          {...props}
+          cid={cidItem}
+          fileName={props.fileName ? `${props.fileName} · Tệp ${cidIndex + 1}` : `Tài liệu IPFS #${cidIndex + 1}`}
+        />
+      ))}
     </div>
   );
 }
