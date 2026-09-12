@@ -22,7 +22,7 @@ ENV NEXT_PUBLIC_CHARITY_TOKEN_ADDRESS=${NEXT_PUBLIC_CHARITY_TOKEN_ADDRESS}
 ENV NEXT_PUBLIC_DONATION_RANKING_ADDRESS=${NEXT_PUBLIC_DONATION_RANKING_ADDRESS}
 ENV NEXT_PUBLIC_DONATION_RANKING_CONTRACT_ADDRESS=${NEXT_PUBLIC_DONATION_RANKING_CONTRACT_ADDRESS}
 COPY --from=deps /app/node_modules ./node_modules
-COPY package*.json next.config.js postcss.config.js tailwind.config.js tsconfig.json ./
+COPY package*.json next.config.js postcss.config.js tailwind.config.js tsconfig.json *d.ts ./
 COPY app ./app
 RUN npm run build
 

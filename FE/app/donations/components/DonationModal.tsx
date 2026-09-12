@@ -19,6 +19,8 @@ import {
   formatTransactionHash,
   mapDonationErrorMessage,
   mapTransactionStatusToVietnamese,
+  mapGuestTransactionStatusToVietnamese,
+  resolveGuestDisplayStatusRaw,
   isCampaignBeforeDeadline,
 } from './DonationModal.helpers';
 import type {
@@ -68,10 +70,18 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   // ============================================================
   const {
     initState,
+    donationState,
     bootstrapGuestWallet,
   } = useGuestWallet();
 
   const isGuestReady = initState.initStatus === 'READY';
+  const isGuestDonating =
+    donationState.donationStatus !== 'IDLE' &&
+    donationState.donationStatus !== 'SUCCESS' &&
+    donationState.donationStatus !== 'FAILED';
+  const isGuestDonationInProgress = isGuestDonating || isAwaitingPayment;
+  const guestDonationSuccess = donationState.donationStatus === 'SUCCESS';
+  const guestDisplayStatusValue = donationState.donationStatus;
 
   // ============================================================
   // LOAD HISTORY
@@ -376,17 +386,19 @@ export default function DonationModal({ campaignItem, onClose, onDonationSuccess
   }
 
   return (
-      <GuestReadyView
+    <GuestReadyView
       campaignItem={campaignItem}
       initState={initState}
+      donationState={donationState}
       donationAmountInput={donationAmountInput}
       setDonationAmountInput={setDonationAmountInput}
       isSubmitting={isSubmitting}
       isConfirmModalOpen={isConfirmModalOpen}
       pendingDonationAmount={pendingDonationAmount}
+      isGuestDonationInProgress={isGuestDonationInProgress}
+      guestDonationSuccess={guestDonationSuccess}
+      guestDisplayStatusValue={guestDisplayStatusValue}
       statusMessage={statusMessage}
-      successNoticeMessage={successNoticeMessage}
-      isSuccessNoticeVisible={isSuccessNoticeVisible}
       onOpenConfirmModal={() => handleOpenConfirmModal(MIN_AMOUNT_PER_DONATION, MAX_AMOUNT_PER_DONATION)}
       onCloseConfirmModal={handleCloseConfirmModal}
       onGuestSubmit={handleGuestDonationSubmit}
@@ -785,8 +797,8 @@ function GuestReadyView({
 
         {/* Status */}
         <p className="mt-3 text-sm text-[#374151]">
-          Trạng thái: <span className={guestDisplayStatusValue === 'failed' ? 'font-semibold text-red-600' : guestDisplayStatusValue === 'success' ? 'font-semibold text-emerald-600' : ''}>
-            {isAwaitingPayment && payosStatusText ? payosStatusText : mapGuestTransactionStatusToVietnamese(guestDisplayStatusValue as Parameters<typeof mapGuestTransactionStatusToVietnamese>[0])}
+          Trạng thái: <span className={guestDisplayStatusValue === 'FAILED' ? 'font-semibold text-red-600' : guestDisplayStatusValue === 'SUCCESS' ? 'font-semibold text-emerald-600' : ''}>
+            {isAwaitingPayment && payosStatusText ? payosStatusText : mapGuestTransactionStatusToVietnamese(resolveGuestDisplayStatusRaw(guestDisplayStatusValue))}
           </span>
         </p>
         {displayError && <p className="mt-1 text-sm text-red-600">{displayError}</p>}

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { persistAuthSession } from '../utils/authSession';
 
@@ -127,7 +127,7 @@ function resolveSafeReturnToPath(returnToValue: string | null): string | null {
   return returnToValue;
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [isInfoCollapsed, setIsInfoCollapsed] = useState(false);
   const [isProgressLoading, setIsProgressLoading] = useState(false);
   const [isSuccessVisible, setIsSuccessVisible] = useState(false);
@@ -527,6 +527,20 @@ export default function LoginPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={(
+        <div className="flex min-h-screen items-center justify-center bg-[#f8fafc] text-sm text-[#64748b]">
+          Đang tải trang đăng nhập...
+        </div>
+      )}
+    >
+      <LoginPageContent />
+    </Suspense>
   );
 }
 
