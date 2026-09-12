@@ -699,9 +699,11 @@ export async function getProjectsForOrganization(organizationUserId: string): Pr
 
 /** Hàm lấy danh sách dự án public cho trang chủ. Mục đích: cung cấp dữ liệu thật từ MongoDB, gồm cả dự án đã hoàn tất. */
 export async function getPublicSupportProjects(limitCount?: number): Promise<PublicSupportProjectResult[]> {
-  const sanitizedLimitCount = typeof limitCount === 'number' && Number.isFinite(limitCount)
-    ? Math.max(1, Math.min(12, Math.floor(limitCount)))
-    : undefined;
+  const sanitizedLimitCount = limitCount === undefined
+    ? undefined
+    : Number.isFinite(limitCount)
+      ? Math.max(1, Math.min(12, Math.floor(limitCount)))
+      : 6;
   const cacheKey = createPublicSupportCacheKey(sanitizedLimitCount);
 
   try {

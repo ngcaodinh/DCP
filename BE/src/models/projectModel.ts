@@ -59,6 +59,11 @@ const ProjectMongoModel = mongoose.model<ProjectRecord>('Project', projectSchema
 
 const publicProjectStatusList: ProjectStatus[] = ['ACTIVE', 'COMPLETED', 'CLOSED'];
 
+function createPublicProjectDeadlineFilter(): { $gte: Date } {
+  const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  return { $gte: sixtyDaysAgo };
+}
+
 /** Hàm tìm dự án theo tên trong cùng tổ chức. Mục đích: chặn trùng tên dự án theo nghiệp vụ. */
 export async function findProjectByOrganizationIdAndName(organizationId: string, name: string): Promise<ProjectRecord | null> {
   return ProjectMongoModel.findOne({ organizationId, name }).lean<ProjectRecord>().exec();

@@ -311,9 +311,9 @@ function normalizeLimitCount(limitCount: number, defaultLimit = 20, maximumLimit
 
 /** Hàm lấy danh sách campaign public. Mục đích: trả dữ liệu chiến dịch cùng thống kê donation để frontend render trang UC3.1. */
 export async function getPublicDonationCampaigns(limitCount?: number) {
-  const normalizedLimitCount = typeof limitCount === 'number' && Number.isFinite(limitCount)
-    ? normalizeLimitCount(limitCount, 12, 24)
-    : undefined;
+  const normalizedLimitCount = limitCount === undefined
+    ? undefined
+    : normalizeLimitCount(limitCount, 12, 24);
   const campaignRecords = await findPublicCampaigns(normalizedLimitCount);
 
   return Promise.all(
