@@ -1,22 +1,9 @@
 import './globals.css';
 import Script from 'next/script';
-import { Be_Vietnam_Pro, Lexend } from 'next/font/google';
 import type { Metadata, Viewport } from 'next';
 import AuthSessionManager from './components/AuthSessionManager';
 import { GuestWalletProvider } from './components/GuestWalletProvider';
 import { QueryClientProviderWrapper } from './providers';
-
-const beVietnamProFont = Be_Vietnam_Pro({
-  subsets: ['latin', 'vietnamese'],
-  weight: ['300', '400', '500', '600', '700', '800'],
-  variable: '--font-be-vietnam-pro'
-});
-
-const lexendFont = Lexend({
-  subsets: ['latin', 'vietnamese'],
-  weight: ['300', '400', '500', '600'],
-  variable: '--font-lexend'
-});
 
 /** Hàm lấy URL gốc của website. Mục đích: dùng thống nhất cho canonical, sitemap và structured data. */
 function getSiteBaseUrl(): string {
@@ -139,7 +126,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="vi">
-      <body className={`${beVietnamProFont.variable} ${lexendFont.variable} overflow-x-hidden`}>
+      <body className="overflow-x-hidden">
         <Script
           id="website-structured-data"
           type="application/ld+json"
