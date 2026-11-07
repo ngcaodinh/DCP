@@ -25,6 +25,16 @@ import {
   type PayosDonationStatus,
 } from '../../utils/guestPayosClient';
 
+/** Hiệu ứng pháo hoa dùng chung cho cả quyên góp công khai và ẩn danh. */
+function celebrateDonationSuccess(): void {
+  confetti({
+    particleCount: 120,
+    spread: 70,
+    origin: { y: 0.6 },
+    colors: ['#FFD700', '#FF6347', '#00CED1', '#32CD32', '#FF69B4'],
+  });
+}
+
 /** Chi tiết cơ bản của dự án — từ /projects/public-support/{projectId}. */
 interface ProjectBasicInfo {
   projectId: string;
@@ -196,21 +206,21 @@ function ProjectBanner({ project, coverImageUrl }: { project: ProjectDetail; cov
   const bannerStyle = coverImageUrl
     ? {
         backgroundImage: `linear-gradient(rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0.18)), url(${coverImageUrl})`,
-        minHeight: '240px',
+        minHeight: 'clamp(12rem, 35vw, 15rem)',
       }
     : {
         background: 'linear-gradient(135deg, #0e7c6b, #34d399)',
-        minHeight: '240px',
+        minHeight: 'clamp(12rem, 35vw, 15rem)',
       };
 
   return (
     <div className="project-detail-banner mb-6 overflow-hidden" style={bannerStyle}>
-      <div className="flex h-60 items-end px-6 pb-5">
+      <div className="flex min-h-[12rem] w-full items-end px-4 pb-4 sm:min-h-[15rem] sm:px-6 sm:pb-5">
         <div className="w-full text-center">
           <span className={`mb-2 inline-block rounded-full px-3 py-1 text-xs font-semibold ${isExpired ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
             ● {getPublicProjectStatusLabel(project.status, project.deadline)}
           </span>
-          <h1 className="text-2xl font-bold text-white drop-shadow-sm md:text-3xl">{project.name}</h1>
+          <h1 className="break-words text-xl font-bold leading-tight text-white drop-shadow-sm sm:text-2xl md:text-3xl">{project.name}</h1>
         </div>
       </div>
     </div>
@@ -227,7 +237,7 @@ function ProjectInfoSection({ project }: { project: ProjectDetail }) {
         </svg>
         <span className="text-sm font-semibold text-[#0e7c6b]">Dự án đã xác minh</span>
       </div>
-      <p className="mb-4 whitespace-pre-wrap text-sm leading-relaxed text-[#374151]">{project.description}</p>
+      <p className="mb-4 break-words whitespace-pre-wrap text-sm leading-relaxed text-[#374151]">{project.description}</p>
       <div className="project-detail-meta-grid">
         {project.creatorName && (
           <div className="project-detail-meta-item">
@@ -265,9 +275,9 @@ function ProjectProgressSection({ project }: { project: ProjectDetail }) {
   return (
     <section className="project-detail-section mb-6">
       <h2 className="project-detail-section-title">Tiến độ gây quỹ</h2>
-      <div className="mb-3 mt-4 flex items-center justify-between text-sm text-[#4b5563]">
-        <span>Đã quyên góp: {formatCurrencyVnd(project.donatedAmount)} token</span>
-        <span>Mục tiêu: {formatCurrencyVnd(project.goalAmount)} token</span>
+      <div className="mb-3 mt-4 flex flex-col gap-1 text-sm text-[#4b5563] sm:flex-row sm:items-center sm:justify-between">
+        <span className="break-words">Đã quyên góp: {formatCurrencyVnd(project.donatedAmount)} token</span>
+        <span className="break-words sm:text-right">Mục tiêu: {formatCurrencyVnd(project.goalAmount)} token</span>
       </div>
       <div className="h-3 overflow-hidden rounded-full bg-[#d1fae5]">
         <div className="h-full rounded-full bg-[#10b981]" style={{ width: `${donationPercent}%` }} />
@@ -326,6 +336,7 @@ interface DonationSectionProps {
   anonymousDonationCount: number;
   anonymousHasPendingDonation: boolean;
   isLoggedIn: boolean;
+  payosOrderCode: string | null;
   payosPaymentUrl: string | null;
   payosStatus: PayosDonationStatus | null;
   payosReturnStatus: { code: string; status: string } | null;
@@ -365,6 +376,7 @@ function DonationSection(props: DonationSectionProps) {
     anonymousDonationCount,
     anonymousHasPendingDonation,
     isLoggedIn,
+    payosOrderCode,
     payosPaymentUrl,
     payosStatus,
     payosReturnStatus,
@@ -444,7 +456,7 @@ function DonationSection(props: DonationSectionProps) {
   if (donationMode === 'public') {
     return (
       <section className="project-detail-form-section public mb-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-[#065f46]">🏛️ Quyên góp công khai</h2>
           <button type="button" onClick={onClosePublicDonation} className="text-sm text-[#6b7280] hover:text-[#374151]">
             ✕ Đóng
@@ -533,7 +545,7 @@ function DonationSection(props: DonationSectionProps) {
 
   return (
     <section className="project-detail-form-section anonymous mb-6">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-[#4338ca]">🔐 Quyên góp ẩn danh</h2>
         <button type="button" onClick={onCloseAnonymousDonation} className="text-sm text-[#6b7280] hover:text-[#374151]">
           ✕ Đóng
@@ -594,7 +606,7 @@ function DonationSection(props: DonationSectionProps) {
             </p>
           )}
 
-          {isAwaitingAnonymousPayment && payosPaymentUrl && payosStatus !== 'PENDING_PAYMENT' && (
+          {isAwaitingAnonymousPayment && (payosPaymentUrl || payosOrderCode) && payosStatus && payosStatus !== 'PENDING_PAYMENT' && (
             <div className="mt-4 rounded-xl border border-[#c7d2fe] bg-[#eef2ff] p-4">
               {payosStatus === 'COMPLETED' ? (
                 <>
@@ -856,9 +868,11 @@ export default function DonationProjectDetailPage() {
       setPayosOrderCode(payosOrder);
       setIsAwaitingAnonymousPayment(true);
       setDonationMode('anonymous');
+      setHasInitiatedAnonymous(true);
       if (payosCode === '00' || payosStatusParam === 'PAID') {
+        setPayosStatus('PAYMENT_CONFIRMED');
         setAnonymousStatus('PROCESSING');
-        setAnonymousMessage('Da nhan thanh toan, he thong dang xu ly quyen gop cua ban...');
+        setAnonymousMessage('Đã nhận thanh toán, hệ thống đang xử lý quyên góp của bạn...');
       }
       // Khong goi restoreGuestSession o day nua — poll lay token dong tu sessionStorage.
     }
@@ -874,13 +888,17 @@ export default function DonationProjectDetailPage() {
     if (!isAwaitingAnonymousPayment || !payosOrderCode) return;
 
     const pollIntervalId = window.setInterval(async () => {
-      // Lấy token động từ sessionStorage mỗi lần poll để tránh race condition khi redirect về.
-      const { loadGuestSessionToken } = await import('../../utils/guestWalletStorage');
-      const tokenData = loadGuestSessionToken();
-      const token = tokenData?.token;
-
       try {
-        const statusResponse = await getPayosDonationStatus(payosOrderCode, token || '');
+        // Đọc token trong try để cả lỗi storage/import cũng được phản ánh ra giao diện.
+        const { loadGuestSessionToken } = await import('../../utils/guestWalletStorage');
+        const token = loadGuestSessionToken()?.token;
+        if (!token) {
+          setAnonymousStatus('PROCESSING');
+          setAnonymousMessage(`Không tìm thấy phiên ví để kiểm tra mã đơn ${payosOrderCode}. Hệ thống sẽ thử lại.`);
+          return;
+        }
+
+        const statusResponse = await getPayosDonationStatus(payosOrderCode, token);
 
         if (statusResponse.status === 'COMPLETED') {
           window.clearInterval(pollIntervalId);
@@ -891,13 +909,7 @@ export default function DonationProjectDetailPage() {
           setAnonymousMessage('Quyên góp ẩn danh thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
           setDonationAmountInput('');
 
-          // Bắn pháo hoa chúc mừng
-          confetti({
-            particleCount: 120,
-            spread: 70,
-            origin: { y: 0.6 },
-            colors: ['#FFD700', '#FF6347', '#00CED1', '#32CD32', '#FF69B4'],
-          });
+          celebrateDonationSuccess();
 
           // Hiển thị popup thành công
           setDonationSuccessTxHash(statusResponse.relayTxHash);
@@ -916,13 +928,19 @@ export default function DonationProjectDetailPage() {
           setPayosStatus('FAILED');
           setAnonymousStatus('FAILED');
           setAnonymousMessage(statusResponse.errorMessage || 'Thanh toán thất bại. Vui lòng thử lại.');
+        } else if (statusResponse.status === 'PENDING_PAYMENT') {
+          setPayosStatus('PENDING_PAYMENT');
+          setAnonymousStatus('PROCESSING');
+          setAnonymousMessage('PayOS đã chuyển về trang này. Đang chờ backend xác nhận thanh toán...');
         } else if (statusResponse.status === 'PAYMENT_CONFIRMED' || statusResponse.status === 'MINTING' || statusResponse.status === 'RELAYING') {
           setPayosStatus(statusResponse.status);
           setAnonymousStatus('PROCESSING');
           setAnonymousMessage('Đã nhận thanh toán, hệ thống đang xử lý quyên góp của bạn...');
         }
       } catch {
-        // Bỏ qua lỗi poll tạm thời (BE đang xử lý webhook) để tránh làm gián đoạn.
+        // Giữ trạng thái chờ nhưng cho người dùng biết việc xác minh đang được thử lại.
+        setAnonymousStatus('PROCESSING');
+        setAnonymousMessage(`Chưa thể kiểm tra trạng thái mã đơn ${payosOrderCode}. Hệ thống sẽ tự động thử lại.`);
       }
     }, 3000);
 
@@ -930,14 +948,14 @@ export default function DonationProjectDetailPage() {
   }, [isAwaitingAnonymousPayment, payosOrderCode, projectId, loadProjectData]);
 
   /**
-   * Effect tự động redirect về trang project detail sau khi popup thành công hiển thị.
-   * Tách riêng để tránh re-trigger do loadProjectData thay đổi reference.
+   * Tự đóng popup thành công sau 5 giây, không tải lại trang dự án.
    */
   useEffect(() => {
     if (!showDonationSuccessPopup) return;
     if (redirectTimeoutRef.current) clearTimeout(redirectTimeoutRef.current);
     redirectTimeoutRef.current = setTimeout(() => {
-      window.location.href = `/donations/${projectId}`;
+      setShowDonationSuccessPopup(false);
+      redirectTimeoutRef.current = null;
     }, 5000);
     return () => {
       if (redirectTimeoutRef.current) {
@@ -945,7 +963,7 @@ export default function DonationProjectDetailPage() {
         redirectTimeoutRef.current = null;
       }
     };
-  }, [showDonationSuccessPopup, projectId]);
+  }, [showDonationSuccessPopup]);
 
   /**
    * Effect dọn redirect timeout khi component unmount.
@@ -1084,10 +1102,18 @@ export default function DonationProjectDetailPage() {
       setPublicStatus('processing');
       setPublicMessage('Hệ thống đang gửi giao dịch quyên góp, vui lòng chờ trong giây lát...');
 
-      await executeOneClickDonationRequest(accessToken, projectDetail.projectId, pendingPublicAmount, false);
+      const transactionHash = await executeOneClickDonationRequest(
+        accessToken,
+        projectDetail.projectId,
+        pendingPublicAmount,
+        false,
+      );
 
       setPublicStatus('success');
-      setPublicMessage('Giao dịch quyên góp đã được xác nhận thành công trên blockchain.');
+      setPublicMessage('Quyên góp công khai thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
+      setDonationSuccessTxHash(transactionHash);
+      celebrateDonationSuccess();
+      setShowDonationSuccessPopup(true);
       setDonationAmountInput('');
       setPendingPublicAmount(null);
       await loadProjectData();
@@ -1179,7 +1205,7 @@ export default function DonationProjectDetailPage() {
 
   return (
     <main className="min-h-screen bg-[#f6f8fb]">
-      <div className="mx-auto max-w-5xl px-4 py-8">
+      <div className="mx-auto w-full max-w-5xl px-3 py-5 sm:px-6 sm:py-8">
         <div className="mb-6">
           <Link href="/" className="project-detail-back">
             ← Quay về trang chủ
@@ -1218,18 +1244,20 @@ export default function DonationProjectDetailPage() {
               <p className="mt-3 text-sm leading-6 text-[#4b5563]">
                 Theo dõi các yêu cầu, chữ ký phê duyệt, minh chứng và giao dịch giải ngân của dự án.
               </p>
-              <Link
-                href={`/disbursements?projectId=${encodeURIComponent(projectDetail.projectId)}`}
-                className="mt-3 inline-flex items-center rounded-lg bg-[#0e7c6b] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0b6759]"
-              >
-                Xem trang giải ngân →
-              </Link>
-              <Link
-                href={`/donors?projectId=${encodeURIComponent(projectDetail.projectId)}`}
-                className="ml-3 mt-3 inline-flex items-center rounded-lg border border-[#0e7c6b] px-4 py-2 text-sm font-semibold text-[#0e7c6b] transition hover:bg-[#e6f7f4]"
-              >
-                Xem lịch sử nhà hảo tâm →
-              </Link>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                <Link
+                  href={`/disbursements?projectId=${encodeURIComponent(projectDetail.projectId)}`}
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg bg-[#0e7c6b] px-4 py-2 text-center text-sm font-semibold text-white transition hover:bg-[#0b6759]"
+                >
+                  Xem trang giải ngân →
+                </Link>
+                <Link
+                  href={`/donors?projectId=${encodeURIComponent(projectDetail.projectId)}`}
+                  className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[#0e7c6b] px-4 py-2 text-center text-sm font-semibold text-[#0e7c6b] transition hover:bg-[#e6f7f4]"
+                >
+                  Xem lịch sử nhà hảo tâm →
+                </Link>
+              </div>
             </section>
 
             <DonationSection
@@ -1251,6 +1279,7 @@ export default function DonationProjectDetailPage() {
               anonymousDonationCount={initState.donationCount}
               anonymousHasPendingDonation={initState.hasPendingDonation}
               isLoggedIn={isLoggedIn}
+              payosOrderCode={payosOrderCode}
               payosPaymentUrl={payosPaymentUrl}
               payosStatus={payosStatus}
               payosReturnStatus={payosReturnStatus}
@@ -1284,8 +1313,8 @@ export default function DonationProjectDetailPage() {
 
         {/* Popup chúc mừng quyên góp thành công */}
         {showDonationSuccessPopup && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="relative w-full max-w-sm animate-in fade-in zoom-in-95 duration-300 rounded-2xl bg-white p-8 shadow-2xl">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+            <div className="relative max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto animate-in fade-in zoom-in-95 duration-300 rounded-2xl bg-white p-6 shadow-2xl sm:p-8">
               <div className="flex flex-col items-center text-center">
                 <div className="mb-4 text-6xl">🎉</div>
                 <h3 className="mb-2 text-2xl font-bold text-emerald-600">Quyên góp thành công!</h3>
@@ -1295,7 +1324,7 @@ export default function DonationProjectDetailPage() {
                     Tx: {donationSuccessTxHash.slice(0, 10)}...{donationSuccessTxHash.slice(-8)}
                   </p>
                 )}
-                <p className="text-sm text-gray-400">Tự động quay về trang dự án sau 5s...</p>
+                <p className="text-sm text-gray-400">Thông báo sẽ tự đóng sau 5 giây.</p>
               </div>
             </div>
           </div>

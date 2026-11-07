@@ -13,6 +13,7 @@ import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { findProjectById } from '../repositories/projectRepository';
 import { createGuestPayosDonation, findGuestPayosDonationByOrderCode } from '../repositories/guestPayosDonationRepository';
 import { getLogger } from '../config/logger';
+import { getPublicAppUrl } from '../config/publicAppUrl';
 import { sendErrorResponse } from '../utils/apiResponse';
 import { isProjectDeadlineExpired, isProjectDonationOpen } from '../utils/projectDonationEligibility';
 
@@ -77,8 +78,13 @@ export async function handleInitGuestPayosDonation(
     return;
   }
 
+  const appUrl = getPublicAppUrl();
+  if (!appUrl) {
+    sendErrorResponse(response, 500, 'Backend chưa được cấu hình APP_URL HTTPS cho production.', 'APP_URL_NOT_CONFIGURED');
+    return;
+  }
+
   const orderCode = String(Date.now() + Math.floor(Math.random() * 999));
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const returnUrl = `${appUrl}/donations/${projectId}?payosOrder=${orderCode}`;
   const cancelUrl = `${appUrl}/donations/${projectId}`;
 

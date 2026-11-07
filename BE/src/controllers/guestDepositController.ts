@@ -18,6 +18,7 @@ import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { getLogger } from '../config/logger';
 import { findProjectById } from '../repositories/projectRepository';
 import { getZeroDevConfig } from '../config/zeroDev';
+import { getPublicAppUrl } from '../config/publicAppUrl';
 
 const logger = getLogger();
 
@@ -161,8 +162,13 @@ export async function handleSponsorGuestDeposit(
     return;
   }
 
+  const appUrl = getPublicAppUrl();
+  if (!appUrl) {
+    response.status(500).json({ message: 'Backend chưa được cấu hình APP_URL HTTPS cho production.' });
+    return;
+  }
+
   const orderCode = String(Date.now() + Math.floor(Math.random() * 999));
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const returnUrl = `${appUrl}/donations/${projectId}?orderCode=${orderCode}`;
 
   logger.info('Bắt đầu sponsor guest deposit.', {
@@ -393,8 +399,13 @@ export async function handleCreateGuestDeposit(
     return;
   }
 
+  const appUrl = getPublicAppUrl();
+  if (!appUrl) {
+    response.status(500).json({ message: 'Backend chưa được cấu hình APP_URL HTTPS cho production.' });
+    return;
+  }
+
   const orderCode = String(Date.now() + Math.floor(Math.random() * 999));
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
   const returnUrl = `${appUrl}/donations/${projectId}?orderCode=${orderCode}`;
 
   logger.info('Bắt đầu tạo guest deposit payment link (legacy).', {

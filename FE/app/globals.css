@@ -2413,6 +2413,7 @@ footer {
 }
 
 .project-detail-meta-item label {
+  min-width: 0;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -2423,9 +2424,11 @@ footer {
 }
 
 .project-detail-meta-item span {
+  overflow-wrap: anywhere;
   font-size: 14px;
   font-weight: 600;
   color: var(--ink-soft);
+  line-height: 1.4;
 }
 
 .project-detail-donation-grid {
@@ -2442,6 +2445,8 @@ footer {
 
 .project-detail-donation-btn {
   display: flex;
+  min-width: 0;
+  min-height: 112px;
   flex-direction: column;
   align-items: center;
   gap: 8px;
@@ -2527,6 +2532,7 @@ footer {
 
 .project-detail-submit-btn {
   width: 100%;
+  min-height: 44px;
   border-radius: 12px;
   padding: 12px 20px;
   font-size: 15px;
@@ -2592,6 +2598,27 @@ footer {
   .project-detail-form-section {
     padding: 16px;
     border-radius: 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .project-detail-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-detail-section,
+  .project-detail-form-section {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .project-detail-donation-grid {
+    gap: 12px;
+  }
+
+  .project-detail-donation-btn {
+    min-height: 104px;
+    padding: 14px 10px;
   }
 }
 
