@@ -96,9 +96,11 @@ function IpfsEvidencePreviewCardContent({
   }
 
   const cardClassName = compact
-    ? 'rounded-lg border border-slate-200 bg-white p-3'
-    : 'rounded-xl border border-slate-200 bg-white p-3 shadow-sm';
-  const previewFrameClassName = compact ? 'h-32 rounded-lg' : 'h-44 rounded-xl';
+    ? 'w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white p-3'
+    : 'w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white p-3 shadow-sm';
+  const previewFrameClassName = compact
+    ? 'relative aspect-[4/3] w-full min-w-0 max-w-full rounded-lg'
+    : 'relative h-44 w-full min-w-0 max-w-full rounded-xl';
 
   if (!isValidCid) {
     return (
@@ -117,15 +119,15 @@ function IpfsEvidencePreviewCardContent({
 
   return (
     <div className={cardClassName}>
-      <div className={`relative overflow-hidden border border-slate-200 bg-slate-50 ${previewFrameClassName}`}>
+      <div className={`box-border overflow-hidden border border-slate-200 bg-slate-50 ${previewFrameClassName}`}>
         {previewKind === 'image' ? (
           <Image
             src={gatewayUrl}
             alt={fileName || `Tài liệu IPFS ${formatCompactCid(trimmedCid)}`}
             fill
             unoptimized
-            sizes={compact ? '(max-width: 640px) 100vw, 50vw' : '(max-width: 768px) 100vw, 50vw'}
-            className="object-cover"
+            sizes={compact ? '(max-width: 640px) calc(100vw - 4rem), (max-width: 1279px) 50vw, 33vw' : '(max-width: 768px) calc(100vw - 3rem), 50vw'}
+            className={compact ? 'object-contain' : 'object-cover'}
             onError={handlePreviewError}
           />
         ) : null}
@@ -155,7 +157,7 @@ function IpfsEvidencePreviewCardContent({
       </div>
 
       <div className="mt-3 space-y-1.5">
-        <p className="text-sm font-semibold text-slate-900">{fileName || 'Tài liệu IPFS'}</p>
+        <p className="break-words text-sm font-semibold text-slate-900">{fileName || 'Tài liệu IPFS'}</p>
         {documentTypeLabel || mimeType || fileSizeLabel ? (
           <p className="text-[11px] text-slate-600">
             {[documentTypeLabel, mimeType, fileSizeLabel].filter(Boolean).join(' · ')}
@@ -186,7 +188,7 @@ export default function IpfsEvidencePreviewCard(props: IpfsEvidencePreviewCardPr
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid w-full min-w-0 max-w-full gap-3 sm:grid-cols-2">
       {cidList.map((cidItem, cidIndex) => (
         <IpfsEvidencePreviewCardContent
           key={`${cidItem}-${cidIndex}`}

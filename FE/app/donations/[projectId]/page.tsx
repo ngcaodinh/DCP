@@ -297,7 +297,7 @@ function EvidenceSection({ project }: { project: ProjectDetail }) {
       {!hasEvidence ? (
         <p className="mt-3 text-sm text-[#6b7280]">Dự án chưa có tệp bằng chứng.</p>
       ) : (
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {project.evidenceCids.map((evidenceCid, index) => {
             const evidenceFile = project.evidenceFiles?.find(file => file.cid === evidenceCid);
             return (
