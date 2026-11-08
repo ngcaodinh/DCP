@@ -22,7 +22,6 @@ import {
 import {
   initPayosDonation,
   getPayosDonationStatus,
-  type PayosDonationStatus,
 } from '../../utils/guestPayosClient';
 
 /** Hiệu ứng pháo hoa dùng chung cho cả quyên góp công khai và ẩn danh. */
@@ -336,10 +335,6 @@ interface DonationSectionProps {
   anonymousDonationCount: number;
   anonymousHasPendingDonation: boolean;
   isLoggedIn: boolean;
-  payosOrderCode: string | null;
-  payosPaymentUrl: string | null;
-  payosStatus: PayosDonationStatus | null;
-  payosReturnStatus: { code: string; status: string } | null;
   payosConfirmAmount: string | null;
   showPayosConfirmModal: boolean;
   onTogglePayosConfirmModal: (open: boolean) => void;
@@ -376,10 +371,6 @@ function DonationSection(props: DonationSectionProps) {
     anonymousDonationCount,
     anonymousHasPendingDonation,
     isLoggedIn,
-    payosOrderCode,
-    payosPaymentUrl,
-    payosStatus,
-    payosReturnStatus,
     payosConfirmAmount,
     showPayosConfirmModal,
     onTogglePayosConfirmModal,
@@ -528,21 +519,6 @@ function DonationSection(props: DonationSectionProps) {
     );
   }
 
-  const payosStatusText =
-    payosStatus === 'PENDING_PAYMENT'
-      ? 'Đang chờ thanh toán PayOS'
-      : payosStatus === 'PAYMENT_CONFIRMED'
-        ? 'Đã nhận thanh toán, hệ thống đang chuẩn bị quyên góp'
-        : payosStatus === 'MINTING'
-          ? 'Hệ thống đang mint token để thực hiện quyên góp'
-          : payosStatus === 'RELAYING'
-            ? 'Hệ thống đang gửi giao dịch quyên góp lên blockchain'
-            : payosStatus === 'COMPLETED'
-              ? 'Quyên góp thành công'
-              : payosStatus === 'FAILED'
-                ? 'Thanh toán thất bại'
-                : '';
-
   return (
     <section className="project-detail-form-section anonymous mb-6">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -604,30 +580,6 @@ function DonationSection(props: DonationSectionProps) {
             >
               {anonymousMessage}
             </p>
-          )}
-
-          {isAwaitingAnonymousPayment && (payosPaymentUrl || payosOrderCode) && payosStatus && payosStatus !== 'PENDING_PAYMENT' && (
-            <div className="mt-4 rounded-xl border border-[#c7d2fe] bg-[#eef2ff] p-4">
-              {payosStatus === 'COMPLETED' ? (
-                <>
-                  <p className="text-sm font-semibold text-emerald-700">
-                    Quyên góp thành công! Cảm ơn bạn vì tấm lòng sẻ chia.
-                  </p>
-                  {payosStatus && (
-                    <p className="mt-1 text-xs text-emerald-600">
-                      Trạng thái: {payosStatusText}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-semibold text-[#3730a3]">{payosStatusText}</p>
-                  {payosConfirmAmount && (
-                    <p className="mt-1 text-xs text-[#4338ca]">Số tiền: {payosConfirmAmount} token</p>
-                  )}
-                </>
-              )}
-            </div>
           )}
 
           {/* Popup xác nhận trước khi mở PayOS */}
@@ -766,11 +718,11 @@ export default function DonationProjectDetailPage() {
   const [hasInitiatedAnonymous, setHasInitiatedAnonymous] = useState(false);
   const [payosPaymentUrl, setPayosPaymentUrl] = useState<string | null>(null);
   const [payosOrderCode, setPayosOrderCode] = useState<string | null>(null);
-  const [payosStatus, setPayosStatus] = useState<PayosDonationStatus | null>(null);
   const [isAwaitingAnonymousPayment, setIsAwaitingAnonymousPayment] = useState(false);
-  const [payosReturnStatus, setPayosReturnStatus] = useState<{ code: string; status: string } | null>(null);
+  const [hasSuccessfulPayosReturn, setHasSuccessfulPayosReturn] = useState(false);
   const [payosConfirmAmount, setPayosConfirmAmount] = useState<string | null>(null);
   const [showPayosConfirmModal, setShowPayosConfirmModal] = useState(false);
+  const [showDonationProcessingPopup, setShowDonationProcessingPopup] = useState(false);
   const [showDonationSuccessPopup, setShowDonationSuccessPopup] = useState(false);
   const [donationSuccessTxHash, setDonationSuccessTxHash] = useState<string | null>(null);
   const redirectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -859,20 +811,22 @@ export default function DonationProjectDetailPage() {
     const payosOrder = searchParams.get('payosOrder');
     const payosCode = searchParams.get('code');
     const payosStatusParam = searchParams.get('status');
+    const payosCancelled = searchParams.get('cancel')?.toLowerCase() === 'true';
+    const paymentWasSuccessful = !payosCancelled && (
+      payosStatusParam?.toUpperCase() === 'PAID'
+      || (payosCode === '00' && payosStatusParam?.toUpperCase() !== 'CANCELLED')
+    );
 
     if (payosOrder && (payosCode !== null || payosStatusParam !== null)) {
-      setPayosReturnStatus({
-        code: payosCode || '',
-        status: payosStatusParam || ''
-      });
       setPayosOrderCode(payosOrder);
       setIsAwaitingAnonymousPayment(true);
       setDonationMode('anonymous');
       setHasInitiatedAnonymous(true);
-      if (payosCode === '00' || payosStatusParam === 'PAID') {
-        setPayosStatus('PAYMENT_CONFIRMED');
+      setHasSuccessfulPayosReturn(Boolean(paymentWasSuccessful));
+      if (paymentWasSuccessful) {
         setAnonymousStatus('PROCESSING');
-        setAnonymousMessage('Đã nhận thanh toán, hệ thống đang xử lý quyên góp của bạn...');
+        setAnonymousMessage('');
+        setShowDonationProcessingPopup(true);
       }
       // Khong goi restoreGuestSession o day nua — poll lay token dong tu sessionStorage.
     }
@@ -886,6 +840,7 @@ export default function DonationProjectDetailPage() {
    */
   useEffect(() => {
     if (!isAwaitingAnonymousPayment || !payosOrderCode) return;
+    const paymentWasSuccessful = hasSuccessfulPayosReturn;
 
     const pollIntervalId = window.setInterval(async () => {
       try {
@@ -894,7 +849,7 @@ export default function DonationProjectDetailPage() {
         const token = loadGuestSessionToken()?.token;
         if (!token) {
           setAnonymousStatus('PROCESSING');
-          setAnonymousMessage(`Không tìm thấy phiên ví để kiểm tra mã đơn ${payosOrderCode}. Hệ thống sẽ thử lại.`);
+          setAnonymousMessage('');
           return;
         }
 
@@ -904,9 +859,10 @@ export default function DonationProjectDetailPage() {
           window.clearInterval(pollIntervalId);
           setIsAwaitingAnonymousPayment(false);
           setIsAnonymousSubmitting(false);
-          setPayosStatus('COMPLETED');
+          setHasSuccessfulPayosReturn(false);
           setAnonymousStatus('SUCCESS');
-          setAnonymousMessage('Quyên góp ẩn danh thành công! Cảm ơn bạn vì tấm lòng sẻ chia.');
+          setAnonymousMessage('');
+          setShowDonationProcessingPopup(false);
           setDonationAmountInput('');
 
           celebrateDonationSuccess();
@@ -925,27 +881,29 @@ export default function DonationProjectDetailPage() {
           window.clearInterval(pollIntervalId);
           setIsAwaitingAnonymousPayment(false);
           setIsAnonymousSubmitting(false);
-          setPayosStatus('FAILED');
+          setHasSuccessfulPayosReturn(false);
           setAnonymousStatus('FAILED');
           setAnonymousMessage(statusResponse.errorMessage || 'Thanh toán thất bại. Vui lòng thử lại.');
+          setShowDonationProcessingPopup(false);
         } else if (statusResponse.status === 'PENDING_PAYMENT') {
-          setPayosStatus('PENDING_PAYMENT');
           setAnonymousStatus('PROCESSING');
-          setAnonymousMessage('PayOS đã chuyển về trang này. Đang chờ backend xác nhận thanh toán...');
+          setAnonymousMessage(paymentWasSuccessful ? '' : 'PayOS chưa xác nhận khoản thanh toán. Hệ thống sẽ tiếp tục kiểm tra.');
+          setShowDonationProcessingPopup(paymentWasSuccessful);
         } else if (statusResponse.status === 'PAYMENT_CONFIRMED' || statusResponse.status === 'MINTING' || statusResponse.status === 'RELAYING') {
-          setPayosStatus(statusResponse.status);
           setAnonymousStatus('PROCESSING');
-          setAnonymousMessage('Đã nhận thanh toán, hệ thống đang xử lý quyên góp của bạn...');
+          setAnonymousMessage('');
+          setShowDonationProcessingPopup(true);
         }
       } catch {
         // Giữ trạng thái chờ nhưng cho người dùng biết việc xác minh đang được thử lại.
         setAnonymousStatus('PROCESSING');
-        setAnonymousMessage(`Chưa thể kiểm tra trạng thái mã đơn ${payosOrderCode}. Hệ thống sẽ tự động thử lại.`);
+        setAnonymousMessage('');
+        setShowDonationProcessingPopup(paymentWasSuccessful);
       }
     }, 3000);
 
     return () => window.clearInterval(pollIntervalId);
-  }, [isAwaitingAnonymousPayment, payosOrderCode, projectId, loadProjectData]);
+  }, [hasSuccessfulPayosReturn, isAwaitingAnonymousPayment, payosOrderCode, projectId, loadProjectData]);
 
   /**
    * Tự đóng popup thành công sau 5 giây, không tải lại trang dự án.
@@ -1059,8 +1017,9 @@ export default function DonationProjectDetailPage() {
     setAnonymousMessage('');
     setPayosPaymentUrl(null);
     setPayosOrderCode(null);
-    setPayosStatus(null);
     setIsAwaitingAnonymousPayment(false);
+    setHasSuccessfulPayosReturn(false);
+    setShowDonationProcessingPopup(false);
   };
 
   /**
@@ -1185,7 +1144,6 @@ export default function DonationProjectDetailPage() {
 
       setPayosOrderCode(response.orderCode);
       setPayosPaymentUrl(response.paymentUrl);
-      setPayosStatus('PENDING_PAYMENT');
       setIsAwaitingAnonymousPayment(true);
       setShowPayosConfirmModal(false);
       setPendingAnonymousAmount(null);
@@ -1279,10 +1237,6 @@ export default function DonationProjectDetailPage() {
               anonymousDonationCount={initState.donationCount}
               anonymousHasPendingDonation={initState.hasPendingDonation}
               isLoggedIn={isLoggedIn}
-              payosOrderCode={payosOrderCode}
-              payosPaymentUrl={payosPaymentUrl}
-              payosStatus={payosStatus}
-              payosReturnStatus={payosReturnStatus}
               payosConfirmAmount={payosConfirmAmount}
               showPayosConfirmModal={showPayosConfirmModal}
               onTogglePayosConfirmModal={handleTogglePayosConfirmModal}
@@ -1309,6 +1263,29 @@ export default function DonationProjectDetailPage() {
 
             <DonationHistorySection historyList={historyList} />
           </>
+        )}
+
+        {showDonationProcessingPopup && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="donation-processing-title"
+          >
+            <div className="w-full max-w-sm rounded-2xl bg-white p-7 text-center shadow-2xl sm:p-8">
+              <div className="relative mx-auto mb-5 h-14 w-14" aria-hidden="true">
+                <span className="absolute inset-0 animate-ping rounded-full bg-indigo-200 opacity-60" />
+                <span className="absolute inset-1 animate-spin rounded-full border-4 border-indigo-100 border-t-indigo-600" />
+              </div>
+              <h3 id="donation-processing-title" className="text-lg font-bold text-[#3730a3]">
+                Hệ thống đang ghi nhận quyên góp
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-gray-600">
+                Thanh toán đã được nhận. Vui lòng chờ hệ thống hoàn tất quyên góp.
+              </p>
+              <p className="mt-3 text-xs text-gray-400">Bạn không cần thanh toán lại.</p>
+            </div>
+          </div>
         )}
 
         {/* Popup chúc mừng quyên góp thành công */}
