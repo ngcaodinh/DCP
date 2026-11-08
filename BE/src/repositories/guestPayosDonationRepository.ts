@@ -51,12 +51,34 @@ export async function findLatestGuestPayosDonationBySession(
 }
 
 export async function updateGuestPayosDonation(
-  filter: { orderCode: string },
+  filter: Partial<Pick<GuestPayosDonation, 'orderCode' | 'status'>>,
   update: Partial<GuestPayosDonation> & { updatedAt?: Date }
 ): Promise<GuestPayosDonation | null> {
   return GuestPayosDonationModel.findOneAndUpdate(
     filter,
     { ...update, updatedAt: new Date() },
+    { returnDocument: 'after' }
+  )
+    .lean<GuestPayosDonation>()
+    .exec();
+}
+
+/** Atomically reserve a PayOS status reconciliation so rapid frontend polls do not fan out upstream requests. */
+export async function claimGuestPayosStatusReconciliation(
+  orderCode: string,
+  checkedBefore: Date,
+  checkedAt = new Date()
+): Promise<GuestPayosDonation | null> {
+  return GuestPayosDonationModel.findOneAndUpdate(
+    {
+      orderCode,
+      status: 'PENDING_PAYMENT',
+      $or: [
+        { lastPayosStatusCheckAt: null },
+        { lastPayosStatusCheckAt: { $lt: checkedBefore } }
+      ]
+    },
+    { $set: { lastPayosStatusCheckAt: checkedAt } },
     { returnDocument: 'after' }
   )
     .lean<GuestPayosDonation>()

@@ -203,6 +203,9 @@ export async function handleGuestPayosWebhook(
   const payosTransactionId = String(webhookData.transactionId || rawPayload.transactionId || webhookData.reference || rawPayload.reference || '').trim();
 
   if (donation.status !== 'PENDING_PAYMENT') {
+    if (donation.status === 'PAYMENT_CONFIRMED') {
+      void processGuestPayosDonation(orderCode);
+    }
     logger.info('Guest PayOS webhook: donation da xu ly, bo qua.', { orderCode });
     response.status(200).json({ message: 'Already processed.' });
     return;
@@ -210,7 +213,7 @@ export async function handleGuestPayosWebhook(
 
   if (!isPaymentSuccess(webhookData)) {
     await updateGuestPayosDonation(
-      { orderCode },
+      { orderCode, status: 'PENDING_PAYMENT' },
       {
         status: 'FAILED',
         payosTransactionId: payosTransactionId || null,
@@ -223,94 +226,27 @@ export async function handleGuestPayosWebhook(
     return;
   }
 
-  await updateGuestPayosDonation(
-    { orderCode },
+  const confirmedDonation = await updateGuestPayosDonation(
+    { orderCode, status: 'PENDING_PAYMENT' },
     {
       status: 'PAYMENT_CONFIRMED',
       payosTransactionId: payosTransactionId || null,
       updatedAt: new Date()
     }
   );
+  if (!confirmedDonation) {
+    const latestDonation = await findGuestPayosDonationByOrderCode(orderCode);
+    if (latestDonation?.status === 'PAYMENT_CONFIRMED') {
+      void processGuestPayosDonation(orderCode);
+    }
+    response.status(200).json({ message: 'Already processed.' });
+    return;
+  }
   logger.info('Guest PayOS donation thanh toan xac nhan, bat dau mint + relay.', { orderCode });
 
   response.status(200).json({ message: 'Webhook received.' });
 
-  void Promise.resolve().then(async () => {
-    try {
-      await updateGuestPayosDonation(
-        { orderCode },
-        { status: 'MINTING', updatedAt: new Date() }
-      );
-
-      const mintResult = await mintTokenToGuestWallet(
-        donation.walletAddress,
-        donation.amount,
-        orderCode
-      );
-
-      await updateGuestPayosDonation(
-        { orderCode },
-        { status: 'RELAYING', mintTxHash: mintResult.transactionHash, updatedAt: new Date() }
-      );
-
-      const relayResult = await executeGuestRelayedDonation({
-        sessionId: donation.guestSessionId,
-        projectId: donation.projectId,
-        amount: donation.amount,
-        walletAddress: donation.walletAddress,
-        ipAddress: 'payos-webhook',
-        userAgent: 'payos-webhook'
-      });
-
-      // Lấy blockNumber từ relay transaction receipt để tạo Donation record.
-      const relayBlockNumber = await getRelayTransactionBlockNumber(relayResult.transactionHash);
-
-      // Tạo Donation record để hiển thị trên Lịch sử quyên góp và Live Feed.
-      await upsertDonationByTransactionHash({
-        transactionHash: relayResult.transactionHash,
-        projectId: donation.projectId,
-        donorAddress: donation.walletAddress.toLowerCase(),
-        amount: donation.amount,
-        timestamp: new Date(),
-        isAnonymous: true,
-        blockNumber: relayBlockNumber,
-        donationStatus: 'INDEXED',
-        onChainConfirmedAt: new Date(),
-        indexedAt: new Date(),
-        correlationId: `PAYTING_${orderCode}`,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      });
-
-      await updateGuestPayosDonation(
-        { orderCode },
-        {
-          status: 'COMPLETED',
-          relayTxHash: relayResult.transactionHash,
-          updatedAt: new Date()
-        }
-      );
-
-      logger.info('Guest PayOS donation COMPLETED.', {
-        orderCode,
-        mintTxHash: mintResult.transactionHash,
-        relayTxHash: relayResult.transactionHash
-      });
-    } catch (error) {
-      logger.error('Xu ly guest PayOS donation that bai trong webhook.', {
-        orderCode,
-        errorMessage: (error as Error).message
-      });
-      await updateGuestPayosDonation(
-        { orderCode },
-        {
-          status: 'FAILED',
-          errorMessage: (error as Error).message || 'Unknown error',
-          updatedAt: new Date()
-        }
-      );
-    }
-  });
+  void processGuestPayosDonation(orderCode);
 }
 
 /**
@@ -319,6 +255,91 @@ export async function handleGuestPayosWebhook(
 interface MintResult {
   transactionHash: string;
   blockNumber: number;
+}
+
+/** Claim and process a confirmed donation once, even when a status poll races with the PayOS webhook. */
+export async function processGuestPayosDonation(orderCode: string): Promise<void> {
+  let donation;
+  try {
+    donation = await updateGuestPayosDonation(
+      { orderCode, status: 'PAYMENT_CONFIRMED' },
+      { status: 'MINTING', updatedAt: new Date() }
+    );
+  } catch (error) {
+    logger.error('Could not claim confirmed guest PayOS donation for processing.', {
+      orderCode,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+  if (!donation) return;
+
+  try {
+    const mintResult = await mintTokenToGuestWallet(
+      donation.walletAddress,
+      donation.amount,
+      orderCode
+    );
+
+    await updateGuestPayosDonation(
+      { orderCode, status: 'MINTING' },
+      { status: 'RELAYING', mintTxHash: mintResult.transactionHash, updatedAt: new Date() }
+    );
+
+    const relayResult = await executeGuestRelayedDonation({
+      sessionId: donation.guestSessionId,
+      projectId: donation.projectId,
+      amount: donation.amount,
+      walletAddress: donation.walletAddress,
+      ipAddress: 'payos-webhook',
+      userAgent: 'payos-webhook'
+    });
+
+    const relayBlockNumber = await getRelayTransactionBlockNumber(relayResult.transactionHash);
+    await upsertDonationByTransactionHash({
+      transactionHash: relayResult.transactionHash,
+      projectId: donation.projectId,
+      donorAddress: donation.walletAddress.toLowerCase(),
+      amount: donation.amount,
+      timestamp: new Date(),
+      isAnonymous: true,
+      blockNumber: relayBlockNumber,
+      donationStatus: 'INDEXED',
+      onChainConfirmedAt: new Date(),
+      indexedAt: new Date(),
+      correlationId: `PAYTING_${orderCode}`,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    });
+
+    await updateGuestPayosDonation(
+      { orderCode, status: 'RELAYING' },
+      {
+        status: 'COMPLETED',
+        relayTxHash: relayResult.transactionHash,
+        updatedAt: new Date()
+      }
+    );
+
+    logger.info('Guest PayOS donation COMPLETED.', {
+      orderCode,
+      mintTxHash: mintResult.transactionHash,
+      relayTxHash: relayResult.transactionHash
+    });
+  } catch (error) {
+    logger.error('Guest PayOS donation processing failed.', {
+      orderCode,
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    await updateGuestPayosDonation(
+      { orderCode },
+      {
+        status: 'FAILED',
+        errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        updatedAt: new Date()
+      }
+    );
+  }
 }
 
 /**

@@ -13,6 +13,13 @@ type CreatePaymentLinkResult = {
   orderCode: string;
 };
 
+export type PayosPaymentRequestStatus = {
+  orderCode: string;
+  amount: number;
+  amountPaid: number;
+  status: string;
+};
+
 export type CreatePayosTransferInput = {
   requestId: string;
   amountVnd: number;
@@ -348,6 +355,59 @@ export async function createPayosPaymentLink(input: CreatePaymentLinkInput): Pro
     paymentUrl,
     orderCode: normalizedOrderCode
   };
+}
+
+/** Read the authoritative PayOS state for a payment link when its webhook is delayed or unavailable. */
+export async function getPayosPaymentRequestStatus(orderCode: string): Promise<PayosPaymentRequestStatus> {
+  const clientId = String(process.env.PAYOS_CLIENT_ID || '').trim();
+  const apiKey = String(process.env.PAYOS_API_KEY || '').trim();
+  if (!clientId || !apiKey) {
+    throw new Error('Thiếu cấu hình PAYOS_CLIENT_ID hoặc PAYOS_API_KEY.');
+  }
+
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), 10000);
+  try {
+    const response = await fetch(
+      `https://api-merchant.payos.vn/v2/payment-requests/${encodeURIComponent(orderCode)}`,
+      {
+        method: 'GET',
+        headers: {
+          'x-client-id': clientId,
+          'x-api-key': apiKey
+        },
+        signal: abortController.signal
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`PayOS payment status request failed with HTTP ${response.status}.`);
+    }
+
+    const responsePayload = await response.json() as {
+      code?: string;
+      desc?: string;
+      data?: {
+        orderCode?: string | number;
+        amount?: number;
+        amountPaid?: number;
+        status?: string;
+      };
+    };
+    const paymentData = responsePayload.data;
+    if (responsePayload.code !== '00' || !paymentData || paymentData.orderCode === undefined) {
+      throw new Error(`PayOS returned an invalid payment status response (${responsePayload.code || 'no code'}).`);
+    }
+
+    return {
+      orderCode: String(paymentData.orderCode),
+      amount: Number(paymentData.amount),
+      amountPaid: Number(paymentData.amountPaid),
+      status: String(paymentData.status || '').trim().toUpperCase()
+    };
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 /**

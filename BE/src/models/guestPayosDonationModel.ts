@@ -26,6 +26,7 @@ export type GuestPayosDonation = {
   mintTxHash: string | null;
   relayTxHash: string | null;
   errorMessage: string | null;
+  lastPayosStatusCheckAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -45,6 +46,7 @@ const guestPayosDonationSchema = new Schema<GuestPayosDonation>(
     mintTxHash: { type: String, default: null },
     relayTxHash: { type: String, default: null },
     errorMessage: { type: String, default: null },
+    lastPayosStatusCheckAt: { type: Date, default: null },
     createdAt: { type: Date, required: true },
     updatedAt: { type: Date, required: true }
   },

@@ -8,10 +8,16 @@
  */
 import { Request, Response } from 'express';
 import crypto from 'crypto';
-import { createPayosPaymentLink } from '../services/payosService';
+import { createPayosPaymentLink, getPayosPaymentRequestStatus } from '../services/payosService';
 import { GuestSessionRequest } from '../middleware/guestAuthMiddleware';
 import { findProjectById } from '../repositories/projectRepository';
-import { createGuestPayosDonation, findGuestPayosDonationByOrderCode } from '../repositories/guestPayosDonationRepository';
+import {
+  claimGuestPayosStatusReconciliation,
+  createGuestPayosDonation,
+  findGuestPayosDonationByOrderCode,
+  updateGuestPayosDonation
+} from '../repositories/guestPayosDonationRepository';
+import { processGuestPayosDonation } from './guestPayosWebhookController';
 import { getLogger } from '../config/logger';
 import { getPublicAppUrl } from '../config/publicAppUrl';
 import { sendErrorResponse } from '../utils/apiResponse';
@@ -21,6 +27,7 @@ const logger = getLogger();
 
 const MIN_GUEST_DONATION_AMOUNT = 1;
 const MAX_GUEST_DONATION_AMOUNT = 200000;
+const PAYOS_STATUS_RECONCILE_INTERVAL_MS = 10000;
 
 type PayosInitRequestBody = {
   projectId: string;
@@ -181,7 +188,7 @@ export async function handleGetGuestPayosDonationStatus(
     return;
   }
 
-  const donation = await findGuestPayosDonationByOrderCode(orderCode);
+  let donation = await findGuestPayosDonationByOrderCode(orderCode);
   if (!donation) {
     sendErrorResponse(response, 404, 'Không tìm thấy donation.', 'NOT_FOUND');
     return;
@@ -190,6 +197,51 @@ export async function handleGetGuestPayosDonationStatus(
   if (donation.guestSessionId !== guestRequest.guestSession.sessionId) {
     sendErrorResponse(response, 403, 'Bạn không có quyền xem donation này.', 'FORBIDDEN');
     return;
+  }
+
+  if (donation.status === 'PAYMENT_CONFIRMED') {
+    // Resume the in-process job if the API restarted after recording the payment but before starting mint/relay.
+    void processGuestPayosDonation(orderCode);
+  } else if (donation.status === 'PENDING_PAYMENT') {
+    const checkedAt = new Date();
+    const checkedBefore = new Date(checkedAt.getTime() - PAYOS_STATUS_RECONCILE_INTERVAL_MS);
+    const reconciliationClaim = await claimGuestPayosStatusReconciliation(orderCode, checkedBefore, checkedAt);
+
+    if (reconciliationClaim) {
+      try {
+        const payosPayment = await getPayosPaymentRequestStatus(orderCode);
+        const orderAndAmountMatch =
+          payosPayment.orderCode === donation.orderCode
+          && payosPayment.amount === donation.amount;
+
+        if (payosPayment.status === 'PAID' && orderAndAmountMatch && payosPayment.amountPaid >= donation.amount) {
+          const confirmedDonation = await updateGuestPayosDonation(
+            { orderCode, status: 'PENDING_PAYMENT' },
+            { status: 'PAYMENT_CONFIRMED', updatedAt: new Date() }
+          );
+          if (confirmedDonation) {
+            donation = confirmedDonation;
+            logger.info('PayOS status reconciliation confirmed guest donation.', { orderCode });
+            void processGuestPayosDonation(orderCode);
+          }
+        } else if (payosPayment.status === 'PAID') {
+          logger.warn('PayOS reports PAID but guest donation order or amount does not match.', {
+            orderCode,
+            payosOrderCode: payosPayment.orderCode,
+            payosAmount: payosPayment.amount,
+            payosAmountPaid: payosPayment.amountPaid,
+            expectedAmount: donation.amount
+          });
+        }
+      } catch (error) {
+        logger.warn('Could not reconcile guest donation status with PayOS.', {
+          orderCode,
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    donation = (await findGuestPayosDonationByOrderCode(orderCode)) || donation;
   }
 
   response.status(200).json({
